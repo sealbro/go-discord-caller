@@ -16,6 +16,7 @@ import (
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
@@ -222,22 +223,48 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
 		return fmt.Errorf("speaker %s join channel %s: %w", speakerID, channelID, err)
 	}
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		return fmt.Errorf("set speaking: %w", err)
-	}
-
-	// Start the audio capture goroutine for this speaker.
-	relayCtx, cancel := context.WithCancel(context.Background())
-	s.mu.Lock()
-	s.cancels[speakerID] = cancel
-	s.mu.Unlock()
-
-	go s.captureAndRelay(relayCtx, speakerID, guildID, client)
 
 	slog.Info("speaker joined channel",
 		slog.String("speakerID", speakerID.String()),
 		slog.String("channelID", channelID.String()),
 	)
+	return nil
+}
+
+func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error {
+	s.mu.RLock()
+	client, ok := s.clients[speakerID]
+	s.mu.RUnlock()
+
+	if !ok {
+		return fmt.Errorf("speaker %s is not connected", speakerID)
+	}
+
+	// Start the audio capture goroutine for this speaker.
+	relayCtx, cancel := context.WithCancel(ctx)
+	s.mu.Lock()
+	s.cancels[speakerID] = cancel
+	s.mu.Unlock()
+
+	var provider *opus.VoiceProvider
+	go func() {
+		<-relayCtx.Done()
+		if provider != nil {
+			provider.Close()
+		}
+	}()
+
+	conn := client.VoiceManager.GetConn(guildID)
+	if conn == nil {
+		return fmt.Errorf("speaker %s is not connected to a voice channel in guild %s", speakerID, guildID)
+	}
+	provider = opus.NewVoiceProvider(chOut)
+	conn.SetOpusFrameProvider(provider)
+
+	if err := conn.SetSpeaking(relayCtx, voice.SpeakingFlagMicrophone); err != nil {
+		return fmt.Errorf("set speaking flag: %w", err)
+	}
+
 	return nil
 }
 
@@ -260,37 +287,6 @@ func (s *Service) LeaveChannel(ctx context.Context, speakerID, guildID snowflake
 	}
 
 	slog.Info("speaker left channel", slog.String("speakerID", speakerID.String()))
-}
-
-// captureAndRelay reads Opus packets from the speaker's voice connection and
-// forwards them to every other active speaker in the same guild.
-func (s *Service) captureAndRelay(ctx context.Context, sourceSpeakerID, guildID snowflake.ID, client *bot.Client) {
-	conn := client.VoiceManager.GetConn(guildID)
-	if conn == nil {
-		return
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		packet, err := conn.UDP().ReadPacket()
-		if err != nil {
-			slog.Debug("audio read stopped",
-				slog.String("speakerID", sourceSpeakerID.String()),
-				slog.Any("err", err),
-			)
-			return
-		}
-
-		// Only relay audio from users with the bound role.
-		// TODO: filter by role — requires resolving SSRC -> userID -> guild member roles.
-
-		s.relayPacket(ctx, guildID, sourceSpeakerID, packet.Opus)
-	}
 }
 
 // relayPacket writes an Opus packet to all speaker connections except the source.

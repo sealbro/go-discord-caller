@@ -2,11 +2,9 @@ package caller
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 
 	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 )
 
@@ -26,10 +24,6 @@ func (c *Caller) JoinChannel(ctx context.Context, guildID, channelID snowflake.I
 
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
 		return err
-	}
-
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		return fmt.Errorf("set speaking: %w", err)
 	}
 
 	slog.Info("joined voice channel",

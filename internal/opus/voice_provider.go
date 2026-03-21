@@ -1,4 +1,4 @@
-package voice
+package opus
 
 import (
 	"fmt"
@@ -8,11 +8,11 @@ import (
 
 type VoiceProvider struct {
 	voice.OpusFrameProvider
-	ch     chan []byte
+	ch     <-chan []byte
 	closed bool
 }
 
-func NewVoiceProvider(ch chan []byte) *VoiceProvider {
+func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
 	return &VoiceProvider{
 		ch: ch,
 	}

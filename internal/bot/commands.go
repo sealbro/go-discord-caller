@@ -8,7 +8,6 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/caller"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
@@ -56,12 +55,11 @@ func permPtr(p discord.Permissions) omit.Omit[*discord.Permissions] {
 // CommandHandlers wires all slash command and component routes to the manager service.
 type CommandHandlers struct {
 	manager *manager.Service
-	caller  *caller.Caller
 }
 
 // NewCommandHandlers creates a new CommandHandlers.
-func NewCommandHandlers(m *manager.Service, c *caller.Caller) *CommandHandlers {
-	return &CommandHandlers{manager: m, caller: c}
+func NewCommandHandlers(m *manager.Service) *CommandHandlers {
+	return &CommandHandlers{manager: m}
 }
 
 // Register attaches all routes to the given router.
@@ -162,18 +160,8 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	if err := h.manager.StartVoiceRaid(context.TODO(), guildID); err != nil {
+	if err = h.manager.StartVoiceRaid(context.TODO(), guildID); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
-	}
-
-	// Also make the owner bot join its configured channel, if one is set.
-	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
-		if err := h.caller.JoinChannel(context.TODO(), guildID, chID); err != nil {
-			// Non-fatal — log via the ephemeral warning but still report success.
-			return e.CreateMessage(discord.MessageCreate{
-				Content: fmt.Sprintf("🔴 **Voice raid started.** All enabled speakers have joined their bound channels.\n⚠️ Owner bot failed to join <#%s>: %s", chID, err),
-			})
-		}
 	}
 
 	return e.CreateMessage(discord.MessageCreate{
@@ -192,7 +180,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	}
 
 	// Also make the owner bot leave its voice channel.
-	_ = h.caller.LeaveChannel(context.TODO(), guildID)
+	h.manager.LeaveChannel(context.TODO(), guildID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: "⚫ **Voice raid stopped.** All speakers have left their channels.",
@@ -281,10 +269,7 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
 	}
 
-	installURL := fmt.Sprintf(
-		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144&guild_id=%s",
-		clientID, guildID,
-	)
+	installURL := installUrl(clientID, guildID)
 
 	sp, err := h.manager.AddNextSpeaker(context.TODO(), guildID)
 	if err != nil {
@@ -393,4 +378,13 @@ func statusEmoji(enabled bool) string {
 		return "✅"
 	}
 	return "❌"
+}
+
+func installUrl(clientID snowflake.ID, guildID snowflake.ID) string {
+	permissions := "391565762894144"
+	installURL := fmt.Sprintf(
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%s&guild_id=%s",
+		clientID, permissions, guildID,
+	)
+	return installURL
 }

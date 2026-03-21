@@ -6,9 +6,11 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
@@ -70,12 +72,48 @@ type Service struct {
 	speaker     *speaker.Service
 	speakerPool []string // ordered list of bot tokens available for registration
 	isMemberFn  func(guildID, userID snowflake.ID) bool
+	ownerClient *bot.Client
 }
 
 // NewService creates a new manager Service.
 // pool is the ordered list of speaker bot tokens loaded from environment variables.
 func NewService(st store.Store, spk *speaker.Service, pool []string) *Service {
 	return &Service{store: st, speaker: spk, speakerPool: pool}
+}
+
+// SetOwnerClient supplies the owner bot's Discord client used by JoinChannel
+// and LeaveChannel. Call this once after the client has been created.
+func (m *Service) SetOwnerClient(client *bot.Client) {
+	m.ownerClient = client
+}
+
+// JoinChannel makes the owner bot join a voice channel.
+func (m *Service) JoinChannel(ctx context.Context, guildID, channelID snowflake.ID) error {
+	if m.ownerClient == nil {
+		return fmt.Errorf("owner client not set")
+	}
+	conn := m.ownerClient.VoiceManager.CreateConn(guildID)
+	if err := conn.Open(ctx, channelID, false, false); err != nil {
+		return err
+	}
+	slog.Info("joined voice channel",
+		slog.String("channelID", channelID.String()),
+		slog.String("guildID", guildID.String()),
+	)
+	return nil
+}
+
+// LeaveChannel makes the owner bot leave its current voice channel in a guild.
+func (m *Service) LeaveChannel(ctx context.Context, guildID snowflake.ID) {
+	if m.ownerClient == nil {
+		return
+	}
+	conn := m.ownerClient.VoiceManager.GetConn(guildID)
+	if conn == nil {
+		return
+	}
+	conn.Close(ctx)
+	slog.Info("left voice channel", slog.String("guildID", guildID.String()))
 }
 
 // SetMemberChecker supplies a live Discord membership check used by
@@ -370,6 +408,30 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		return fmt.Errorf("a voice raid is already active in this server")
 	}
 
+	if chID, ok := m.GetOwnerChannel(guildID); ok {
+		if err := m.JoinChannel(ctx, guildID, chID); err != nil {
+			return fmt.Errorf("failed to join owner channel: %w", err)
+		}
+	}
+
+	conn := m.ownerClient.VoiceManager.GetConn(guildID)
+	if conn == nil {
+		return fmt.Errorf("no voice connection to join owner channel")
+	}
+	selfUser, _ := m.ownerClient.Caches.SelfUser()
+
+	chIn := make(chan []byte, 10)
+	receiver := opus.NewVoiceReceiver(chIn, selfUser.ID)
+	defer receiver.Close()
+	conn.SetOpusFrameReceiver(receiver)
+
+	var outs []chan []byte
+	newOut := func() chan []byte {
+		ch := make(chan []byte, 10)
+		outs = append(outs, ch)
+		return ch
+	}
+
 	speakers := m.store.ListSpeakers(guildID)
 	session := &domain.VoiceSession{GuildID: guildID, Active: true}
 
@@ -386,6 +448,13 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 			continue
 		}
 		session.SpeakerIDs = append(session.SpeakerIDs, sp.ID)
+
+		chOut := newOut()
+		err := m.speaker.Consume(ctx, sp.ID, guildID, chOut)
+		if err != nil {
+			slog.Error("failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
+			continue
+		}
 	}
 
 	m.store.SetSession(session)
@@ -393,6 +462,34 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		slog.String("guildID", guildID.String()),
 		slog.Int("activeSpeakers", len(session.SpeakerIDs)),
 	)
+
+	go func() {
+		defer func() {
+			receiver.Close()
+			for _, out := range outs {
+				close(out)
+			}
+			close(chIn)
+			slog.Info("voice raid ended", slog.String("guildID", guildID.String()))
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case pkt, ok := <-chIn:
+				if !ok {
+					return
+				}
+				for _, out := range outs {
+					select {
+					case out <- pkt:
+					default:
+					}
+				}
+			}
+		}
+	}()
+
 	return nil
 }
 

@@ -7,16 +7,15 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/caller"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
 // eventListeners returns all event listeners to register with the client.
-func eventListeners(c *caller.Caller, m *manager.Service) []bot.EventListener {
+func eventListeners(m *manager.Service) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(m)),
-		bot.NewListenerFunc(onVoiceJoin(c)),
-		bot.NewListenerFunc(onVoiceLeave(c)),
+		bot.NewListenerFunc(onVoiceJoin()),
+		bot.NewListenerFunc(onVoiceLeave()),
 	}
 }
 
@@ -35,10 +34,8 @@ func onReady(m *manager.Service) func(*events.Ready) {
 	}
 }
 
-// ...existing code...
-
 // onVoiceJoin is called whenever a user joins a voice channel.
-func onVoiceJoin(c *caller.Caller) func(*events.GuildVoiceJoin) {
+func onVoiceJoin() func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
 		// Ignore the bot's own voice state changes.
 		if e.Member.User.ID == e.Client().ID() {
@@ -55,7 +52,7 @@ func onVoiceJoin(c *caller.Caller) func(*events.GuildVoiceJoin) {
 }
 
 // onVoiceLeave is called whenever a user leaves a voice channel.
-func onVoiceLeave(c *caller.Caller) func(*events.GuildVoiceLeave) {
+func onVoiceLeave() func(*events.GuildVoiceLeave) {
 	return func(e *events.GuildVoiceLeave) {
 		// Ignore the bot's own voice state changes.
 		if e.Member.User.ID == e.Client().ID() {

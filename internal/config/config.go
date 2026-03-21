@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+
+	"github.com/joho/godotenv"
 )
 
 // Config holds all application configuration.
@@ -16,7 +18,8 @@ type Config struct {
 	GuildID string
 }
 
-// Load reads configuration from environment variables.
+// Load reads configuration from a .env file (if present) and then from environment variables.
+// Environment variables already set in the process take precedence over the .env file.
 //
 // Owner bot:
 //
@@ -28,6 +31,11 @@ type Config struct {
 //	DISCORD_SPEAKER_2_BOT_TOKEN
 //	... (sequential, stops at first missing index)
 func Load() (*Config, error) {
+	// Load .env file if it exists; silently skip if not found.
+	if err := godotenv.Load(); err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("error reading .env file: %w", err)
+	}
+
 	ownerToken := os.Getenv("DISCORD_OWNER_BOT_TOKEN")
 	if ownerToken == "" {
 		return nil, fmt.Errorf("DISCORD_OWNER_BOT_TOKEN environment variable is required")

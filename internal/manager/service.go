@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/speaker"
@@ -114,9 +114,9 @@ func (m *Service) SeedExistingSpeakers(ctx context.Context, guildIDs []snowflake
 				continue
 			}
 
-			username, _ := m.speaker.PoolClientUsername(token)
+			user, _ := m.speaker.PoolClientUser(token)
 
-			sp, err := m.AddSpeaker(ctx, guildID, token, username, nil)
+			sp, err := m.AddSpeaker(ctx, guildID, token, user, nil)
 			if err != nil {
 				slog.Warn("seed: failed to register existing speaker bot",
 					slog.String("guildID", guildID.String()),
@@ -186,21 +186,26 @@ func (m *Service) NextSpeakerClientID(guildID snowflake.ID) (snowflake.ID, bool)
 }
 
 // AddNextSpeaker picks the next pool token not yet registered in the store and
-// registers it as a speaker in the guild.  It uses the store-only check so that
-// a bot that was just invited (already in the guild) is registered correctly.
-func (m *Service) AddNextSpeaker(ctx context.Context, guildID snowflake.ID, displayName string) (*domain.Speaker, error) {
+// registers it as a speaker in the guild.  The display name is resolved
+// automatically from the pre-connected pool gateway's self-user.
+func (m *Service) AddNextSpeaker(ctx context.Context, guildID snowflake.ID) (*domain.Speaker, error) {
 	token, ok := m.nextAvailableToken(guildID)
 	if !ok {
 		return nil, fmt.Errorf("no available speaker tokens left in the pool")
 	}
-	return m.AddSpeaker(ctx, guildID, token, displayName, nil)
+
+	user, ok := m.speaker.PoolClientUser(token)
+	if !ok {
+		slog.Warn("failed to get user info for speaker bot")
+	}
+	return m.AddSpeaker(ctx, guildID, token, user, nil)
 }
 
 // AddSpeaker registers a speaker bot for the given guild.
 // If the bot token is already in the store (registered for another guild), the new guild is
 // added to the existing speaker's Guilds map and the existing gateway connection is reused.
 // Otherwise a new Speaker record is created and a gateway connection is opened.
-func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken, username string, allowedChannels []snowflake.ID) (*domain.Speaker, error) {
+func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken string, user discord.User, allowedChannels []snowflake.ID) (*domain.Speaker, error) {
 	membership := &domain.GuildMembership{
 		AllowedChannels: allowedChannels,
 		Enabled:         true,
@@ -222,9 +227,9 @@ func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken
 
 	// No existing record — create one and open a new gateway connection.
 	sp := &domain.Speaker{
-		ID:       snowflake.New(time.Now()),
+		ID:       user.ID,
 		BotToken: botToken,
-		Username: username,
+		Username: user.Username,
 		Guilds:   map[snowflake.ID]*domain.GuildMembership{guildID: membership},
 	}
 
@@ -236,7 +241,7 @@ func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken
 	}
 
 	slog.Info("speaker added",
-		slog.String("username", username),
+		slog.String("username", user.Username),
 		slog.String("guildID", guildID.String()),
 	)
 	return sp, nil

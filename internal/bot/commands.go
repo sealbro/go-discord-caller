@@ -75,12 +75,8 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	// Component routes
 	r.ButtonComponent("/speakers/toggle/{speakerID}", h.handleToggleSpeaker)
 	r.ButtonComponent("/speakers/add", h.handleAddSpeakerButton)
-	r.ButtonComponent("/speakers/confirm-add", h.handleConfirmAddSpeaker)
 	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}", h.handleBindChannel)
 	r.SelectMenuComponent("/owner/bind-channel", h.handleBindOwnerChannel)
-
-	// Modal route
-	r.Modal("/speakers/add-modal", h.handleAddSpeakerModal)
 }
 
 // ── Slash command handlers ───────────────────────────────────────────────────
@@ -272,8 +268,8 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 }
 
 // handleAddSpeakerButton resolves the next pool bot's ApplicationID, builds a
-// Discord OAuth2 invite URL pre-targeted at the current guild, and presents it
-// alongside a "Set Display Name" button that opens the naming modal.
+// Discord OAuth2 invite URL pre-targeted at the current guild, and presents a
+// "Confirm Registration" button to register the bot after it has been invited.
 func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -290,42 +286,25 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 		clientID, guildID,
 	)
 
-	return e.CreateMessage(discord.MessageCreate{
-		Content: "**Add Speaker Bot**\n" +
-			"1. Click **Invite to Server** — the bot will be pre-selected for this server.\n" +
-			"2. Complete the authorisation in the browser.\n" +
-			"3. Come back and click **Set Display Name** to finish registration.",
-		Components: []discord.LayoutComponent{
-			discord.NewActionRow(
-				discord.NewLinkButton("🔗 Invite to Server", installURL),
-				discord.NewSuccessButton("✏️ Set Display Name", "/speakers/confirm-add"),
-			),
-		},
-		Flags: discord.MessageFlagEphemeral,
-	})
-}
-
-// handleConfirmAddSpeaker opens the naming modal once the bot has been invited.
-func (h *CommandHandlers) handleConfirmAddSpeaker(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
+	sp, err := h.manager.AddNextSpeaker(context.TODO(), guildID)
 	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+		return e.CreateMessage(discord.MessageCreate{
+			Content: "**Add Speaker Bot**\n" +
+				"1. Click **Invite to Server** — the bot will be pre-selected for this server.\n" +
+				"2. Complete the authorisation in the browser.\n" +
+				"3. Run **/setup-speakers** again to confirm registration.",
+			Components: []discord.LayoutComponent{
+				discord.NewActionRow(
+					discord.NewLinkButton("🔗 Invite to Server", installURL),
+				),
+			},
+			Flags: discord.MessageFlagEphemeral,
+		})
 	}
 
-	if !h.manager.HasAvailableToken(guildID) {
-		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
-	}
-
-	return e.Modal(discord.ModalCreate{
-		CustomID: "/speakers/add-modal",
-		Title:    "Name Your Speaker Bot",
-		Components: []discord.LayoutComponent{
-			discord.NewLabel("Display Name",
-				discord.NewShortTextInput("username").
-					WithPlaceholder("Friendly name for this speaker (e.g. speaker-1)").
-					WithRequired(true),
-			),
-		},
+	return e.CreateMessage(discord.MessageCreate{
+		Content: fmt.Sprintf("✅ Speaker <@%s> (`%s`) added and connected.", sp.ID, sp.Username),
+		Flags:   discord.MessageFlagEphemeral,
 	})
 }
 
@@ -362,29 +341,6 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("✅ Speaker <@%s> bound to <#%s>.", speakerID, channelID),
-		Flags:   discord.MessageFlagEphemeral,
-	})
-}
-
-// handleAddSpeakerModal processes the modal submission — picks the next pool token automatically.
-func (h *CommandHandlers) handleAddSpeakerModal(e *handler.ModalEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
-	}
-
-	username, _ := e.Data.OptText("username")
-	if username == "" {
-		return e.CreateMessage(ephemeral("❌ Display name is required."))
-	}
-
-	sp, err := h.manager.AddNextSpeaker(context.TODO(), guildID, username)
-	if err != nil {
-		return e.CreateMessage(ephemeral("❌ " + err.Error()))
-	}
-
-	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Speaker <@%s> added and connected.", sp.ID),
 		Flags:   discord.MessageFlagEphemeral,
 	})
 }

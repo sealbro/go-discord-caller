@@ -10,6 +10,7 @@ import (
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
@@ -86,22 +87,22 @@ func (s *Service) ClosePool(ctx context.Context) {
 	slog.Info("pool: all unassigned gateways closed")
 }
 
-// PoolClientUsername returns the username of the bot for the given pool token
+// PoolClientUser returns the discord.User of the bot for the given pool token
 // by reading the self-user from the pre-connected gateway's cache.
-// Returns an empty string and false if the client is not in the pool or the
+// Returns a zero User and false if the client is not in the pool or the
 // self-user is not yet available.
-func (s *Service) PoolClientUsername(token string) (string, bool) {
+func (s *Service) PoolClientUser(token string) (discord.User, bool) {
 	s.mu.RLock()
 	client, ok := s.poolClients[token]
 	s.mu.RUnlock()
 	if !ok {
-		return "", false
+		return discord.User{}, false
 	}
 	selfUser, ok := client.Caches.SelfUser()
 	if !ok {
-		return "", false
+		return discord.User{}, false
 	}
-	return selfUser.Username, true
+	return selfUser.User, true
 }
 
 // NextPoolClientID returns the Discord ApplicationID for the given pool token.
@@ -265,6 +266,13 @@ func (s *Service) captureAndRelay(ctx context.Context, sourceSpeakerID, guildID 
 	if conn == nil {
 		return
 	}
+	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+		slog.Warn("relay set speaking failed",
+			slog.String("targetSpeakerID", sourceSpeakerID.String()),
+			slog.Any("err", err),
+		)
+		return
+	}
 
 	for {
 		select {
@@ -285,12 +293,12 @@ func (s *Service) captureAndRelay(ctx context.Context, sourceSpeakerID, guildID 
 		// Only relay audio from users with the bound role.
 		// TODO: filter by role — requires resolving SSRC -> userID -> guild member roles.
 
-		s.relayPacket(guildID, sourceSpeakerID, packet.Opus)
+		s.relayPacket(ctx, guildID, sourceSpeakerID, packet.Opus)
 	}
 }
 
 // relayPacket writes an Opus packet to all speaker connections except the source.
-func (s *Service) relayPacket(guildID, excludeSpeakerID snowflake.ID, opus []byte) {
+func (s *Service) relayPacket(ctx context.Context, guildID, excludeSpeakerID snowflake.ID, opus []byte) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -302,6 +310,14 @@ func (s *Service) relayPacket(guildID, excludeSpeakerID snowflake.ID, opus []byt
 		if conn == nil {
 			continue
 		}
+		if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+			slog.Warn("relay set speaking failed",
+				slog.String("targetSpeakerID", id.String()),
+				slog.Any("err", err),
+			)
+			continue
+		}
+
 		if _, err := conn.UDP().Write(opus); err != nil {
 			slog.Warn("relay write failed",
 				slog.String("targetSpeakerID", id.String()),

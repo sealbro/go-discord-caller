@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
@@ -98,8 +99,9 @@ func (b *Bot) Run() error {
 		b.speakerSvc.ClosePool(ctx)
 	}()
 
-	// Register slash commands globally (or guild-scoped when GuildID is set).
-	guildIDs := guildScope(b.cfg.GuildID)
+	// Register slash commands scoped to every guild the bot is already in.
+	guildIDs := b.discoverGuildIDs(5 * time.Second)
+	slog.Info("discovered guilds for command sync", slog.Int("count", len(guildIDs)))
 	if err := handler.SyncCommands(b.client, Commands, guildIDs); err != nil {
 		slog.Warn("failed to sync slash commands", slog.Any("err", err))
 	}
@@ -115,15 +117,21 @@ func (b *Bot) Run() error {
 	return nil
 }
 
-// guildScope returns a slice with one guild ID for dev/scoped registration,
-// or an empty slice for global registration.
-func guildScope(guildID string) []snowflake.ID {
-	if guildID == "" {
-		return nil
+// discoverGuildIDs waits (up to timeout) for all GUILD_CREATE events to be
+// processed by the cache, then returns the IDs of every guild the bot is in.
+// If the bot is not in any guild, nil is returned (global command registration).
+func (b *Bot) discoverGuildIDs(timeout time.Duration) []snowflake.ID {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if len(b.client.Caches.UnreadyGuildIDs()) == 0 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	id, err := snowflake.Parse(guildID)
-	if err != nil {
-		return nil
+
+	var ids []snowflake.ID
+	for g := range b.client.Caches.Guilds() {
+		ids = append(ids, g.ID)
 	}
-	return []snowflake.ID{id}
+	return ids
 }

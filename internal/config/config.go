@@ -14,8 +14,6 @@ type Config struct {
 	OwnerBotToken string
 	// SpeakerTokens is the ordered pool of speaker bot tokens loaded from env
 	SpeakerTokens []string
-	// GuildID restricts slash command registration to one server (optional, empty = global)
-	GuildID string
 }
 
 // Load reads configuration from a .env file (if present) and then from environment variables.
@@ -54,6 +52,5 @@ func Load() (*Config, error) {
 	return &Config{
 		OwnerBotToken: ownerToken,
 		SpeakerTokens: speakerTokens,
-		GuildID:       os.Getenv("DISCORD_GUILD_ID"),
 	}, nil
 }

@@ -222,6 +222,9 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
 		return fmt.Errorf("speaker %s join channel %s: %w", speakerID, channelID, err)
 	}
+	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+		return fmt.Errorf("set speaking: %w", err)
+	}
 
 	// Start the audio capture goroutine for this speaker.
 	relayCtx, cancel := context.WithCancel(context.Background())
@@ -266,13 +269,6 @@ func (s *Service) captureAndRelay(ctx context.Context, sourceSpeakerID, guildID 
 	if conn == nil {
 		return
 	}
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		slog.Warn("relay set speaking failed",
-			slog.String("targetSpeakerID", sourceSpeakerID.String()),
-			slog.Any("err", err),
-		)
-		return
-	}
 
 	for {
 		select {
@@ -308,13 +304,6 @@ func (s *Service) relayPacket(ctx context.Context, guildID, excludeSpeakerID sno
 		}
 		conn := client.VoiceManager.GetConn(guildID)
 		if conn == nil {
-			continue
-		}
-		if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-			slog.Warn("relay set speaking failed",
-				slog.String("targetSpeakerID", id.String()),
-				slog.Any("err", err),
-			)
 			continue
 		}
 

@@ -64,6 +64,13 @@ func New(cfg *config.Config) (*Bot, error) {
 	c := caller.New(client)
 	client.AddEventListeners(eventListeners(c)...)
 
+	// Supply a live Discord membership check so NextSpeakerClientID skips bots
+	// that are already in the guild (e.g. invited in a previous session).
+	managerSvc.SetMemberChecker(func(guildID, userID snowflake.ID) bool {
+		_, err := client.Rest.GetMember(guildID, userID)
+		return err == nil // nil error → member exists
+	})
+
 	return &Bot{
 		client:     client,
 		caller:     c,

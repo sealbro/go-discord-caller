@@ -2,8 +2,10 @@ package speaker
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 
 	"github.com/disgoorg/disgo"
@@ -79,16 +81,43 @@ func (s *Service) ClosePool(ctx context.Context) {
 	slog.Info("pool: all unassigned gateways closed")
 }
 
-// NextPoolClientID returns the Discord ApplicationID of the pre-connected gateway
-// for the given pool token, so an OAuth2 invite URL can be constructed.
+// NextPoolClientID returns the Discord ApplicationID for the given pool token.
+// It first checks the pre-connected pool gateway; if that gateway is not
+// available (startup failure, already assigned, etc.) it falls back to
+// decoding the ApplicationID directly from the token string — Discord bot
+// tokens embed the bot's user/application ID as raw-base64 in the first
+// segment, so no network call is required.
 func (s *Service) NextPoolClientID(token string) (snowflake.ID, bool) {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
 	client, ok := s.poolClients[token]
-	if !ok {
+	s.mu.RUnlock()
+
+	if ok {
+		return client.ApplicationID, true
+	}
+
+	// Fall back: decode the ApplicationID from the token string.
+	return clientIDFromToken(token)
+}
+
+// clientIDFromToken extracts the Discord ApplicationID (= bot user ID) from a
+// raw bot token.  Discord tokens are formatted as
+// "<base64(userID)>.<timestamp>.<hmac>", where the first segment is the
+// bot's user ID encoded with standard base64 (no padding).
+func clientIDFromToken(token string) (snowflake.ID, bool) {
+	idx := strings.IndexByte(token, '.')
+	if idx <= 0 {
 		return 0, false
 	}
-	return client.ApplicationID, true
+	data, err := base64.RawStdEncoding.DecodeString(token[:idx])
+	if err != nil {
+		return 0, false
+	}
+	id, err := snowflake.Parse(string(data))
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }
 
 // Connect assigns an already-open pool gateway to the speaker, or opens a new one if

@@ -14,7 +14,11 @@ type Speaker struct {
 }
 
 // HasChannelAccess reports whether the speaker is allowed to join the given channel.
+// If AllowedChannels is empty, access is unrestricted (all voice channels allowed).
 func (s *Speaker) HasChannelAccess(channelID snowflake.ID) bool {
+	if len(s.AllowedChannels) == 0 {
+		return true // no restriction — all channels are allowed
+	}
 	for _, id := range s.AllowedChannels {
 		if id == channelID {
 			return true

@@ -57,6 +57,7 @@ type Service struct {
 	store       store.Store
 	speaker     *speaker.Service
 	speakerPool []string // ordered list of bot tokens available for registration
+	isMemberFn  func(guildID, userID snowflake.ID) bool
 }
 
 // NewService creates a new manager Service.
@@ -65,14 +66,23 @@ func NewService(st store.Store, spk *speaker.Service, pool []string) *Service {
 	return &Service{store: st, speaker: spk, speakerPool: pool}
 }
 
-// HasAvailableToken reports whether the pool still has at least one token
-// that has not been registered as a speaker in the given guild.
+// SetMemberChecker supplies a live Discord membership check used by
+// NextSpeakerClientID to skip bots that are already in the guild.
+// Call this once after the owner bot client has been created.
+func (m *Service) SetMemberChecker(fn func(guildID, userID snowflake.ID) bool) {
+	m.isMemberFn = fn
+}
+
+// HasAvailableToken reports whether the pool has at least one speaker bot
+// that has not yet been added to the given guild.
 func (m *Service) HasAvailableToken(guildID snowflake.ID) bool {
-	_, ok := m.nextAvailableToken(guildID)
+	_, ok := m.NextSpeakerClientID(guildID)
 	return ok
 }
 
-// nextAvailableToken returns the first pool token not yet used by a speaker in the guild.
+// nextAvailableToken returns the first pool token whose bot has not yet been
+// registered as a speaker in the store for this guild.
+// Used by AddNextSpeaker which only needs the store-based check.
 func (m *Service) nextAvailableToken(guildID snowflake.ID) (string, bool) {
 	speakers := m.store.ListSpeakers(guildID)
 	used := make(map[string]struct{}, len(speakers))
@@ -87,23 +97,44 @@ func (m *Service) nextAvailableToken(guildID snowflake.ID) (string, bool) {
 	return "", false
 }
 
-// AddNextSpeaker picks the next unused pool token and registers it as a speaker in the guild.
+// NextSpeakerClientID returns the Discord ApplicationID of the next pool
+// speaker whose bot has NOT yet joined the guild.
+// It iterates the ordered pool and skips every token that is either already
+// registered in the store OR whose bot is already a guild member on Discord's
+// side (e.g. invited in a previous session whose state was lost).
+func (m *Service) NextSpeakerClientID(guildID snowflake.ID) (snowflake.ID, bool) {
+	speakers := m.store.ListSpeakers(guildID)
+	used := make(map[string]struct{}, len(speakers))
+	for _, sp := range speakers {
+		used[sp.BotToken] = struct{}{}
+	}
+
+	for _, token := range m.speakerPool {
+		if _, ok := used[token]; ok {
+			continue // already registered in our store
+		}
+		clientID, ok := m.speaker.NextPoolClientID(token)
+		if !ok {
+			continue // cannot determine ApplicationID for this token
+		}
+		// Skip if the bot is already a member of the guild on Discord's side.
+		if m.isMemberFn != nil && m.isMemberFn(guildID, clientID) {
+			continue
+		}
+		return clientID, true
+	}
+	return 0, false
+}
+
+// AddNextSpeaker picks the next pool token not yet registered in the store and
+// registers it as a speaker in the guild.  It uses the store-only check so that
+// a bot that was just invited (already in the guild) is registered correctly.
 func (m *Service) AddNextSpeaker(ctx context.Context, guildID snowflake.ID, displayName string) (*domain.Speaker, error) {
 	token, ok := m.nextAvailableToken(guildID)
 	if !ok {
 		return nil, fmt.Errorf("no available speaker tokens left in the pool")
 	}
 	return m.AddSpeaker(ctx, guildID, token, displayName, nil)
-}
-
-// NextSpeakerClientID returns the Discord ApplicationID of the next available pool gateway,
-// used to build an OAuth2 invite URL before the speaker is formally registered.
-func (m *Service) NextSpeakerClientID(guildID snowflake.ID) (snowflake.ID, bool) {
-	token, ok := m.nextAvailableToken(guildID)
-	if !ok {
-		return 0, false
-	}
-	return m.speaker.NextPoolClientID(token)
 }
 
 // AddSpeaker registers a new speaker bot, persists it, and opens its gateway connection.

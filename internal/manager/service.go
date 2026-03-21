@@ -54,13 +54,46 @@ func (s *Status) String() string {
 
 // Service orchestrates speaker bots and voice raid sessions.
 type Service struct {
-	store   store.Store
-	speaker *speaker.Service
+	store       store.Store
+	speaker     *speaker.Service
+	speakerPool []string // ordered list of bot tokens available for registration
 }
 
 // NewService creates a new manager Service.
-func NewService(st store.Store, spk *speaker.Service) *Service {
-	return &Service{store: st, speaker: spk}
+// pool is the ordered list of speaker bot tokens loaded from environment variables.
+func NewService(st store.Store, spk *speaker.Service, pool []string) *Service {
+	return &Service{store: st, speaker: spk, speakerPool: pool}
+}
+
+// HasAvailableToken reports whether the pool still has at least one token
+// that has not been registered as a speaker in the given guild.
+func (m *Service) HasAvailableToken(guildID snowflake.ID) bool {
+	_, ok := m.nextAvailableToken(guildID)
+	return ok
+}
+
+// nextAvailableToken returns the first pool token not yet used by a speaker in the guild.
+func (m *Service) nextAvailableToken(guildID snowflake.ID) (string, bool) {
+	speakers := m.store.ListSpeakers(guildID)
+	used := make(map[string]struct{}, len(speakers))
+	for _, sp := range speakers {
+		used[sp.BotToken] = struct{}{}
+	}
+	for _, token := range m.speakerPool {
+		if _, ok := used[token]; !ok {
+			return token, true
+		}
+	}
+	return "", false
+}
+
+// AddNextSpeaker picks the next unused pool token and registers it as a speaker in the guild.
+func (m *Service) AddNextSpeaker(ctx context.Context, guildID snowflake.ID, displayName string) (*domain.Speaker, error) {
+	token, ok := m.nextAvailableToken(guildID)
+	if !ok {
+		return nil, fmt.Errorf("no available speaker tokens left in the pool")
+	}
+	return m.AddSpeaker(ctx, guildID, token, displayName, nil)
 }
 
 // AddSpeaker registers a new speaker bot, persists it, and opens its gateway connection.

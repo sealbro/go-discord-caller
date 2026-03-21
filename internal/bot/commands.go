@@ -89,10 +89,13 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 
 	speakers := h.manager.ListSpeakers(guildID)
 
-	components := []discord.LayoutComponent{
-		discord.NewActionRow(
+	var components []discord.LayoutComponent
+
+	// Only show the "Add Speaker" button when the pool still has an unused token.
+	if h.manager.HasAvailableToken(guildID) {
+		components = append(components, discord.NewActionRow(
 			discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"),
-		),
+		))
 	}
 
 	for _, sp := range speakers {
@@ -232,20 +235,25 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 	})
 }
 
-// handleAddSpeakerButton opens a modal to collect the new speaker's bot token.
+// handleAddSpeakerButton opens a modal to collect a display name for the next pool speaker.
 func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	// Guard: re-check availability in case it changed since the message was rendered.
+	if !h.manager.HasAvailableToken(guildID) {
+		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
+	}
+
 	return e.Modal(discord.ModalCreate{
 		CustomID: "/speakers/add-modal",
 		Title:    "Add Speaker Bot",
 		Components: []discord.LayoutComponent{
-			discord.NewLabel("Bot Token",
-				discord.NewShortTextInput("bot_token").
-					WithPlaceholder("Bot token from the Discord Developer Portal").
-					WithRequired(true),
-			),
 			discord.NewLabel("Display Name",
 				discord.NewShortTextInput("username").
-					WithPlaceholder("Friendly name for this speaker bot").
+					WithPlaceholder("Friendly name for this speaker (e.g. speaker-1)").
 					WithRequired(true),
 			),
 		},
@@ -284,24 +292,21 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	})
 }
 
-// handleAddSpeakerModal processes the modal submission for adding a new speaker.
+// handleAddSpeakerModal processes the modal submission — picks the next pool token automatically.
 func (h *CommandHandlers) handleAddSpeakerModal(e *handler.ModalEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	data := e.Data
-	botToken, _ := data.OptText("bot_token")
-	username, _ := data.OptText("username")
-
-	if botToken == "" || username == "" {
-		return e.CreateMessage(ephemeral("❌ Bot token and display name are required."))
+	username, _ := e.Data.OptText("username")
+	if username == "" {
+		return e.CreateMessage(ephemeral("❌ Display name is required."))
 	}
 
-	sp, err := h.manager.AddSpeaker(context.TODO(), guildID, botToken, username, nil)
+	sp, err := h.manager.AddNextSpeaker(context.TODO(), guildID, username)
 	if err != nil {
-		return e.CreateMessage(ephemeral("❌ Failed to add speaker: " + err.Error()))
+		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 
 	return e.CreateMessage(discord.MessageCreate{

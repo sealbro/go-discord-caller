@@ -18,7 +18,7 @@ Every speaker has access to a list of voice channels which allow him.
         - [ ] Role bot admin
           - [ ] '/setup-speakers' List all speakers
             - [ ] Show speaker name (added speaker bot username), show combobox with allowed voice channels to bind
-            - [ ] Add speaker bot to a discord server, at the end button to add new speaker to the server
+            - [ ] Add speaker bot to a discord server, at the end button to add new speaker to the server, allow add if has not added speaker bot token
             - [ ] Checkbox do enable/disable a speaker bot without removing it from the server
           - [ ] Bind/Unbind a voice channel to a speaker (voice channel id to speaker id)
           - [ ] Bind/Unbind a role which will be able to catch users voice

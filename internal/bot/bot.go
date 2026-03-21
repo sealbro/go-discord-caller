@@ -32,15 +32,15 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Infrastructure
 	st := store.NewInMemoryStore()
 	speakerSvc := speaker.NewService(st)
-	managerSvc := manager.NewService(st, speakerSvc)
+	managerSvc := manager.NewService(st, speakerSvc, cfg.SpeakerTokens)
 
 	// Command router
 	r := handler.New()
 	cmdHandlers := NewCommandHandlers(managerSvc)
 	cmdHandlers.Register(r)
 
-	// Manager (gateway) bot client
-	client, err := disgo.New(cfg.BotToken,
+	// Manager (owner) bot client
+	client, err := disgo.New(cfg.OwnerBotToken,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(
 				gateway.IntentGuilds,
@@ -56,6 +56,8 @@ func New(cfg *config.Config) (*Bot, error) {
 
 	c := caller.New(client)
 	client.AddEventListeners(eventListeners(c)...)
+
+	slog.Info("speaker pool loaded", slog.Int("total", len(cfg.SpeakerTokens)))
 
 	return &Bot{
 		client:  client,

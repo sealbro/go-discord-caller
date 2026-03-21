@@ -3,6 +3,7 @@ package bot
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/handler"
@@ -120,8 +121,8 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		}
 
 		placeholder := "Bind to a voice channel…"
-		if membership.BoundChannelID != nil {
-			placeholder = fmt.Sprintf("Bound: <#%s>", membership.BoundChannelID)
+		if chID, ok := h.manager.GetBoundChannel(sp.ID, guildID); ok {
+			placeholder = fmt.Sprintf("Bound: <#%s>", chID)
 		}
 
 		components = append(components,
@@ -160,13 +161,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	if err = h.manager.StartVoiceRaid(context.TODO(), guildID); err != nil {
-		return e.CreateMessage(ephemeral("❌ " + err.Error()))
-	}
+	go func() {
+		if err = h.manager.StartVoiceRaid(context.TODO(), guildID); err != nil {
+			slog.Error("failed to start voice raid")
+		}
+	}()
 
-	return e.CreateMessage(discord.MessageCreate{
-		Content: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels.",
-	})
+	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels."))
 }
 
 func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
@@ -182,9 +183,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	// Also make the owner bot leave its voice channel.
 	h.manager.LeaveChannel(context.TODO(), guildID)
 
-	return e.CreateMessage(discord.MessageCreate{
-		Content: "⚫ **Voice raid stopped.** All speakers have left their channels.",
-	})
+	return e.CreateMessage(ephemeral("⚫ **Voice raid stopped.** All speakers have left their channels."))
 }
 
 func (h *CommandHandlers) handleStatus(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {

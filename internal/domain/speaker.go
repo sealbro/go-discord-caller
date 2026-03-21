@@ -5,7 +5,6 @@ import "github.com/disgoorg/snowflake/v2"
 // GuildMembership holds the per-guild state for a speaker bot.
 type GuildMembership struct {
 	AllowedChannels []snowflake.ID // voice channels this speaker is permitted to join in this guild
-	BoundChannelID  *snowflake.ID  // currently bound voice channel (nil = unbound)
 	Enabled         bool
 }
 
@@ -15,12 +14,6 @@ type Speaker struct {
 	BotToken string
 	Username string
 	Guilds   map[snowflake.ID]*GuildMembership // guildID -> per-guild state
-}
-
-// GetGuild returns the GuildMembership for the given guild, if present.
-func (s *Speaker) GetGuild(guildID snowflake.ID) (*GuildMembership, bool) {
-	m, ok := s.Guilds[guildID]
-	return m, ok
 }
 
 // HasChannelAccess reports whether the speaker is allowed to join the given channel in the guild.

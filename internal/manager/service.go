@@ -19,6 +19,7 @@ import (
 type Status struct {
 	GuildID        snowflake.ID
 	Speakers       []*domain.Speaker
+	BoundChannels  map[snowflake.ID]snowflake.ID // userID -> channelID
 	RoleID         *snowflake.ID
 	OwnerChannelID *snowflake.ID
 	Session        *domain.VoiceSession
@@ -39,8 +40,8 @@ func (s *Status) String() string {
 			enabled = "❌"
 		}
 		bound := "unbound"
-		if membership.BoundChannelID != nil {
-			bound = fmt.Sprintf("<#%s>", membership.BoundChannelID)
+		if chID, ok := s.BoundChannels[sp.ID]; ok {
+			bound = fmt.Sprintf("<#%s>", chID)
 		}
 		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
 	}
@@ -356,7 +357,8 @@ func (m *Service) BindChannel(speakerID, guildID, channelID snowflake.ID) error 
 	if !sp.HasChannelAccess(guildID, channelID) {
 		return fmt.Errorf("channel <#%s> is not in the allowed list for speaker `%s`", channelID, sp.Username)
 	}
-	return m.store.BindChannel(speakerID, guildID, channelID)
+	m.store.BindChannel(speakerID, guildID, channelID)
+	return nil
 }
 
 // UnbindChannel removes the channel binding from a speaker in a specific guild.
@@ -364,23 +366,27 @@ func (m *Service) UnbindChannel(speakerID, guildID snowflake.ID) {
 	m.store.UnbindChannel(speakerID, guildID)
 }
 
-// BindOwnerChannel sets the voice channel the owner bot will join in the guild.
-func (m *Service) BindOwnerChannel(guildID, channelID snowflake.ID) {
-	m.store.BindOwnerChannel(guildID, channelID)
-	slog.Info("owner channel bound",
-		slog.String("guildID", guildID.String()),
-		slog.String("channelID", channelID.String()),
-	)
+// GetBoundChannel returns the bound voice channel for any user (speaker or owner) in a guild.
+func (m *Service) GetBoundChannel(userID, guildID snowflake.ID) (snowflake.ID, bool) {
+	return m.store.GetBoundChannel(userID, guildID)
 }
 
-// UnbindOwnerChannel removes the owner bot's voice channel binding for the guild.
+// UnbindOwnerChannel removes the owner channel binding from a guild.
 func (m *Service) UnbindOwnerChannel(guildID snowflake.ID) {
-	m.store.UnbindOwnerChannel(guildID)
+	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	m.store.UnbindChannel(ownerUser.ID, guildID)
 }
 
-// GetOwnerChannel returns the channel the owner bot is configured to join in the guild.
+// BindOwnerChannel binds a voice channel to the owner of the guild.
+func (m *Service) BindOwnerChannel(guildID, channelID snowflake.ID) {
+	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	m.store.BindChannel(ownerUser.ID, guildID, channelID)
+}
+
+// GetOwnerChannel returns the bound voice channel for the owner of the guild.
 func (m *Service) GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool) {
-	return m.store.GetOwnerChannel(guildID)
+	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	return m.store.GetBoundChannel(ownerUser.ID, guildID)
 }
 
 // BindRole sets the Discord role whose members' voice will be captured in the guild.
@@ -408,7 +414,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		return fmt.Errorf("a voice raid is already active in this server")
 	}
 
-	if chID, ok := m.GetOwnerChannel(guildID); ok {
+	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+
+	if chID, ok := m.store.GetBoundChannel(ownerUser.ID, guildID); ok {
 		if err := m.JoinChannel(ctx, guildID, chID); err != nil {
 			return fmt.Errorf("failed to join owner channel: %w", err)
 		}
@@ -418,10 +426,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 	if conn == nil {
 		return fmt.Errorf("no voice connection to join owner channel")
 	}
-	selfUser, _ := m.ownerClient.Caches.SelfUser()
 
 	chIn := make(chan []byte, 10)
-	receiver := opus.NewVoiceReceiver(chIn, selfUser.ID)
+	receiver := opus.NewVoiceReceiver(chIn, ownerUser.ID)
 	defer receiver.Close()
 	conn.SetOpusFrameReceiver(receiver)
 
@@ -437,10 +444,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 	for _, sp := range speakers {
 		membership, ok := sp.Guilds[guildID]
-		if !ok || !membership.Enabled || membership.BoundChannelID == nil {
+		channelID, hasChannel := m.store.GetBoundChannel(sp.ID, guildID)
+		if !ok || !membership.Enabled || !hasChannel {
 			continue
 		}
-		if err := m.speaker.JoinChannel(ctx, sp.ID, guildID, *membership.BoundChannelID); err != nil {
+		if err := m.speaker.JoinChannel(ctx, sp.ID, guildID, channelID); err != nil {
 			slog.Warn("speaker failed to join channel on raid start",
 				slog.String("speakerID", sp.ID.String()),
 				slog.Any("err", err),
@@ -511,14 +519,23 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 
 // GetStatus returns the current speaker and session state for a guild.
 func (m *Service) GetStatus(guildID snowflake.ID) *Status {
+	speakers := m.store.ListSpeakers(guildID)
+	boundChannels := make(map[snowflake.ID]snowflake.ID, len(speakers))
+	for _, sp := range speakers {
+		if chID, ok := m.store.GetBoundChannel(sp.ID, guildID); ok {
+			boundChannels[sp.ID] = chID
+		}
+	}
+
 	s := &Status{
-		GuildID:  guildID,
-		Speakers: m.store.ListSpeakers(guildID),
+		GuildID:       guildID,
+		Speakers:      speakers,
+		BoundChannels: boundChannels,
 	}
 	if roleID, ok := m.store.GetBoundRole(guildID); ok {
 		s.RoleID = &roleID
 	}
-	if chID, ok := m.store.GetOwnerChannel(guildID); ok {
+	if chID, ok := m.GetOwnerChannel(guildID); ok {
 		s.OwnerChannelID = &chID
 	}
 	if session, ok := m.store.GetSession(guildID); ok {

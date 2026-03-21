@@ -2,24 +2,39 @@ package domain
 
 import "github.com/disgoorg/snowflake/v2"
 
-// Speaker represents a speaker bot instance registered in a guild.
-type Speaker struct {
-	ID              snowflake.ID
-	GuildID         snowflake.ID
-	BotToken        string
-	Username        string
-	AllowedChannels []snowflake.ID // voice channels this speaker is permitted to join
+// GuildMembership holds the per-guild state for a speaker bot.
+type GuildMembership struct {
+	AllowedChannels []snowflake.ID // voice channels this speaker is permitted to join in this guild
 	BoundChannelID  *snowflake.ID  // currently bound voice channel (nil = unbound)
 	Enabled         bool
 }
 
-// HasChannelAccess reports whether the speaker is allowed to join the given channel.
-// If AllowedChannels is empty, access is unrestricted (all voice channels allowed).
-func (s *Speaker) HasChannelAccess(channelID snowflake.ID) bool {
-	if len(s.AllowedChannels) == 0 {
+// Speaker represents a speaker bot instance that can be registered in one or more guilds.
+type Speaker struct {
+	ID       snowflake.ID
+	BotToken string
+	Username string
+	Guilds   map[snowflake.ID]*GuildMembership // guildID -> per-guild state
+}
+
+// GetGuild returns the GuildMembership for the given guild, if present.
+func (s *Speaker) GetGuild(guildID snowflake.ID) (*GuildMembership, bool) {
+	m, ok := s.Guilds[guildID]
+	return m, ok
+}
+
+// HasChannelAccess reports whether the speaker is allowed to join the given channel in the guild.
+// If the guild's AllowedChannels is empty, access is unrestricted (all voice channels allowed).
+// Returns false if the speaker is not registered in the guild.
+func (s *Speaker) HasChannelAccess(guildID, channelID snowflake.ID) bool {
+	m, ok := s.Guilds[guildID]
+	if !ok {
+		return false
+	}
+	if len(m.AllowedChannels) == 0 {
 		return true // no restriction — all channels are allowed
 	}
-	for _, id := range s.AllowedChannels {
+	for _, id := range m.AllowedChannels {
 		if id == channelID {
 			return true
 		}

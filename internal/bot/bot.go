@@ -62,7 +62,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	}
 
 	c := caller.New(client)
-	client.AddEventListeners(eventListeners(c)...)
+	client.AddEventListeners(eventListeners(c, managerSvc)...)
 
 	// Supply a live Discord membership check so NextSpeakerClientID skips bots
 	// that are already in the guild (e.g. invited in a previous session).

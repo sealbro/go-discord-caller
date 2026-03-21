@@ -13,13 +13,14 @@ type Store interface {
 	// Speaker CRUD
 	AddSpeaker(s *domain.Speaker)
 	GetSpeaker(id snowflake.ID) (*domain.Speaker, bool)
+	GetSpeakerByToken(token string) (*domain.Speaker, bool)
 	UpdateSpeaker(s *domain.Speaker) error
 	ListSpeakers(guildID snowflake.ID) []*domain.Speaker
 	RemoveSpeaker(id snowflake.ID)
 
 	// Channel binding
-	BindChannel(speakerID, channelID snowflake.ID) error
-	UnbindChannel(speakerID snowflake.ID)
+	BindChannel(speakerID, guildID, channelID snowflake.ID) error
+	UnbindChannel(speakerID, guildID snowflake.ID)
 
 	// Role binding
 	BindRole(guildID, roleID snowflake.ID)
@@ -34,18 +35,20 @@ type Store interface {
 
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
-	mu       sync.RWMutex
-	speakers map[snowflake.ID]*domain.Speaker
-	roles    map[snowflake.ID]snowflake.ID // guildID -> roleID
-	sessions map[snowflake.ID]*domain.VoiceSession
+	mu         sync.RWMutex
+	speakers   map[snowflake.ID]*domain.Speaker
+	tokenIndex map[string]snowflake.ID       // botToken -> speakerID
+	roles      map[snowflake.ID]snowflake.ID // guildID -> roleID
+	sessions   map[snowflake.ID]*domain.VoiceSession
 }
 
 // NewInMemoryStore creates a new empty InMemoryStore.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		speakers: make(map[snowflake.ID]*domain.Speaker),
-		roles:    make(map[snowflake.ID]snowflake.ID),
-		sessions: make(map[snowflake.ID]*domain.VoiceSession),
+		speakers:   make(map[snowflake.ID]*domain.Speaker),
+		tokenIndex: make(map[string]snowflake.ID),
+		roles:      make(map[snowflake.ID]snowflake.ID),
+		sessions:   make(map[snowflake.ID]*domain.VoiceSession),
 	}
 }
 
@@ -53,6 +56,7 @@ func (s *InMemoryStore) AddSpeaker(sp *domain.Speaker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.speakers[sp.ID] = sp
+	s.tokenIndex[sp.BotToken] = sp.ID
 }
 
 func (s *InMemoryStore) GetSpeaker(id snowflake.ID) (*domain.Speaker, bool) {
@@ -77,35 +81,55 @@ func (s *InMemoryStore) ListSpeakers(guildID snowflake.ID) []*domain.Speaker {
 	defer s.mu.RUnlock()
 	var result []*domain.Speaker
 	for _, sp := range s.speakers {
-		if sp.GuildID == guildID {
+		if _, ok := sp.Guilds[guildID]; ok {
 			result = append(result, sp)
 		}
 	}
 	return result
 }
 
+func (s *InMemoryStore) GetSpeakerByToken(token string) (*domain.Speaker, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	id, ok := s.tokenIndex[token]
+	if !ok {
+		return nil, false
+	}
+	sp, ok := s.speakers[id]
+	return sp, ok
+}
+
 func (s *InMemoryStore) RemoveSpeaker(id snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.speakers, id)
+	if sp, ok := s.speakers[id]; ok {
+		delete(s.tokenIndex, sp.BotToken)
+		delete(s.speakers, id)
+	}
 }
 
-func (s *InMemoryStore) BindChannel(speakerID, channelID snowflake.ID) error {
+func (s *InMemoryStore) BindChannel(speakerID, guildID, channelID snowflake.ID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sp, ok := s.speakers[speakerID]
 	if !ok {
 		return fmt.Errorf("speaker %s not found", speakerID)
 	}
-	sp.BoundChannelID = &channelID
+	membership, ok := sp.Guilds[guildID]
+	if !ok {
+		return fmt.Errorf("speaker %s is not registered in guild %s", speakerID, guildID)
+	}
+	membership.BoundChannelID = &channelID
 	return nil
 }
 
-func (s *InMemoryStore) UnbindChannel(speakerID snowflake.ID) {
+func (s *InMemoryStore) UnbindChannel(speakerID, guildID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if sp, ok := s.speakers[speakerID]; ok {
-		sp.BoundChannelID = nil
+		if membership, ok := sp.Guilds[guildID]; ok {
+			membership.BoundChannelID = nil
+		}
 	}
 }
 

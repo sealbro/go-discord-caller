@@ -81,6 +81,24 @@ func (s *Service) ClosePool(ctx context.Context) {
 	slog.Info("pool: all unassigned gateways closed")
 }
 
+// PoolClientUsername returns the username of the bot for the given pool token
+// by reading the self-user from the pre-connected gateway's cache.
+// Returns an empty string and false if the client is not in the pool or the
+// self-user is not yet available.
+func (s *Service) PoolClientUsername(token string) (string, bool) {
+	s.mu.RLock()
+	client, ok := s.poolClients[token]
+	s.mu.RUnlock()
+	if !ok {
+		return "", false
+	}
+	selfUser, ok := client.Caches.SelfUser()
+	if !ok {
+		return "", false
+	}
+	return selfUser.Username, true
+}
+
 // NextPoolClientID returns the Discord ApplicationID for the given pool token.
 // It first checks the pre-connected pool gateway; if that gateway is not
 // available (startup failure, already assigned, etc.) it falls back to

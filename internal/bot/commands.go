@@ -100,20 +100,25 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	}
 
 	for _, sp := range speakers {
+		membership, ok := sp.Guilds[guildID]
+		if !ok {
+			continue
+		}
+
 		label := "Enable"
-		if sp.Enabled {
+		if membership.Enabled {
 			label = "Disable"
 		}
 
 		placeholder := "Bind to a voice channel…"
-		if sp.BoundChannelID != nil {
-			placeholder = fmt.Sprintf("Bound: <#%s>", sp.BoundChannelID)
+		if membership.BoundChannelID != nil {
+			placeholder = fmt.Sprintf("Bound: <#%s>", membership.BoundChannelID)
 		}
 
 		components = append(components,
 			discord.NewActionRow(
 				discord.NewSecondaryButton(
-					fmt.Sprintf("%s %s (%s)", statusEmoji(sp.Enabled), sp.Username, label),
+					fmt.Sprintf("%s %s (%s)", statusEmoji(membership.Enabled), sp.Username, label),
 					fmt.Sprintf("/speakers/toggle/%s", sp.ID),
 				),
 			),
@@ -217,12 +222,14 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 	var enabled bool
 	for _, s := range status.Speakers {
 		if s.ID == speakerID {
-			enabled = s.Enabled
+			if membership, ok := s.Guilds[guildID]; ok {
+				enabled = membership.Enabled
+			}
 			break
 		}
 	}
 
-	if err := h.manager.ToggleSpeaker(context.TODO(), speakerID, !enabled); err != nil {
+	if err := h.manager.ToggleSpeaker(context.TODO(), speakerID, guildID, !enabled); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 
@@ -301,6 +308,11 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
 
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
 	if !ok {
 		return e.CreateMessage(ephemeral("unexpected interaction data type"))
@@ -308,7 +320,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 
 	channels := channelData.Channels()
 	if len(channels) == 0 {
-		h.manager.UnbindChannel(speakerID)
+		h.manager.UnbindChannel(speakerID, guildID)
 		return e.CreateMessage(discord.MessageCreate{
 			Content: "✅ Channel binding removed.",
 			Flags:   discord.MessageFlagEphemeral,
@@ -316,7 +328,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	}
 
 	channelID := channels[0].ID
-	if err := h.manager.BindChannel(speakerID, channelID); err != nil {
+	if err := h.manager.BindChannel(speakerID, guildID, channelID); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 

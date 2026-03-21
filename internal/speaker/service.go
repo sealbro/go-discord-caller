@@ -16,45 +16,122 @@ import (
 
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
 type Service struct {
-	mu      sync.RWMutex
-	clients map[snowflake.ID]*bot.Client        // speakerID -> gateway client
-	cancels map[snowflake.ID]context.CancelFunc // speakerID -> relay goroutine cancel
-	store   store.Store
+	mu          sync.RWMutex
+	poolClients map[string]*bot.Client       // token -> pre-connected gateway (available pool)
+	clients     map[snowflake.ID]*bot.Client // speakerID -> assigned gateway
+	cancels     map[snowflake.ID]context.CancelFunc
+	store       store.Store
 }
 
 // NewService creates a new speaker Service.
 func NewService(st store.Store) *Service {
 	return &Service{
-		clients: make(map[snowflake.ID]*bot.Client),
-		cancels: make(map[snowflake.ID]context.CancelFunc),
-		store:   st,
+		poolClients: make(map[string]*bot.Client),
+		clients:     make(map[snowflake.ID]*bot.Client),
+		cancels:     make(map[snowflake.ID]context.CancelFunc),
+		store:       st,
 	}
 }
 
-// Connect opens a Discord gateway connection for the given speaker bot.
+// ConnectPool opens a dedicated gateway connection for every token in the pool at startup.
+// These gateways sit idle until a speaker is registered via AddNextSpeaker.
+func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
+	for i, token := range tokens {
+		client, err := disgo.New(token,
+			bot.WithGatewayConfigOpts(
+				gateway.WithIntents(gateway.IntentGuildVoiceStates),
+			),
+		)
+		if err != nil {
+			slog.Warn("pool: failed to build gateway",
+				slog.Int("index", i+1),
+				slog.Any("err", err),
+			)
+			continue
+		}
+
+		if err = client.OpenGateway(ctx); err != nil {
+			slog.Warn("pool: failed to open gateway",
+				slog.Int("index", i+1),
+				slog.Any("err", err),
+			)
+			client.Close(ctx)
+			continue
+		}
+
+		s.mu.Lock()
+		s.poolClients[token] = client
+		s.mu.Unlock()
+
+		slog.Info("pool: speaker gateway ready", slog.Int("index", i+1))
+	}
+}
+
+// ClosePool shuts down all gateways that are still in the available pool (not yet assigned).
+func (s *Service) ClosePool(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for token, client := range s.poolClients {
+		client.Close(ctx)
+		delete(s.poolClients, token)
+	}
+	slog.Info("pool: all unassigned gateways closed")
+}
+
+// NextPoolClientID returns the Discord ApplicationID of the pre-connected gateway
+// for the given pool token, so an OAuth2 invite URL can be constructed.
+func (s *Service) NextPoolClientID(token string) (snowflake.ID, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	client, ok := s.poolClients[token]
+	if !ok {
+		return 0, false
+	}
+	return client.ApplicationID, true
+}
+
+// Connect assigns an already-open pool gateway to the speaker, or opens a new one if
+// the token was not pre-connected (e.g. added manually outside the env pool).
 func (s *Service) Connect(ctx context.Context, sp *domain.Speaker) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if _, ok := s.clients[sp.ID]; ok {
-		return nil // already connected
+		return nil // already assigned
 	}
 
-	client, err := disgo.New(sp.BotToken,
-		bot.WithGatewayConfigOpts(
-			gateway.WithIntents(gateway.IntentGuildVoiceStates),
-		),
-	)
-	if err != nil {
-		return fmt.Errorf("build speaker client %s: %w", sp.ID, err)
-	}
+	var client *bot.Client
 
-	if err = client.OpenGateway(ctx); err != nil {
-		return fmt.Errorf("open gateway for speaker %s: %w", sp.ID, err)
+	if poolClient, ok := s.poolClients[sp.BotToken]; ok {
+		// Reuse the pre-connected gateway — no extra network round-trip needed.
+		client = poolClient
+		delete(s.poolClients, sp.BotToken)
+		slog.Info("speaker assigned from pool",
+			slog.String("speakerID", sp.ID.String()),
+			slog.String("username", sp.Username),
+		)
+	} else {
+		// Token was not in the pool — open a new gateway on demand.
+		var err error
+		client, err = disgo.New(sp.BotToken,
+			bot.WithGatewayConfigOpts(
+				gateway.WithIntents(gateway.IntentGuildVoiceStates),
+			),
+		)
+		if err != nil {
+			return fmt.Errorf("build speaker client %s: %w", sp.ID, err)
+		}
+		if err = client.OpenGateway(ctx); err != nil {
+			return fmt.Errorf("open gateway for speaker %s: %w", sp.ID, err)
+		}
+		slog.Info("speaker connected (new gateway)",
+			slog.String("speakerID", sp.ID.String()),
+			slog.String("username", sp.Username),
+		)
 	}
 
 	s.clients[sp.ID] = client
-	slog.Info("speaker connected", slog.String("speakerID", sp.ID.String()), slog.String("username", sp.Username))
 	return nil
 }
 

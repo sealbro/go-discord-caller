@@ -96,6 +96,16 @@ func (m *Service) AddNextSpeaker(ctx context.Context, guildID snowflake.ID, disp
 	return m.AddSpeaker(ctx, guildID, token, displayName, nil)
 }
 
+// NextSpeakerClientID returns the Discord ApplicationID of the next available pool gateway,
+// used to build an OAuth2 invite URL before the speaker is formally registered.
+func (m *Service) NextSpeakerClientID(guildID snowflake.ID) (snowflake.ID, bool) {
+	token, ok := m.nextAvailableToken(guildID)
+	if !ok {
+		return 0, false
+	}
+	return m.speaker.NextPoolClientID(token)
+}
+
 // AddSpeaker registers a new speaker bot, persists it, and opens its gateway connection.
 func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken, username string, allowedChannels []snowflake.ID) (*domain.Speaker, error) {
 	sp := &domain.Speaker{

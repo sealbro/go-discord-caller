@@ -21,18 +21,25 @@ import (
 
 // Bot wraps the disgo client and all application services.
 type Bot struct {
-	client  *bot.Client
-	caller  *caller.Caller
-	manager *manager.Service
-	cfg     *config.Config
+	client     *bot.Client
+	caller     *caller.Caller
+	manager    *manager.Service
+	speakerSvc *speaker.Service
+	cfg        *config.Config
 }
 
 // New creates and configures a new Bot instance with all services wired together.
 func New(cfg *config.Config) (*Bot, error) {
+	ctx := context.Background()
+
 	// Infrastructure
 	st := store.NewInMemoryStore()
 	speakerSvc := speaker.NewService(st)
 	managerSvc := manager.NewService(st, speakerSvc, cfg.SpeakerTokens)
+
+	// Open one dedicated gateway per speaker token immediately at startup.
+	speakerSvc.ConnectPool(ctx, cfg.SpeakerTokens)
+	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
 
 	// Command router
 	r := handler.New()
@@ -57,24 +64,27 @@ func New(cfg *config.Config) (*Bot, error) {
 	c := caller.New(client)
 	client.AddEventListeners(eventListeners(c)...)
 
-	slog.Info("speaker pool loaded", slog.Int("total", len(cfg.SpeakerTokens)))
-
 	return &Bot{
-		client:  client,
-		caller:  c,
-		manager: managerSvc,
-		cfg:     cfg,
+		client:     client,
+		caller:     c,
+		manager:    managerSvc,
+		speakerSvc: speakerSvc,
+		cfg:        cfg,
 	}, nil
 }
 
-// Run registers slash commands, opens the gateway, and blocks until an OS signal.
+// Run opens the owner gateway, registers slash commands, and blocks until an OS signal.
 func (b *Bot) Run() error {
 	ctx := context.Background()
 
 	if err := b.client.OpenGateway(ctx); err != nil {
 		return err
 	}
-	defer b.client.Close(ctx)
+	defer func() {
+		b.client.Close(ctx)
+		// Shut down any pool gateways that were never assigned to a speaker.
+		b.speakerSvc.ClosePool(ctx)
+	}()
 
 	// Register slash commands globally (or guild-scoped when GuildID is set).
 	guildIDs := guildScope(b.cfg.GuildID)

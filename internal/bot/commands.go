@@ -73,6 +73,7 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	// Component routes
 	r.ButtonComponent("/speakers/toggle/{speakerID}", h.handleToggleSpeaker)
 	r.ButtonComponent("/speakers/add", h.handleAddSpeakerButton)
+	r.ButtonComponent("/speakers/confirm-add", h.handleConfirmAddSpeaker)
 	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}", h.handleBindChannel)
 
 	// Modal route
@@ -235,21 +236,54 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 	})
 }
 
-// handleAddSpeakerButton opens a modal to collect a display name for the next pool speaker.
+// handleAddSpeakerButton resolves the next pool bot's ApplicationID, builds a
+// Discord OAuth2 invite URL pre-targeted at the current guild, and presents it
+// alongside a "Set Display Name" button that opens the naming modal.
 func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	// Guard: re-check availability in case it changed since the message was rendered.
+	clientID, ok := h.manager.NextSpeakerClientID(guildID)
+	if !ok {
+		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
+	}
+
+	installURL := fmt.Sprintf(
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144&guild_id=%s",
+		clientID, guildID,
+	)
+
+	return e.CreateMessage(discord.MessageCreate{
+		Content: "**Add Speaker Bot**\n" +
+			"1. Click **Invite to Server** — the bot will be pre-selected for this server.\n" +
+			"2. Complete the authorisation in the browser.\n" +
+			"3. Come back and click **Set Display Name** to finish registration.",
+		Components: []discord.LayoutComponent{
+			discord.NewActionRow(
+				discord.NewLinkButton("🔗 Invite to Server", installURL),
+				discord.NewSuccessButton("✏️ Set Display Name", "/speakers/confirm-add"),
+			),
+		},
+		Flags: discord.MessageFlagEphemeral,
+	})
+}
+
+// handleConfirmAddSpeaker opens the naming modal once the bot has been invited.
+func (h *CommandHandlers) handleConfirmAddSpeaker(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
 	if !h.manager.HasAvailableToken(guildID) {
 		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
 	}
 
 	return e.Modal(discord.ModalCreate{
 		CustomID: "/speakers/add-modal",
-		Title:    "Add Speaker Bot",
+		Title:    "Name Your Speaker Bot",
 		Components: []discord.LayoutComponent{
 			discord.NewLabel("Display Name",
 				discord.NewShortTextInput("username").

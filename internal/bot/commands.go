@@ -8,6 +8,7 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/caller"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
@@ -55,11 +56,12 @@ func permPtr(p discord.Permissions) omit.Omit[*discord.Permissions] {
 // CommandHandlers wires all slash command and component routes to the manager service.
 type CommandHandlers struct {
 	manager *manager.Service
+	caller  *caller.Caller
 }
 
 // NewCommandHandlers creates a new CommandHandlers.
-func NewCommandHandlers(m *manager.Service) *CommandHandlers {
-	return &CommandHandlers{manager: m}
+func NewCommandHandlers(m *manager.Service, c *caller.Caller) *CommandHandlers {
+	return &CommandHandlers{manager: m, caller: c}
 }
 
 // Register attaches all routes to the given router.
@@ -75,6 +77,7 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	r.ButtonComponent("/speakers/add", h.handleAddSpeakerButton)
 	r.ButtonComponent("/speakers/confirm-add", h.handleConfirmAddSpeaker)
 	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}", h.handleBindChannel)
+	r.SelectMenuComponent("/owner/bind-channel", h.handleBindOwnerChannel)
 
 	// Modal route
 	r.Modal("/speakers/add-modal", h.handleAddSpeakerModal)
@@ -91,6 +94,18 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	speakers := h.manager.ListSpeakers(guildID)
 
 	var components []discord.LayoutComponent
+
+	// Owner bot channel selector
+	ownerPlaceholder := "Set owner bot voice channel…"
+	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
+		ownerPlaceholder = fmt.Sprintf("Owner bot channel: <#%s>", chID)
+	}
+	components = append(components,
+		discord.NewActionRow(
+			discord.NewChannelSelectMenu("/owner/bind-channel", ownerPlaceholder).
+				WithChannelTypes(discord.ChannelTypeGuildVoice),
+		),
+	)
 
 	// Only show the "Add Speaker" button when the pool still has an unused token.
 	if h.manager.HasAvailableToken(guildID) {
@@ -155,6 +170,16 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 
+	// Also make the owner bot join its configured channel, if one is set.
+	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
+		if err := h.caller.JoinChannel(context.TODO(), guildID, chID); err != nil {
+			// Non-fatal — log via the ephemeral warning but still report success.
+			return e.CreateMessage(discord.MessageCreate{
+				Content: fmt.Sprintf("🔴 **Voice raid started.** All enabled speakers have joined their bound channels.\n⚠️ Owner bot failed to join <#%s>: %s", chID, err),
+			})
+		}
+	}
+
 	return e.CreateMessage(discord.MessageCreate{
 		Content: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels.",
 	})
@@ -169,6 +194,9 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	if err := h.manager.StopVoiceRaid(context.TODO(), guildID); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
+
+	// Also make the owner bot leave its voice channel.
+	_ = h.caller.LeaveChannel(context.TODO(), guildID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: "⚫ **Voice raid stopped.** All speakers have left their channels.",
@@ -333,7 +361,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	}
 
 	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Speaker `%s` bound to <#%s>.", speakerID, channelID),
+		Content: fmt.Sprintf("✅ Speaker <@%s> bound to <#%s>.", speakerID, channelID),
 		Flags:   discord.MessageFlagEphemeral,
 	})
 }
@@ -356,7 +384,37 @@ func (h *CommandHandlers) handleAddSpeakerModal(e *handler.ModalEvent) error {
 	}
 
 	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Speaker **%s** (`%s`) added and connected.", sp.Username, sp.ID),
+		Content: fmt.Sprintf("✅ Speaker <@%s> added and connected.", sp.ID),
+		Flags:   discord.MessageFlagEphemeral,
+	})
+}
+
+// handleBindOwnerChannel updates the voice channel the owner bot will join.
+func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
+	if !ok {
+		return e.CreateMessage(ephemeral("unexpected interaction data type"))
+	}
+
+	channels := channelData.Channels()
+	if len(channels) == 0 {
+		h.manager.UnbindOwnerChannel(guildID)
+		return e.CreateMessage(discord.MessageCreate{
+			Content: "✅ Owner bot channel binding removed.",
+			Flags:   discord.MessageFlagEphemeral,
+		})
+	}
+
+	channelID := channels[0].ID
+	h.manager.BindOwnerChannel(guildID, channelID)
+
+	return e.CreateMessage(discord.MessageCreate{
+		Content: fmt.Sprintf("✅ Owner bot will join <#%s> during voice raids.", channelID),
 		Flags:   discord.MessageFlagEphemeral,
 	})
 }

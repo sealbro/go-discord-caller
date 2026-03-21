@@ -15,10 +15,11 @@ import (
 
 // Status holds the current state of speakers and bindings in a guild.
 type Status struct {
-	GuildID  snowflake.ID
-	Speakers []*domain.Speaker
-	RoleID   *snowflake.ID
-	Session  *domain.VoiceSession
+	GuildID        snowflake.ID
+	Speakers       []*domain.Speaker
+	RoleID         *snowflake.ID
+	OwnerChannelID *snowflake.ID
+	Session        *domain.VoiceSession
 }
 
 // String returns a human-readable summary of the status.
@@ -39,13 +40,19 @@ func (s *Status) String() string {
 		if membership.BoundChannelID != nil {
 			bound = fmt.Sprintf("<#%s>", membership.BoundChannelID)
 		}
-		sb.WriteString(fmt.Sprintf("- %s `%s` → %s %s\n", enabled, sp.Username, bound, sp.ID))
+		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
 	}
 
 	if s.RoleID != nil {
 		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.RoleID))
 	} else {
 		sb.WriteString("\n**Capture Role:** not set\n")
+	}
+
+	if s.OwnerChannelID != nil {
+		sb.WriteString(fmt.Sprintf("\n**Owner Bot Channel:** <#%s>\n", s.OwnerChannelID))
+	} else {
+		sb.WriteString("\n**Owner Bot Channel:** not set\n")
 	}
 
 	if s.Session != nil && s.Session.Active {
@@ -314,6 +321,25 @@ func (m *Service) UnbindChannel(speakerID, guildID snowflake.ID) {
 	m.store.UnbindChannel(speakerID, guildID)
 }
 
+// BindOwnerChannel sets the voice channel the owner bot will join in the guild.
+func (m *Service) BindOwnerChannel(guildID, channelID snowflake.ID) {
+	m.store.BindOwnerChannel(guildID, channelID)
+	slog.Info("owner channel bound",
+		slog.String("guildID", guildID.String()),
+		slog.String("channelID", channelID.String()),
+	)
+}
+
+// UnbindOwnerChannel removes the owner bot's voice channel binding for the guild.
+func (m *Service) UnbindOwnerChannel(guildID snowflake.ID) {
+	m.store.UnbindOwnerChannel(guildID)
+}
+
+// GetOwnerChannel returns the channel the owner bot is configured to join in the guild.
+func (m *Service) GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool) {
+	return m.store.GetOwnerChannel(guildID)
+}
+
 // BindRole sets the Discord role whose members' voice will be captured in the guild.
 func (m *Service) BindRole(guildID, roleID snowflake.ID) {
 	m.store.BindRole(guildID, roleID)
@@ -389,6 +415,9 @@ func (m *Service) GetStatus(guildID snowflake.ID) *Status {
 	}
 	if roleID, ok := m.store.GetBoundRole(guildID); ok {
 		s.RoleID = &roleID
+	}
+	if chID, ok := m.store.GetOwnerChannel(guildID); ok {
+		s.OwnerChannelID = &chID
 	}
 	if session, ok := m.store.GetSession(guildID); ok {
 		s.Session = session

@@ -11,6 +11,8 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/handler"
+	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/caller"
 	"github.com/sealbro/go-discord-caller/internal/config"
@@ -41,10 +43,9 @@ func New(cfg *config.Config) (*Bot, error) {
 	speakerSvc.ConnectPool(ctx, cfg.SpeakerTokens)
 	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
 
-	// Command router
+	// Command router (routes are registered after the client is created so
+	// the caller can be wired in before OpenGateway is called).
 	r := handler.New()
-	cmdHandlers := NewCommandHandlers(managerSvc)
-	cmdHandlers.Register(r)
 
 	// Manager (owner) bot client
 	client, err := disgo.New(cfg.OwnerBotToken,
@@ -56,12 +57,20 @@ func New(cfg *config.Config) (*Bot, error) {
 			),
 		),
 		bot.WithEventListeners(r),
+		bot.WithVoiceManagerConfigOpts(
+			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+		),
 	)
 	if err != nil {
 		return nil, err
 	}
 
 	c := caller.New(client)
+
+	// Wire command handlers (needs the real caller backed by the owner client).
+	cmdHandlers := NewCommandHandlers(managerSvc, c)
+	cmdHandlers.Register(r)
+
 	client.AddEventListeners(eventListeners(c, managerSvc)...)
 
 	// Supply a live Discord membership check so NextSpeakerClientID skips bots

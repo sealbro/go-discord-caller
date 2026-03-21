@@ -11,6 +11,8 @@ import (
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/gateway"
+	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/store"
@@ -42,6 +44,9 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 		client, err := disgo.New(token,
 			bot.WithGatewayConfigOpts(
 				gateway.WithIntents(gateway.IntentGuildVoiceStates),
+			),
+			bot.WithVoiceManagerConfigOpts(
+				voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			),
 		)
 		if err != nil {
@@ -164,6 +169,9 @@ func (s *Service) Connect(ctx context.Context, sp *domain.Speaker) error {
 		client, err = disgo.New(sp.BotToken,
 			bot.WithGatewayConfigOpts(
 				gateway.WithIntents(gateway.IntentGuildVoiceStates),
+			),
+			bot.WithVoiceManagerConfigOpts(
+				voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			),
 		)
 		if err != nil {

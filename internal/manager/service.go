@@ -519,9 +519,36 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		m.speaker.LeaveChannel(ctx, speakerID, guildID)
 	}
 
+	m.LeaveChannel(ctx, guildID)
+
 	m.store.DeleteSession(guildID)
 	slog.Info("voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil
+}
+
+// Shutdown stops every active voice raid, closes all speaker gateways (assigned
+// and pool), and leaves every owner voice channel. Call this before closing the
+// owner bot client.
+func (m *Service) Shutdown(ctx context.Context) {
+	slog.Info("shutting down manager service...")
+
+	// Stop every active raid: cancels relay goroutines and leaves speaker channels.
+	for _, session := range m.store.ListSessions() {
+		if !session.Active {
+			continue
+		}
+		if err := m.StopVoiceRaid(ctx, session.GuildID); err != nil {
+			slog.Warn("shutdown: failed to stop voice raid",
+				slog.String("guildID", session.GuildID.String()),
+				slog.Any("err", err),
+			)
+		}
+		// Leave the owner bot's voice channel for this guild.
+		m.LeaveChannel(ctx, session.GuildID)
+	}
+
+	// Shut down all speaker gateways (assigned + pool).
+	m.speaker.Shutdown(ctx)
 }
 
 // GetStatus returns the current speaker and session state for a guild.

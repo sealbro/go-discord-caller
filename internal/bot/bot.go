@@ -23,10 +23,9 @@ import (
 
 // Bot wraps the disgo client and all application services.
 type Bot struct {
-	client     *bot.Client
-	manager    *manager.Service
-	speakerSvc *speaker.Service
-	cfg        *config.Config
+	client  *bot.Client
+	manager *manager.Service
+	cfg     *config.Config
 }
 
 // New creates and configures a new Bot instance with all services wired together.
@@ -79,10 +78,9 @@ func New(cfg *config.Config) (*Bot, error) {
 	})
 
 	return &Bot{
-		client:     client,
-		manager:    managerSvc,
-		speakerSvc: speakerSvc,
-		cfg:        cfg,
+		client:  client,
+		manager: managerSvc,
+		cfg:     cfg,
 	}, nil
 }
 
@@ -94,9 +92,9 @@ func (b *Bot) Run() error {
 		return err
 	}
 	defer func() {
+		// Graceful shutdown: stop all raids, close all speaker gateways, then the owner gateway.
+		b.manager.Shutdown(ctx)
 		b.client.Close(ctx)
-		// Shut down any pool gateways that were never assigned to a speaker.
-		b.speakerSvc.ClosePool(ctx)
 	}()
 
 	// Register slash commands scoped to every guild the bot is already in.

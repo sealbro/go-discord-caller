@@ -161,9 +161,14 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
+	// Reject immediately if a raid is already running in this guild.
+	if status := h.manager.GetStatus(guildID); status.Session != nil && status.Session.Active {
+		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
+	}
+
 	go func() {
 		if err = h.manager.StartVoiceRaid(context.TODO(), guildID); err != nil {
-			slog.Error("failed to start voice raid")
+			slog.Warn("failed to start voice raid", slog.Any("err", err))
 		}
 	}()
 
@@ -176,12 +181,16 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	if err := h.manager.StopVoiceRaid(context.TODO(), guildID); err != nil {
-		return e.CreateMessage(ephemeral("❌ " + err.Error()))
+	// Reject immediately if there is no active raid in this guild.
+	if status := h.manager.GetStatus(guildID); status.Session == nil || !status.Session.Active {
+		return e.CreateMessage(ephemeral("⚠️ There is no active voice raid in this server."))
 	}
 
-	// Also make the owner bot leave its voice channel.
-	h.manager.LeaveChannel(context.TODO(), guildID)
+	go func() {
+		if err := h.manager.StopVoiceRaid(context.TODO(), guildID); err != nil {
+			slog.Warn("failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
+		}
+	}()
 
 	return e.CreateMessage(ephemeral("⚫ **Voice raid stopped.** All speakers have left their channels."))
 }

@@ -88,6 +88,34 @@ func (s *Service) ClosePool(ctx context.Context) {
 	slog.Info("pool: all unassigned gateways closed")
 }
 
+// Shutdown cancels every active audio relay, closes all assigned speaker
+// gateways, and closes any remaining pool gateways. Call this once during
+// graceful shutdown before closing the owner bot client.
+func (s *Service) Shutdown(ctx context.Context) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Cancel all relay goroutines first so provider/receiver are closed cleanly.
+	for speakerID, cancel := range s.cancels {
+		cancel()
+		delete(s.cancels, speakerID)
+	}
+
+	// Close all assigned speaker gateways.
+	for speakerID, client := range s.clients {
+		client.Close(ctx)
+		delete(s.clients, speakerID)
+		slog.Info("speaker gateway closed", slog.String("speakerID", speakerID.String()))
+	}
+
+	// Close any pool gateways that were never assigned.
+	for token, client := range s.poolClients {
+		client.Close(ctx)
+		delete(s.poolClients, token)
+	}
+	slog.Info("speaker service shut down")
+}
+
 // PoolClientUser returns the discord.User of the bot for the given pool token
 // by reading the self-user from the pre-connected gateway's cache.
 // Returns a zero User and false if the client is not in the pool or the

@@ -38,6 +38,7 @@ type Store interface {
 	GetSession(guildID snowflake.ID) (*domain.VoiceSession, bool)
 	SetSession(s *domain.VoiceSession)
 	DeleteSession(guildID snowflake.ID)
+	ListSessions() []*domain.VoiceSession
 }
 
 // InMemoryStore is a thread-safe in-memory implementation of Store.
@@ -172,4 +173,14 @@ func (s *InMemoryStore) DeleteSession(guildID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.sessions, guildID)
+}
+
+func (s *InMemoryStore) ListSessions() []*domain.VoiceSession {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]*domain.VoiceSession, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		result = append(result, sess)
+	}
+	return result
 }

@@ -17,6 +17,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/manager"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
@@ -56,11 +57,12 @@ func New(cfg *config.Config) (*Bot, error) {
 
 	// Infrastructure
 	st := store.NewInMemoryStore()
-	speakerSvc := speaker.NewService(st)
-	managerSvc := manager.NewService(st, speakerSvc, cfg.SpeakerTokens, client)
+	poolSvc := pool.NewService(st)
+	speakerSvc := speaker.NewService(st, poolSvc)
+	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
-	speakerSvc.ConnectPool(ctx, cfg.SpeakerTokens)
+	poolSvc.ConnectPool(ctx, cfg.SpeakerTokens)
 	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
 
 	// Wire command handlers.

@@ -119,17 +119,11 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	}
 
 	buildButton := func(sp *domain.Speaker) discord.InteractiveComponent {
-		membership, ok := sp.Guilds[guildID]
-		if !ok {
-			clientID, _ := h.manager.NextSpeakerClientID(guildID)
-			installURL := installUrl(clientID, guildID)
-			return discord.NewLinkButton("🔗 Invite to Server", installURL)
-		}
+		membership, _ := sp.Guilds[guildID]
 		button := discord.NewSecondaryButton(
-			fmt.Sprintf("%s", statusEmoji(membership.Enabled)),
+			fmt.Sprintf("%s %s", sp.Username, statusEmoji(membership.Enabled)),
 			fmt.Sprintf("/speakers/toggle/%s", sp.ID),
 		)
-
 		return button
 	}
 
@@ -292,12 +286,12 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	clientID, ok := h.manager.NextSpeakerClientID(guildID)
+	botUserID, ok := h.manager.NextSpeakerID(guildID)
 	if !ok {
 		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
 	}
 
-	installURL := installUrl(clientID, guildID)
+	installURL := installUrl(botUserID, guildID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: "**Add Speaker Bot**\n" +

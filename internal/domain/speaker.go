@@ -2,6 +2,8 @@ package domain
 
 import (
 	"context"
+	"encoding/base64"
+	"strings"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/snowflake/v2"
@@ -9,8 +11,7 @@ import (
 
 // GuildMembership holds the per-guild state for a speaker bot.
 type GuildMembership struct {
-	AllowedChannels []snowflake.ID // voice channels this speaker is permitted to join in this guild
-	Enabled         bool
+	Enabled bool
 }
 
 // Speaker represents a speaker bot instance that can be registered in one or more guilds.
@@ -25,25 +26,6 @@ type Speaker struct {
 	Cancel context.CancelFunc
 }
 
-// HasChannelAccess reports whether the speaker is allowed to join the given channel in the guild.
-// If the guild's AllowedChannels is empty, access is unrestricted (all voice channels allowed).
-// Returns false if the speaker is not registered in the guild.
-func (s *Speaker) HasChannelAccess(guildID, channelID snowflake.ID) bool {
-	m, ok := s.Guilds[guildID]
-	if !ok {
-		return false
-	}
-	if len(m.AllowedChannels) == 0 {
-		return true // no restriction — all channels are allowed
-	}
-	for _, id := range m.AllowedChannels {
-		if id == channelID {
-			return true
-		}
-	}
-	return false
-}
-
 // VoiceSession represents an active voice raid session inside a guild.
 type VoiceSession struct {
 	GuildID  snowflake.ID
@@ -55,4 +37,24 @@ type VoiceSession struct {
 type RoleBinding struct {
 	GuildID snowflake.ID
 	RoleID  snowflake.ID
+}
+
+// BotUserID extracts the Discord ApplicationID (= bot user ID) from a
+// raw bot token.  Discord tokens are formatted as
+// "<base64(userID)>.<timestamp>.<hmac>", where the first segment is the
+// bot's user ID encoded with standard base64 (no padding).
+func BotUserID(botToken string) (snowflake.ID, bool) {
+	idx := strings.IndexByte(botToken, '.')
+	if idx <= 0 {
+		return 0, false
+	}
+	data, err := base64.RawStdEncoding.DecodeString(botToken[:idx])
+	if err != nil {
+		return 0, false
+	}
+	id, err := snowflake.Parse(string(data))
+	if err != nil {
+		return 0, false
+	}
+	return id, true
 }

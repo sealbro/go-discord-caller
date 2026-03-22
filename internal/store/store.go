@@ -45,11 +45,11 @@ type Store interface {
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
 	mu         sync.RWMutex
-	speakers   map[snowflake.ID]*domain.Speaker
-	tokenIndex map[string]snowflake.ID       // botToken -> speakerID
-	roles      map[snowflake.ID]snowflake.ID // guildID -> roleID
-	channels   map[channelKey]snowflake.ID   // (userID, guildID) -> channelID
-	sessions   map[snowflake.ID]*domain.VoiceSession
+	speakers   map[snowflake.ID]*domain.Speaker      // speakerID -> speaker
+	tokenIndex map[string]snowflake.ID               // botToken -> speakerID
+	roles      map[snowflake.ID]snowflake.ID         // guildID -> roleID
+	channels   map[channelKey]snowflake.ID           // (userID, guildID) -> channelID
+	sessions   map[snowflake.ID]*domain.VoiceSession // guildID -> session
 }
 
 // NewInMemoryStore creates a new empty InMemoryStore.

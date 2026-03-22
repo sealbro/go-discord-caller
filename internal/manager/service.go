@@ -4,82 +4,29 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 
 	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
-
-// Status holds the current state of speakers and bindings in a guild.
-type Status struct {
-	GuildID        snowflake.ID
-	Speakers       []*domain.Speaker
-	BoundChannels  map[snowflake.ID]snowflake.ID // userID -> channelID
-	RoleID         *snowflake.ID
-	OwnerChannelID *snowflake.ID
-	Session        *domain.VoiceSession
-}
-
-// String returns a human-readable summary of the status.
-func (s *Status) String() string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("**Speakers (%d):**\n", len(s.Speakers)))
-	for _, sp := range s.Speakers {
-		membership, ok := sp.Guilds[s.GuildID]
-		if !ok {
-			continue
-		}
-		enabled := "✅"
-		if !membership.Enabled {
-			enabled = "❌"
-		}
-		bound := "unbound"
-		if chID, ok := s.BoundChannels[sp.ID]; ok {
-			bound = fmt.Sprintf("<#%s>", chID)
-		}
-		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
-	}
-
-	if s.RoleID != nil {
-		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.RoleID))
-	} else {
-		sb.WriteString("\n**Capture Role:** not set\n")
-	}
-
-	if s.OwnerChannelID != nil {
-		sb.WriteString(fmt.Sprintf("\n**Owner Bot Channel:** <#%s>\n", s.OwnerChannelID))
-	} else {
-		sb.WriteString("\n**Owner Bot Channel:** not set\n")
-	}
-
-	if s.Session != nil && s.Session.Active {
-		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
-	} else {
-		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")
-	}
-
-	return sb.String()
-}
 
 // Service orchestrates speaker bots and voice raid sessions.
 type Service struct {
 	store       store.Store
 	speaker     *speaker.Service
-	speakerPool []string // ordered list of bot tokens available for registration
 	ownerClient *bot.Client
+	poolSvc     *pool.Service
 }
 
 // NewService creates a new manager Service.
 // pool is the ordered list of speaker bot tokens loaded from environment variables.
-func NewService(st store.Store, spk *speaker.Service, pool []string, client *bot.Client) *Service {
-	return &Service{store: st, speaker: spk, speakerPool: pool, ownerClient: client}
+func NewService(st store.Store, spk *speaker.Service, poolSvc *pool.Service, client *bot.Client) *Service {
+	return &Service{store: st, speaker: spk, poolSvc: poolSvc, ownerClient: client}
 }
 
 // JoinChannel makes the owner bot join a voice channel.
@@ -125,24 +72,26 @@ func (m *Service) SeedExistingSpeakers(ctx context.Context, guildIDs []snowflake
 			usedTokens[sp.BotToken] = struct{}{}
 		}
 
-		for _, token := range m.speakerPool {
+		for _, token := range m.poolSvc.GetTokens() {
 			if _, ok := usedTokens[token]; ok {
 				continue // already tracked for this guild
 			}
 
-			clientID, ok := m.speaker.NextPoolClientID(token)
+			botUserID, ok := domain.BotUserID(token)
 			if !ok {
-				continue // cannot determine ApplicationID for this token
-			}
-
-			// Only seed when the bot is already a member of the guild.
-			if !m.isGuildMember(guildID, clientID) {
+				slog.Warn("seed: invalid bot token format, skipping",
+					slog.String("guildID", guildID.String()),
+					slog.String("token", token),
+				)
 				continue
 			}
 
-			user, _ := m.speaker.PoolClientUser(token)
+			// Only seed when the bot is already a member of the guild.
+			if !m.isGuildMember(guildID, botUserID) {
+				continue
+			}
 
-			sp, err := m.AddSpeaker(ctx, guildID, token, user, nil)
+			sp, err := m.AddSpeaker(guildID, token)
 			if err != nil {
 				slog.Warn("seed: failed to register existing speaker bot",
 					slog.String("guildID", guildID.String()),
@@ -161,80 +110,47 @@ func (m *Service) SeedExistingSpeakers(ctx context.Context, guildIDs []snowflake
 // HasAvailableToken reports whether the pool has at least one speaker bot
 // that has not yet been added to the given guild.
 func (m *Service) HasAvailableToken(guildID snowflake.ID) bool {
-	_, ok := m.NextSpeakerClientID(guildID)
+	_, ok := m.NextSpeakerID(guildID)
 	return ok
 }
 
-// nextAvailableToken returns the first pool token whose bot has not yet been
-// registered as a speaker in the store for this guild.
-// Used by AddNextSpeaker which only needs the store-based check.
-func (m *Service) nextAvailableToken(guildID snowflake.ID) (string, bool) {
-	speakers := m.store.ListSpeakers(guildID)
-	used := make(map[string]struct{}, len(speakers))
-	for _, sp := range speakers {
-		used[sp.BotToken] = struct{}{}
-	}
-	for _, token := range m.speakerPool {
-		if _, ok := used[token]; !ok {
-			return token, true
-		}
-	}
-	return "", false
-}
-
-// NextSpeakerClientID returns the Discord ApplicationID of the next pool
+// NextSpeakerID returns the Discord ApplicationID of the next pool
 // speaker whose bot has NOT yet joined the guild.
 // It iterates the ordered pool and skips every token that is either already
 // registered in the store OR whose bot is already a guild member on Discord's
 // side (e.g. invited in a previous session whose state was lost).
-func (m *Service) NextSpeakerClientID(guildID snowflake.ID) (snowflake.ID, bool) {
+func (m *Service) NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool) {
 	speakers := m.store.ListSpeakers(guildID)
 	used := make(map[string]struct{}, len(speakers))
 	for _, sp := range speakers {
 		used[sp.BotToken] = struct{}{}
 	}
 
-	for _, token := range m.speakerPool {
+	for _, token := range m.poolSvc.GetTokens() {
 		if _, ok := used[token]; ok {
 			continue // already registered in our store
 		}
-		clientID, ok := m.speaker.NextPoolClientID(token)
+		botUserID, ok := domain.BotUserID(token)
 		if !ok {
-			continue // cannot determine ApplicationID for this token
-		}
-		// Skip if the bot is already a member of the guild on Discord's side.
-		if m.isGuildMember(guildID, clientID) {
+			slog.Warn("invalid bot token format, skipping")
 			continue
 		}
-		return clientID, true
+		// Skip if the bot is already a member of the guild on Discord's side.
+		if m.isGuildMember(guildID, botUserID) {
+			continue
+		}
+		return botUserID, true
 	}
 	return 0, false
-}
-
-// AddNextSpeaker picks the next pool token not yet registered in the store and
-// registers it as a speaker in the guild.  The display name is resolved
-// automatically from the pre-connected pool gateway's self-user.
-func (m *Service) AddNextSpeaker(ctx context.Context, guildID snowflake.ID) (*domain.Speaker, error) {
-	token, ok := m.nextAvailableToken(guildID)
-	if !ok {
-		return nil, fmt.Errorf("no available speaker tokens left in the pool")
-	}
-
-	user, ok := m.speaker.PoolClientUser(token)
-	if !ok {
-		slog.Warn("failed to get user info for speaker bot")
-	}
-	return m.AddSpeaker(ctx, guildID, token, user, nil)
 }
 
 // AddSpeaker registers a speaker bot for the given guild.
 // If the bot token is already in the store (registered for another guild), the new guild is
 // added to the existing speaker's Guilds map and the existing gateway connection is reused.
 // Otherwise a new Speaker record is created and a gateway connection is opened.
-func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken string, user discord.User, allowedChannels []snowflake.ID) (*domain.Speaker, error) {
+func (m *Service) AddSpeaker(guildID snowflake.ID, botToken string) (*domain.Speaker, error) {
 	membership := &domain.GuildMembership{
-		AllowedChannels: allowedChannels,
-		Enabled:         true,
+		Enabled: true,
 	}
 
 	// Reuse an existing speaker record for this bot token.
@@ -251,6 +167,11 @@ func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken
 		return existing, nil
 	}
 
+	user, ok := m.speaker.GetUserByToken(botToken)
+	if !ok {
+		return nil, fmt.Errorf("cannot resolve user for token")
+	}
+
 	// No existing record — create one and open a new gateway connection.
 	sp := &domain.Speaker{
 		ID:       user.ID,
@@ -261,7 +182,7 @@ func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken
 
 	m.store.AddSpeaker(sp)
 
-	if err := m.speaker.Connect(ctx, sp); err != nil {
+	if err := m.speaker.AssignClient(sp); err != nil {
 		m.store.RemoveSpeaker(sp.ID)
 		return nil, fmt.Errorf("connect speaker: %w", err)
 	}
@@ -293,7 +214,7 @@ func (m *Service) ToggleSpeaker(ctx context.Context, speakerID, guildID snowflak
 	if !enabled {
 		m.speaker.Disconnect(ctx, speakerID)
 	} else {
-		if err := m.speaker.Connect(ctx, sp); err != nil {
+		if err := m.speaker.AssignClient(sp); err != nil {
 			return fmt.Errorf("reconnect speaker: %w", err)
 		}
 	}
@@ -302,12 +223,9 @@ func (m *Service) ToggleSpeaker(ctx context.Context, speakerID, guildID snowflak
 
 // BindChannel binds a voice channel to a speaker in a specific guild (must be in the speaker's allowed list).
 func (m *Service) BindChannel(speakerID, guildID, channelID snowflake.ID) error {
-	sp, ok := m.store.GetSpeaker(speakerID)
+	_, ok := m.store.GetSpeaker(speakerID)
 	if !ok {
 		return fmt.Errorf("speaker %s not found", speakerID)
-	}
-	if !sp.HasChannelAccess(guildID, channelID) {
-		return fmt.Errorf("channel <#%s> is not in the allowed list for speaker `%s`", channelID, sp.Username)
 	}
 	m.store.BindChannel(guildID, speakerID, channelID)
 	return nil
@@ -494,7 +412,7 @@ func (m *Service) Shutdown(ctx context.Context) {
 	}
 
 	// Shut down all speaker gateways (assigned + pool).
-	m.speaker.Shutdown(ctx)
+	m.poolSvc.Shutdown(ctx)
 }
 
 // GetStatus returns the current speaker and session state for a guild.
@@ -527,34 +445,22 @@ func (m *Service) GetStatus(guildID snowflake.ID) *Status {
 // TrySeedMember checks whether a newly-joined guild member is an unregistered
 // pool speaker bot. If it is, the bot is registered via AddSpeaker exactly as
 // SeedExistingSpeakers does on startup. Safe to call concurrently.
-func (m *Service) TrySeedMember(ctx context.Context, guildID, userID snowflake.ID) {
-	registered := m.store.ListSpeakers(guildID)
-	usedTokens := make(map[string]struct{}, len(registered))
-	for _, sp := range registered {
-		usedTokens[sp.BotToken] = struct{}{}
-	}
-
-	for _, token := range m.speakerPool {
-		if _, ok := usedTokens[token]; ok {
-			continue // already tracked for this guild
-		}
-
-		clientID, ok := m.speaker.NextPoolClientID(token)
+func (m *Service) TrySeedMember(guildID, newUserID snowflake.ID) {
+	for _, token := range m.poolSvc.GetTokens() {
+		botUserID, ok := domain.BotUserID(token)
 		if !ok {
-			continue
+			continue // invalid token format
 		}
 
-		if clientID != userID {
+		if botUserID != newUserID {
 			continue // not the bot that just joined
 		}
 
-		user, _ := m.speaker.PoolClientUser(token)
-
-		sp, err := m.AddSpeaker(ctx, guildID, token, user, nil)
+		sp, err := m.AddSpeaker(guildID, token)
 		if err != nil {
 			slog.Warn("member-join: failed to register speaker bot",
 				slog.String("guildID", guildID.String()),
-				slog.String("userID", userID.String()),
+				slog.String("userID", botUserID.String()),
 				slog.Any("err", err),
 			)
 			return

@@ -40,7 +40,7 @@ func onReady(m *manager.Service) func(*events.Ready) {
 // registered, mirroring the startup seeding logic in SeedExistingSpeakers.
 func onGuildMemberAdd(m *manager.Service) func(*events.GuildMemberJoin) {
 	return func(e *events.GuildMemberJoin) {
-		go m.TrySeedMember(context.Background(), e.GuildID, e.Member.User.ID)
+		go m.TrySeedMember(e.GuildID, e.Member.User.ID)
 	}
 }
 

@@ -246,20 +246,20 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 	s.cancels[speakerID] = cancel
 	s.mu.Unlock()
 
-	var provider *opus.VoiceProvider
-	go func() {
-		<-relayCtx.Done()
-		if provider != nil {
-			provider.Close()
-		}
-	}()
-
 	conn := client.VoiceManager.GetConn(guildID)
 	if conn == nil {
 		return fmt.Errorf("speaker %s is not connected to a voice channel in guild %s", speakerID, guildID)
 	}
-	provider = opus.NewVoiceProvider(chOut)
+	provider := opus.NewVoiceProvider(chOut)
 	conn.SetOpusFrameProvider(provider)
+	receiver := opus.NewEmptyVoiceReceiver()
+	conn.SetOpusFrameReceiver(receiver)
+
+	go func() {
+		<-relayCtx.Done()
+		provider.Close()
+		receiver.Close()
+	}()
 
 	if err := conn.SetSpeaking(relayCtx, voice.SpeakingFlagMicrophone); err != nil {
 		return fmt.Errorf("set speaking flag: %w", err)

@@ -59,3 +59,20 @@ func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 func (v *VoiceReceiver) Close() {
 	v.closed = true
 }
+
+// EmptyVoiceReceiver is a no-op OpusFrameReceiver that silently discards all incoming frames.
+type EmptyVoiceReceiver struct {
+	voice.OpusFrameReceiver
+}
+
+func NewEmptyVoiceReceiver() *EmptyVoiceReceiver {
+	return &EmptyVoiceReceiver{}
+}
+
+func (v *EmptyVoiceReceiver) ReceiveOpusFrame(_ snowflake.ID, _ *voice.Packet) error {
+	return nil
+}
+
+func (v *EmptyVoiceReceiver) CleanupUser(_ snowflake.ID) {}
+
+func (v *EmptyVoiceReceiver) Close() {}

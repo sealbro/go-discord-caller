@@ -8,6 +8,7 @@ import (
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -429,8 +430,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 	chIn := make(chan []byte, 10)
 	receiver := opus.NewVoiceReceiver(chIn, ownerUser.ID)
-	defer receiver.Close()
 	conn.SetOpusFrameReceiver(receiver)
+	provider := opus.NewEmptyVoiceProvider()
+	conn.SetOpusFrameProvider(provider)
 
 	var outs []chan []byte
 	newOut := func() chan []byte {
@@ -465,6 +467,10 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		}
 	}
 
+	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+		return fmt.Errorf("set speaking flag: %w", err)
+	}
+
 	m.store.SetSession(session)
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
@@ -473,6 +479,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 	go func() {
 		defer func() {
+			provider.Close()
 			receiver.Close()
 			for _, out := range outs {
 				close(out)

@@ -33,3 +33,30 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 func (v *VoiceProvider) Close() {
 	v.closed = true
 }
+
+// EmptyVoiceProvider is a no-op OpusFrameProvider that never sends audio.
+// ProvideOpusFrame blocks until Close is called, at which point it returns an error
+// so the audio sender stops cleanly.
+type EmptyVoiceProvider struct {
+	voice.OpusFrameProvider
+	done chan struct{}
+}
+
+func NewEmptyVoiceProvider() *EmptyVoiceProvider {
+	return &EmptyVoiceProvider{
+		done: make(chan struct{}),
+	}
+}
+
+func (v *EmptyVoiceProvider) ProvideOpusFrame() ([]byte, error) {
+	<-v.done
+	return nil, fmt.Errorf("empty voice provider closed")
+}
+
+func (v *EmptyVoiceProvider) Close() {
+	select {
+	case <-v.done:
+	default:
+		close(v.done)
+	}
+}

@@ -22,6 +22,7 @@ type Store interface {
 	GetSpeakerByToken(token string) (*domain.Speaker, bool)
 	UpdateSpeaker(s *domain.Speaker) error
 	ListSpeakers(guildID snowflake.ID) []*domain.Speaker
+	ListAllSpeakers() []*domain.Speaker
 	RemoveSpeaker(id snowflake.ID)
 
 	// Channel binding — keyed by (userID, guildID) for both speaker bots and the owner bot.
@@ -181,6 +182,16 @@ func (s *InMemoryStore) ListSessions() []*domain.VoiceSession {
 	result := make([]*domain.VoiceSession, 0, len(s.sessions))
 	for _, sess := range s.sessions {
 		result = append(result, sess)
+	}
+	return result
+}
+
+func (s *InMemoryStore) ListAllSpeakers() []*domain.Speaker {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*domain.Speaker
+	for _, sp := range s.speakers {
+		result = append(result, sp)
 	}
 	return result
 }

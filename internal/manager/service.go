@@ -60,7 +60,7 @@ func (s *Status) String() string {
 	}
 
 	if s.Session != nil && s.Session.Active {
-		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.SpeakerIDs)))
+		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
 	} else {
 		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")
 	}
@@ -403,7 +403,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 			)
 			continue
 		}
-		session.SpeakerIDs = append(session.SpeakerIDs, sp.ID)
+		session.Speakers = append(session.Speakers, sp)
 
 		chOut := newOut()
 		err := m.speaker.Consume(ctx, sp.ID, guildID, chOut)
@@ -420,7 +420,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 	m.store.SetSession(session)
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
-		slog.Int("activeSpeakers", len(session.SpeakerIDs)),
+		slog.Int("activeSpeakers", len(session.Speakers)),
 	)
 
 	go func() {
@@ -461,8 +461,8 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		return fmt.Errorf("no active voice raid in this server")
 	}
 
-	for _, speakerID := range session.SpeakerIDs {
-		m.speaker.LeaveChannel(ctx, speakerID, guildID)
+	for _, sp := range session.Speakers {
+		m.speaker.LeaveChannel(ctx, sp.ID, guildID)
 	}
 
 	m.LeaveChannel(ctx, guildID)

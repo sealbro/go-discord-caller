@@ -21,11 +21,10 @@ import (
 )
 
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
+// Client and Cancel are stored directly on each domain.Speaker.
 type Service struct {
 	mu          sync.RWMutex
-	poolClients map[string]*bot.Client       // token -> pre-connected gateway (available pool)
-	clients     map[snowflake.ID]*bot.Client // speakerID -> assigned gateway
-	cancels     map[snowflake.ID]context.CancelFunc
+	poolClients map[string]*bot.Client // token -> pre-connected gateway (available pool)
 	store       store.Store
 }
 
@@ -33,8 +32,6 @@ type Service struct {
 func NewService(st store.Store) *Service {
 	return &Service{
 		poolClients: make(map[string]*bot.Client),
-		clients:     make(map[snowflake.ID]*bot.Client),
-		cancels:     make(map[snowflake.ID]context.CancelFunc),
 		store:       st,
 	}
 }
@@ -89,23 +86,22 @@ func (s *Service) ClosePool(ctx context.Context) {
 }
 
 // Shutdown cancels every active audio relay, closes all assigned speaker
-// gateways, and closes any remaining pool gateways. Call this once during
-// graceful shutdown before closing the owner bot client.
+// gateways, and closes any remaining pool gateways.
 func (s *Service) Shutdown(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Cancel all relay goroutines first so provider/receiver are closed cleanly.
-	for speakerID, cancel := range s.cancels {
-		cancel()
-		delete(s.cancels, speakerID)
-	}
-
-	// Close all assigned speaker gateways.
-	for speakerID, client := range s.clients {
-		client.Close(ctx)
-		delete(s.clients, speakerID)
-		slog.Info("speaker gateway closed", slog.String("speakerID", speakerID.String()))
+	// Cancel all relay goroutines and close assigned gateways via the store.
+	for _, sp := range s.store.ListAllSpeakers() {
+		if sp.Cancel != nil {
+			sp.Cancel()
+			sp.Cancel = nil
+		}
+		if sp.Client != nil {
+			sp.Client.Close(ctx)
+			sp.Client = nil
+			slog.Info("speaker gateway closed", slog.String("speakerID", sp.ID.String()))
+		}
 	}
 
 	// Close any pool gateways that were never assigned.
@@ -173,20 +169,19 @@ func clientIDFromToken(token string) (snowflake.ID, bool) {
 	return id, true
 }
 
-// Connect assigns an already-open pool gateway to the speaker, or opens a new one if
-// the token was not pre-connected (e.g. added manually outside the env pool).
+// Connect assigns an already-open pool gateway to the speaker, or opens a new one.
+// The client is stored directly on sp.Client.
 func (s *Service) Connect(ctx context.Context, sp *domain.Speaker) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if _, ok := s.clients[sp.ID]; ok {
+	if sp.Client != nil {
 		return nil // already assigned
 	}
 
 	var client *bot.Client
 
 	if poolClient, ok := s.poolClients[sp.BotToken]; ok {
-		// Reuse the pre-connected gateway — no extra network round-trip needed.
 		client = poolClient
 		delete(s.poolClients, sp.BotToken)
 		slog.Info("speaker assigned from pool",
@@ -194,7 +189,6 @@ func (s *Service) Connect(ctx context.Context, sp *domain.Speaker) error {
 			slog.String("username", sp.Username),
 		)
 	} else {
-		// Token was not in the pool — open a new gateway on demand.
 		var err error
 		client, err = disgo.New(sp.BotToken,
 			bot.WithGatewayConfigOpts(
@@ -216,38 +210,43 @@ func (s *Service) Connect(ctx context.Context, sp *domain.Speaker) error {
 		)
 	}
 
-	s.clients[sp.ID] = client
+	sp.Client = client
 	return nil
 }
 
-// Disconnect closes the gateway connection for the given speaker.
+// Disconnect cancels any active relay and closes the gateway for the given speaker.
 func (s *Service) Disconnect(ctx context.Context, speakerID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if cancel, ok := s.cancels[speakerID]; ok {
-		cancel()
-		delete(s.cancels, speakerID)
+	sp, ok := s.store.GetSpeaker(speakerID)
+	if !ok {
+		return
 	}
 
-	if client, ok := s.clients[speakerID]; ok {
-		client.Close(ctx)
-		delete(s.clients, speakerID)
+	if sp.Cancel != nil {
+		sp.Cancel()
+		sp.Cancel = nil
+	}
+
+	if sp.Client != nil {
+		sp.Client.Close(ctx)
+		sp.Client = nil
 		slog.Info("speaker disconnected", slog.String("speakerID", speakerID.String()))
 	}
 }
 
-// JoinChannel makes the speaker bot join the given voice channel and starts audio relay.
+// JoinChannel makes the speaker bot join the given voice channel.
 func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID snowflake.ID) error {
 	s.mu.RLock()
-	client, ok := s.clients[speakerID]
+	sp, ok := s.store.GetSpeaker(speakerID)
 	s.mu.RUnlock()
 
-	if !ok {
+	if !ok || sp.Client == nil {
 		return fmt.Errorf("speaker %s is not connected", speakerID)
 	}
 
-	conn := client.VoiceManager.CreateConn(guildID)
+	conn := sp.Client.VoiceManager.CreateConn(guildID)
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
 		return fmt.Errorf("speaker %s join channel %s: %w", speakerID, channelID, err)
 	}
@@ -259,19 +258,18 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 	return nil
 }
 
+// Consume starts the audio relay for the speaker; the cancel func is stored on sp.Cancel.
 func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error {
-	s.mu.RLock()
-	client, ok := s.clients[speakerID]
-	s.mu.RUnlock()
-
-	if !ok {
+	s.mu.Lock()
+	sp, ok := s.store.GetSpeaker(speakerID)
+	if !ok || sp.Client == nil {
+		s.mu.Unlock()
 		return fmt.Errorf("speaker %s is not connected", speakerID)
 	}
 
-	// Start the audio capture goroutine for this speaker.
 	relayCtx, cancel := context.WithCancel(ctx)
-	s.mu.Lock()
-	s.cancels[speakerID] = cancel
+	sp.Cancel = cancel
+	client := sp.Client
 	s.mu.Unlock()
 
 	conn := client.VoiceManager.GetConn(guildID)
@@ -299,14 +297,20 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 // LeaveChannel makes the speaker bot leave its current voice channel.
 func (s *Service) LeaveChannel(ctx context.Context, speakerID, guildID snowflake.ID) {
 	s.mu.Lock()
-	if cancel, ok := s.cancels[speakerID]; ok {
-		cancel()
-		delete(s.cancels, speakerID)
+	sp, ok := s.store.GetSpeaker(speakerID)
+	if !ok {
+		s.mu.Unlock()
+		return
 	}
-	client, ok := s.clients[speakerID]
+
+	if sp.Cancel != nil {
+		sp.Cancel()
+		sp.Cancel = nil
+	}
+	client := sp.Client
 	s.mu.Unlock()
 
-	if !ok {
+	if client == nil {
 		return
 	}
 

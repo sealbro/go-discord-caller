@@ -1,6 +1,11 @@
 package domain
 
-import "github.com/disgoorg/snowflake/v2"
+import (
+	"context"
+
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/snowflake/v2"
+)
 
 // GuildMembership holds the per-guild state for a speaker bot.
 type GuildMembership struct {
@@ -14,6 +19,10 @@ type Speaker struct {
 	BotToken string
 	Username string
 	Guilds   map[snowflake.ID]*GuildMembership // guildID -> per-guild state
+
+	// Runtime state — not persisted.
+	Client *bot.Client
+	Cancel context.CancelFunc
 }
 
 // HasChannelAccess reports whether the speaker is allowed to join the given channel in the guild.
@@ -37,9 +46,9 @@ func (s *Speaker) HasChannelAccess(guildID, channelID snowflake.ID) bool {
 
 // VoiceSession represents an active voice raid session inside a guild.
 type VoiceSession struct {
-	GuildID    snowflake.ID
-	Active     bool
-	SpeakerIDs []snowflake.ID // speakers currently joined to voice channels
+	GuildID  snowflake.ID
+	Active   bool
+	Speakers []*Speaker // speakers currently joined to voice channels
 }
 
 // RoleBinding links a guild to the Discord role whose members' voice is captured.

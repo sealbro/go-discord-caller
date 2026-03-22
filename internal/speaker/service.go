@@ -288,26 +288,3 @@ func (s *Service) LeaveChannel(ctx context.Context, speakerID, guildID snowflake
 
 	slog.Info("speaker left channel", slog.String("speakerID", speakerID.String()))
 }
-
-// relayPacket writes an Opus packet to all speaker connections except the source.
-func (s *Service) relayPacket(ctx context.Context, guildID, excludeSpeakerID snowflake.ID, opus []byte) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	for id, client := range s.clients {
-		if id == excludeSpeakerID {
-			continue
-		}
-		conn := client.VoiceManager.GetConn(guildID)
-		if conn == nil {
-			continue
-		}
-
-		if _, err := conn.UDP().Write(opus); err != nil {
-			slog.Warn("relay write failed",
-				slog.String("targetSpeakerID", id.String()),
-				slog.Any("err", err),
-			)
-		}
-	}
-}

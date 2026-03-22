@@ -344,19 +344,13 @@ func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteract
 	channels := channelData.Channels()
 	if len(channels) == 0 {
 		h.manager.UnbindOwnerChannel(guildID)
-		return e.CreateMessage(discord.MessageCreate{
-			Content: "✅ Owner bot channel binding removed.",
-			Flags:   discord.MessageFlagEphemeral,
-		})
+		return e.CreateMessage(ephemeral("✅ Owner bot channel binding removed."))
 	}
 
 	channelID := channels[0].ID
 	h.manager.BindOwnerChannel(guildID, channelID)
 
-	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Owner bot will join <#%s> during voice raids.", channelID),
-		Flags:   discord.MessageFlagEphemeral,
-	})
+	return e.CreateMessage(ephemeral(fmt.Sprintf("✅ Owner bot will join <#%s> during voice raids.", channelID)))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

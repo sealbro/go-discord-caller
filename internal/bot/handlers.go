@@ -14,6 +14,7 @@ import (
 func eventListeners(m *manager.Service) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(m)),
+		bot.NewListenerFunc(onGuildMemberAdd(m)),
 		bot.NewListenerFunc(onVoiceJoin()),
 		bot.NewListenerFunc(onVoiceLeave()),
 	}
@@ -31,6 +32,15 @@ func onReady(m *manager.Service) func(*events.Ready) {
 		}
 
 		go m.SeedExistingSpeakers(context.Background(), guildIDs)
+	}
+}
+
+// onGuildMemberAdd is called whenever a new member joins a guild.
+// If the member is an unregistered pool speaker bot it is automatically
+// registered, mirroring the startup seeding logic in SeedExistingSpeakers.
+func onGuildMemberAdd(m *manager.Service) func(*events.GuildMemberJoin) {
+	return func(e *events.GuildMemberJoin) {
+		go m.TrySeedMember(context.Background(), e.GuildID, e.Member.User.ID)
 	}
 }
 

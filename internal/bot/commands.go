@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
@@ -90,8 +91,8 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 
 	var components []discord.LayoutComponent
 
-	// Owner bot channel selector
-	ownerPlaceholder := "Set owner bot voice channel…"
+	// Row 1 — owner bot channel selector
+	ownerPlaceholder := "Bind caller bot to a voice channel…"
 	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
 		ownerPlaceholder = fmt.Sprintf("Owner bot channel: <#%s>", chID)
 	}
@@ -102,36 +103,51 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		),
 	)
 
-	// Only show the "Add Speaker" button when the pool still has an unused token.
-	if h.manager.HasAvailableToken(guildID) {
-		components = append(components, discord.NewActionRow(
-			discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"),
-		))
+	// Discord limit: 5 action rows per message.
+	// Layout: row 1 = owner select, row 2 = all buttons, rows 3-5 = channel selects → max 3 speakers shown.
+	const maxSpeakersShown = 3
+
+	shown := speakers
+	if len(shown) > maxSpeakersShown {
+		shown = shown[:maxSpeakersShown]
 	}
 
-	for _, sp := range speakers {
+	// Row 2 — "Add Speaker" + one toggle button per shown speaker (all in one row, ≤5 buttons).
+	var buttons []discord.InteractiveComponent
+	if h.manager.HasAvailableToken(guildID) {
+		buttons = append(buttons, discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"))
+	}
+
+	buildButton := func(sp *domain.Speaker) discord.InteractiveComponent {
 		membership, ok := sp.Guilds[guildID]
 		if !ok {
-			continue
+			clientID, _ := h.manager.NextSpeakerClientID(guildID)
+			installURL := installUrl(clientID, guildID)
+			return discord.NewLinkButton("🔗 Invite to Server", installURL)
 		}
+		button := discord.NewSecondaryButton(
+			fmt.Sprintf("%s", statusEmoji(membership.Enabled)),
+			fmt.Sprintf("/speakers/toggle/%s", sp.ID),
+		)
 
-		label := "Enable"
-		if membership.Enabled {
-			label = "Disable"
-		}
+		return button
+	}
 
-		placeholder := "Bind to a voice channel…"
+	for _, sp := range shown {
+		buttons = append(buttons, buildButton(sp))
+	}
+
+	if len(buttons) > 0 {
+		components = append(components, discord.NewActionRow(buttons...))
+	}
+
+	// Rows 3-5 — one channel select per shown speaker.
+	for _, sp := range shown {
+		placeholder := fmt.Sprintf("Bind %s to a voice channel…", sp.Username)
 		if chID, ok := h.manager.GetBoundChannel(sp.ID, guildID); ok {
-			placeholder = fmt.Sprintf("Bound: <#%s>", chID)
+			placeholder = fmt.Sprintf("<@%s> → <#%s>", sp.ID, chID)
 		}
-
 		components = append(components,
-			discord.NewActionRow(
-				discord.NewSecondaryButton(
-					fmt.Sprintf("%s %s (%s)", statusEmoji(membership.Enabled), sp.Username, label),
-					fmt.Sprintf("/speakers/toggle/%s", sp.ID),
-				),
-			),
 			discord.NewActionRow(
 				discord.NewChannelSelectMenu(
 					fmt.Sprintf("/speakers/bind-channel/%s", sp.ID),
@@ -146,6 +162,9 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		msg += "_No speakers registered yet. Use **Add Speaker** to register one._"
 	} else {
 		msg += fmt.Sprintf("_%d speaker(s) registered._", len(speakers))
+		if len(speakers) > maxSpeakersShown {
+			msg += fmt.Sprintf(" _(showing first %d)_", maxSpeakersShown)
+		}
 	}
 
 	return e.CreateMessage(discord.MessageCreate{
@@ -264,8 +283,9 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 }
 
 // handleAddSpeakerButton resolves the next pool bot's ApplicationID, builds a
-// Discord OAuth2 invite URL pre-targeted at the current guild, and presents a
-// "Confirm Registration" button to register the bot after it has been invited.
+// Discord OAuth2 invite URL pre-targeted at the current guild, and shows only
+// the invite link. The bot is registered automatically once it joins the server
+// via the GuildMemberJoin event listener.
 func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -279,25 +299,17 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 
 	installURL := installUrl(clientID, guildID)
 
-	sp, err := h.manager.AddNextSpeaker(context.TODO(), guildID)
-	if err != nil {
-		return e.CreateMessage(discord.MessageCreate{
-			Content: "**Add Speaker Bot**\n" +
-				"1. Click **Invite to Server** — the bot will be pre-selected for this server.\n" +
-				"2. Complete the authorisation in the browser.\n" +
-				"3. Run **/setup-speakers** again to confirm registration.",
-			Components: []discord.LayoutComponent{
-				discord.NewActionRow(
-					discord.NewLinkButton("🔗 Invite to Server", installURL),
-				),
-			},
-			Flags: discord.MessageFlagEphemeral,
-		})
-	}
-
 	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Speaker <@%s> (`%s`) added and connected.", sp.ID, sp.Username),
-		Flags:   discord.MessageFlagEphemeral,
+		Content: "**Add Speaker Bot**\n" +
+			"1. Click **Invite to Server** — the bot will be pre-selected for this server.\n" +
+			"2. Complete the authorisation in the browser.\n" +
+			"3. The bot will be registered automatically once it joins the server.",
+		Components: []discord.LayoutComponent{
+			discord.NewActionRow(
+				discord.NewLinkButton("🔗 Invite to Server", installURL),
+			),
+		},
+		Flags: discord.MessageFlagEphemeral,
 	})
 }
 

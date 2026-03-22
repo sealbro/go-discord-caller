@@ -40,6 +40,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(
 				gateway.IntentGuilds,
+				gateway.IntentGuildMembers,
 				gateway.IntentGuildVoiceStates,
 				gateway.IntentGuildMessages,
 			),

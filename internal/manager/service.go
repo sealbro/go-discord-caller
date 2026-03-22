@@ -524,6 +524,49 @@ func (m *Service) GetStatus(guildID snowflake.ID) *Status {
 	return s
 }
 
+// TrySeedMember checks whether a newly-joined guild member is an unregistered
+// pool speaker bot. If it is, the bot is registered via AddSpeaker exactly as
+// SeedExistingSpeakers does on startup. Safe to call concurrently.
+func (m *Service) TrySeedMember(ctx context.Context, guildID, userID snowflake.ID) {
+	registered := m.store.ListSpeakers(guildID)
+	usedTokens := make(map[string]struct{}, len(registered))
+	for _, sp := range registered {
+		usedTokens[sp.BotToken] = struct{}{}
+	}
+
+	for _, token := range m.speakerPool {
+		if _, ok := usedTokens[token]; ok {
+			continue // already tracked for this guild
+		}
+
+		clientID, ok := m.speaker.NextPoolClientID(token)
+		if !ok {
+			continue
+		}
+
+		if clientID != userID {
+			continue // not the bot that just joined
+		}
+
+		user, _ := m.speaker.PoolClientUser(token)
+
+		sp, err := m.AddSpeaker(ctx, guildID, token, user, nil)
+		if err != nil {
+			slog.Warn("member-join: failed to register speaker bot",
+				slog.String("guildID", guildID.String()),
+				slog.String("userID", userID.String()),
+				slog.Any("err", err),
+			)
+			return
+		}
+		slog.Info("member-join: registered speaker bot",
+			slog.String("username", sp.Username),
+			slog.String("guildID", guildID.String()),
+		)
+		return
+	}
+}
+
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
 	_, err := m.ownerClient.Rest.GetMember(guildID, userID)
 	return err == nil

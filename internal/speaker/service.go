@@ -49,9 +49,9 @@ func (s *Service) GetUserByToken(token string) (discord.User, bool) {
 
 // AssignClient assigns an already-open pool gateway to the speaker, or opens a new one.
 // The client is stored directly on sp.Client.
-func (s *Service) AssignClient(sp *domain.Speaker) error {
+func (s *Service) AssignClient(sp *domain.Speaker) {
 	if sp.Client != nil {
-		return nil // already assigned
+		return // already assigned
 	}
 
 	if poolClient, ok := s.poolSvc.GetClientByToken(sp.BotToken); ok {
@@ -60,29 +60,6 @@ func (s *Service) AssignClient(sp *domain.Speaker) error {
 			slog.String("speakerID", sp.ID.String()),
 			slog.String("username", sp.Username),
 		)
-	}
-	return nil
-}
-
-// Disconnect cancels any active relay and closes the gateway for the given speaker.
-func (s *Service) Disconnect(ctx context.Context, speakerID snowflake.ID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	sp, ok := s.store.GetSpeaker(speakerID)
-	if !ok {
-		return
-	}
-
-	if sp.Cancel != nil {
-		sp.Cancel()
-		sp.Cancel = nil
-	}
-
-	if sp.Client != nil {
-		sp.Client.Close(ctx)
-		sp.Client = nil
-		slog.Info("speaker disconnected", slog.String("speakerID", speakerID.String()))
 	}
 }
 
@@ -145,7 +122,7 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 }
 
 // LeaveChannel makes the speaker bot leave its current voice channel.
-func (s *Service) LeaveChannel(ctx context.Context, speakerID, guildID snowflake.ID) {
+func (s *Service) LeaveChannel(ctx context.Context, guildID, speakerID snowflake.ID) {
 	s.mu.Lock()
 	sp, ok := s.store.GetSpeaker(speakerID)
 	if !ok {
@@ -169,4 +146,9 @@ func (s *Service) LeaveChannel(ctx context.Context, speakerID, guildID snowflake
 	}
 
 	slog.Info("speaker left channel", slog.String("speakerID", speakerID.String()))
+}
+
+func (s *Service) RemoveMember(guildID, userID snowflake.ID) {
+	s.LeaveChannel(context.Background(), guildID, userID)
+	s.store.RemoveSpeaker(userID)
 }

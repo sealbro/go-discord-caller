@@ -1,20 +1,21 @@
 package bot
 
 import (
-	"context"
 	"log/slog"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/manager"
+	"github.com/sealbro/go-discord-caller/internal/speaker"
 )
 
 // eventListeners returns all event listeners to register with the client.
-func eventListeners(m *manager.Service) []bot.EventListener {
+func eventListeners(speakerSvc *speaker.Service, managerSvc *manager.Service) []bot.EventListener {
 	return []bot.EventListener{
-		bot.NewListenerFunc(onReady(m)),
-		bot.NewListenerFunc(onGuildMemberAdd(m)),
+		bot.NewListenerFunc(onReady(managerSvc)),
+		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
+		bot.NewListenerFunc(onGuildMemberLeave(speakerSvc)),
 		bot.NewListenerFunc(onVoiceJoin()),
 		bot.NewListenerFunc(onVoiceLeave()),
 	}
@@ -31,7 +32,7 @@ func onReady(m *manager.Service) func(*events.Ready) {
 			guildIDs = append(guildIDs, g.ID)
 		}
 
-		go m.SeedExistingSpeakers(context.Background(), guildIDs)
+		go m.SeedExistingSpeakers(guildIDs)
 	}
 }
 
@@ -41,6 +42,13 @@ func onReady(m *manager.Service) func(*events.Ready) {
 func onGuildMemberAdd(m *manager.Service) func(*events.GuildMemberJoin) {
 	return func(e *events.GuildMemberJoin) {
 		go m.TrySeedMember(e.GuildID, e.Member.User.ID)
+	}
+}
+
+// onGuildMemberLeave is called whenever a member leaves a guild.
+func onGuildMemberLeave(m *speaker.Service) func(leave *events.GuildMemberLeave) {
+	return func(e *events.GuildMemberLeave) {
+		go m.RemoveMember(e.GuildID, e.User.ID)
 	}
 }
 

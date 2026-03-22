@@ -69,7 +69,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	cmdHandlers := NewCommandHandlers(managerSvc)
 	cmdHandlers.Register(r)
 
-	client.AddEventListeners(eventListeners(managerSvc)...)
+	client.AddEventListeners(eventListeners(speakerSvc, managerSvc)...)
 
 	return &Bot{
 		client:  client,

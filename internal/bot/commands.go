@@ -262,7 +262,7 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 		}
 	}
 
-	if err := h.manager.ToggleSpeaker(context.TODO(), speakerID, guildID, !enabled); err != nil {
+	if err := h.manager.ToggleSpeaker(speakerID, guildID, !enabled); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 

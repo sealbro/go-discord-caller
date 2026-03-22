@@ -25,9 +25,9 @@ type Store interface {
 	RemoveSpeaker(id snowflake.ID)
 
 	// Channel binding — keyed by (userID, guildID) for both speaker bots and the owner bot.
-	BindChannel(userID, guildID, channelID snowflake.ID)
-	UnbindChannel(userID, guildID snowflake.ID)
-	GetBoundChannel(userID, guildID snowflake.ID) (snowflake.ID, bool)
+	BindChannel(guildID snowflake.ID, userID snowflake.ID, channelID snowflake.ID)
+	UnbindChannel(guildID, userID snowflake.ID)
+	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
 
 	// Role binding
 	BindRole(guildID, roleID snowflake.ID)
@@ -118,19 +118,19 @@ func (s *InMemoryStore) RemoveSpeaker(id snowflake.ID) {
 	}
 }
 
-func (s *InMemoryStore) BindChannel(userID, guildID, channelID snowflake.ID) {
+func (s *InMemoryStore) BindChannel(guildID snowflake.ID, userID snowflake.ID, channelID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.channels[channelKey{userID, guildID}] = channelID
 }
 
-func (s *InMemoryStore) UnbindChannel(userID, guildID snowflake.ID) {
+func (s *InMemoryStore) UnbindChannel(guildID, userID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.channels, channelKey{userID, guildID})
 }
 
-func (s *InMemoryStore) GetBoundChannel(userID, guildID snowflake.ID) (snowflake.ID, bool) {
+func (s *InMemoryStore) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	ch, ok := s.channels[channelKey{userID, guildID}]

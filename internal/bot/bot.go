@@ -32,15 +32,6 @@ type Bot struct {
 func New(cfg *config.Config) (*Bot, error) {
 	ctx := context.Background()
 
-	// Infrastructure
-	st := store.NewInMemoryStore()
-	speakerSvc := speaker.NewService(st)
-	managerSvc := manager.NewService(st, speakerSvc, cfg.SpeakerTokens)
-
-	// Open one dedicated gateway per speaker token immediately at startup.
-	speakerSvc.ConnectPool(ctx, cfg.SpeakerTokens)
-	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
-
 	// Command router
 	r := handler.New()
 
@@ -62,20 +53,20 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, err
 	}
 
-	managerSvc.SetOwnerClient(client)
+	// Infrastructure
+	st := store.NewInMemoryStore()
+	speakerSvc := speaker.NewService(st)
+	managerSvc := manager.NewService(st, speakerSvc, cfg.SpeakerTokens, client)
+
+	// Open one dedicated gateway per speaker token immediately at startup.
+	speakerSvc.ConnectPool(ctx, cfg.SpeakerTokens)
+	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
 
 	// Wire command handlers.
 	cmdHandlers := NewCommandHandlers(managerSvc)
 	cmdHandlers.Register(r)
 
 	client.AddEventListeners(eventListeners(managerSvc)...)
-
-	// Supply a live Discord membership check so NextSpeakerClientID skips bots
-	// that are already in the guild (e.g. invited in a previous session).
-	managerSvc.SetMemberChecker(func(guildID, userID snowflake.ID) bool {
-		_, err := client.Rest.GetMember(guildID, userID)
-		return err == nil
-	})
 
 	return &Bot{
 		client:  client,

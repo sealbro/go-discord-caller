@@ -73,20 +73,13 @@ type Service struct {
 	store       store.Store
 	speaker     *speaker.Service
 	speakerPool []string // ordered list of bot tokens available for registration
-	isMemberFn  func(guildID, userID snowflake.ID) bool
 	ownerClient *bot.Client
 }
 
 // NewService creates a new manager Service.
 // pool is the ordered list of speaker bot tokens loaded from environment variables.
-func NewService(st store.Store, spk *speaker.Service, pool []string) *Service {
-	return &Service{store: st, speaker: spk, speakerPool: pool}
-}
-
-// SetOwnerClient supplies the owner bot's Discord client used by JoinChannel
-// and LeaveChannel. Call this once after the client has been created.
-func (m *Service) SetOwnerClient(client *bot.Client) {
-	m.ownerClient = client
+func NewService(st store.Store, spk *speaker.Service, pool []string, client *bot.Client) *Service {
+	return &Service{store: st, speaker: spk, speakerPool: pool, ownerClient: client}
 }
 
 // JoinChannel makes the owner bot join a voice channel.
@@ -118,13 +111,6 @@ func (m *Service) LeaveChannel(ctx context.Context, guildID snowflake.ID) {
 	slog.Info("left voice channel", slog.String("guildID", guildID.String()))
 }
 
-// SetMemberChecker supplies a live Discord membership check used by
-// NextSpeakerClientID to skip bots that are already in the guild.
-// Call this once after the owner bot client has been created.
-func (m *Service) SetMemberChecker(fn func(guildID, userID snowflake.ID) bool) {
-	m.isMemberFn = fn
-}
-
 // SeedExistingSpeakers checks every pool token against each supplied guild and
 // registers any speaker bot that is already a member of that guild but is not
 // yet tracked in the store.  Call this once on startup (e.g. from the Ready
@@ -150,7 +136,7 @@ func (m *Service) SeedExistingSpeakers(ctx context.Context, guildIDs []snowflake
 			}
 
 			// Only seed when the bot is already a member of the guild.
-			if m.isMemberFn == nil || !m.isMemberFn(guildID, clientID) {
+			if !m.isGuildMember(guildID, clientID) {
 				continue
 			}
 
@@ -217,7 +203,7 @@ func (m *Service) NextSpeakerClientID(guildID snowflake.ID) (snowflake.ID, bool)
 			continue // cannot determine ApplicationID for this token
 		}
 		// Skip if the bot is already a member of the guild on Discord's side.
-		if m.isMemberFn != nil && m.isMemberFn(guildID, clientID) {
+		if m.isGuildMember(guildID, clientID) {
 			continue
 		}
 		return clientID, true
@@ -287,41 +273,6 @@ func (m *Service) AddSpeaker(ctx context.Context, guildID snowflake.ID, botToken
 	return sp, nil
 }
 
-// RemoveSpeaker removes a speaker from the given guild.
-// The gateway connection and store record are only torn down when the speaker
-// has no remaining guild memberships.
-func (m *Service) RemoveSpeaker(ctx context.Context, speakerID, guildID snowflake.ID) error {
-	sp, ok := m.store.GetSpeaker(speakerID)
-	if !ok {
-		return fmt.Errorf("speaker %s not found", speakerID)
-	}
-
-	if _, ok := sp.Guilds[guildID]; !ok {
-		return fmt.Errorf("speaker %s is not registered in guild %s", speakerID, guildID)
-	}
-
-	delete(sp.Guilds, guildID)
-
-	if len(sp.Guilds) == 0 {
-		// Last guild — disconnect and purge entirely.
-		m.speaker.Disconnect(ctx, speakerID)
-		m.store.RemoveSpeaker(speakerID)
-		slog.Info("speaker removed (no remaining guilds)",
-			slog.String("speakerID", speakerID.String()),
-		)
-	} else {
-		// Still active in other guilds — just persist the updated map.
-		if err := m.store.UpdateSpeaker(sp); err != nil {
-			return err
-		}
-		slog.Info("speaker removed from guild",
-			slog.String("speakerID", speakerID.String()),
-			slog.String("guildID", guildID.String()),
-		)
-	}
-	return nil
-}
-
 // ToggleSpeaker enables or disables a speaker within a specific guild without removing it.
 func (m *Service) ToggleSpeaker(ctx context.Context, speakerID, guildID snowflake.ID, enabled bool) error {
 	sp, ok := m.store.GetSpeaker(speakerID)
@@ -358,36 +309,36 @@ func (m *Service) BindChannel(speakerID, guildID, channelID snowflake.ID) error 
 	if !sp.HasChannelAccess(guildID, channelID) {
 		return fmt.Errorf("channel <#%s> is not in the allowed list for speaker `%s`", channelID, sp.Username)
 	}
-	m.store.BindChannel(speakerID, guildID, channelID)
+	m.store.BindChannel(guildID, speakerID, channelID)
 	return nil
 }
 
 // UnbindChannel removes the channel binding from a speaker in a specific guild.
 func (m *Service) UnbindChannel(speakerID, guildID snowflake.ID) {
-	m.store.UnbindChannel(speakerID, guildID)
+	m.store.UnbindChannel(guildID, speakerID)
 }
 
 // GetBoundChannel returns the bound voice channel for any user (speaker or owner) in a guild.
 func (m *Service) GetBoundChannel(userID, guildID snowflake.ID) (snowflake.ID, bool) {
-	return m.store.GetBoundChannel(userID, guildID)
+	return m.store.GetBoundChannel(guildID, userID)
 }
 
 // UnbindOwnerChannel removes the owner channel binding from a guild.
 func (m *Service) UnbindOwnerChannel(guildID snowflake.ID) {
 	ownerUser, _ := m.ownerClient.Caches.SelfUser()
-	m.store.UnbindChannel(ownerUser.ID, guildID)
+	m.store.UnbindChannel(guildID, ownerUser.ID)
 }
 
 // BindOwnerChannel binds a voice channel to the owner of the guild.
 func (m *Service) BindOwnerChannel(guildID, channelID snowflake.ID) {
 	ownerUser, _ := m.ownerClient.Caches.SelfUser()
-	m.store.BindChannel(ownerUser.ID, guildID, channelID)
+	m.store.BindChannel(guildID, ownerUser.ID, channelID)
 }
 
 // GetOwnerChannel returns the bound voice channel for the owner of the guild.
 func (m *Service) GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool) {
 	ownerUser, _ := m.ownerClient.Caches.SelfUser()
-	return m.store.GetBoundChannel(ownerUser.ID, guildID)
+	return m.store.GetBoundChannel(guildID, ownerUser.ID)
 }
 
 // BindRole sets the Discord role whose members' voice will be captured in the guild.
@@ -397,11 +348,6 @@ func (m *Service) BindRole(guildID, roleID snowflake.ID) {
 		slog.String("guildID", guildID.String()),
 		slog.String("roleID", roleID.String()),
 	)
-}
-
-// UnbindRole removes the role binding from a guild.
-func (m *Service) UnbindRole(guildID snowflake.ID) {
-	m.store.UnbindRole(guildID)
 }
 
 // ListSpeakers returns all speakers registered in the guild.
@@ -417,7 +363,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 	ownerUser, _ := m.ownerClient.Caches.SelfUser()
 
-	if chID, ok := m.store.GetBoundChannel(ownerUser.ID, guildID); ok {
+	if chID, ok := m.store.GetBoundChannel(guildID, ownerUser.ID); ok {
 		if err := m.JoinChannel(ctx, guildID, chID); err != nil {
 			return fmt.Errorf("failed to join owner channel: %w", err)
 		}
@@ -446,7 +392,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 	for _, sp := range speakers {
 		membership, ok := sp.Guilds[guildID]
-		channelID, hasChannel := m.store.GetBoundChannel(sp.ID, guildID)
+		channelID, hasChannel := m.store.GetBoundChannel(guildID, sp.ID)
 		if !ok || !membership.Enabled || !hasChannel {
 			continue
 		}
@@ -556,7 +502,7 @@ func (m *Service) GetStatus(guildID snowflake.ID) *Status {
 	speakers := m.store.ListSpeakers(guildID)
 	boundChannels := make(map[snowflake.ID]snowflake.ID, len(speakers))
 	for _, sp := range speakers {
-		if chID, ok := m.store.GetBoundChannel(sp.ID, guildID); ok {
+		if chID, ok := m.store.GetBoundChannel(guildID, sp.ID); ok {
 			boundChannels[sp.ID] = chID
 		}
 	}
@@ -576,4 +522,9 @@ func (m *Service) GetStatus(guildID snowflake.ID) *Status {
 		s.Session = session
 	}
 	return s
+}
+
+func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
+	_, err := m.ownerClient.Rest.GetMember(guildID, userID)
+	return err == nil
 }

@@ -3,20 +3,19 @@ package domain
 import (
 	"fmt"
 	"strings"
-	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// GuildStatus Status is the view model returned by GetStatus — built from StatusStore + SessionStore.
+// GuildStatus is the per-guild state managed exclusively by manager.Service.
+// All mutations go through the manager; callers receive a value copy from GetStatus.
 type GuildStatus struct {
-	mu            sync.RWMutex
 	GuildID       snowflake.ID
 	OwnerUserID   snowflake.ID                  // owner bot user ID; look up channel via BoundChannels[OwnerUserID]
 	Speakers      map[snowflake.ID]*Speaker     // speakerID -> speaker (Enabled carries per-guild state)
 	BoundChannels map[snowflake.ID]snowflake.ID // userID -> channelID
 	RoleID        *snowflake.ID
-	Session       *VoiceSession
+	Session       *VoiceSession // nil when no active session
 }
 
 func NewGuildStatus(guildID snowflake.ID, ownerUserID snowflake.ID) *GuildStatus {
@@ -25,32 +24,23 @@ func NewGuildStatus(guildID snowflake.ID, ownerUserID snowflake.ID) *GuildStatus
 		OwnerUserID:   ownerUserID,
 		Speakers:      make(map[snowflake.ID]*Speaker, 2),
 		BoundChannels: make(map[snowflake.ID]snowflake.ID, 2),
-		RoleID:        nil,
-		Session:       nil,
 	}
 }
 
-func (s *GuildStatus) HasActiveSession() bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
+// HasActiveSession reports whether there is a running voice raid.
+func (s GuildStatus) HasActiveSession() bool {
 	return s.Session != nil
 }
 
-func (s *GuildStatus) SetSession(session *VoiceSession) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Session = session
-}
-
 // String returns a human-readable summary of the status.
-func (s *GuildStatus) String() string {
+func (s GuildStatus) String() string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("**Speakers (%d):**\n", len(s.Speakers)))
 	for _, sp := range s.Speakers {
-		enabled := "✅"
+		enabled := "🔊"
 		if !sp.Enabled {
-			enabled = "❌"
+			enabled = "🔇"
 		}
 		bound := "unbound"
 		if chID, ok := s.BoundChannels[sp.ID]; ok {
@@ -71,7 +61,7 @@ func (s *GuildStatus) String() string {
 		sb.WriteString("\n**Owner Bot Channel:** not set\n")
 	}
 
-	if s.HasActiveSession() {
+	if s.Session != nil {
 		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
 	} else {
 		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")

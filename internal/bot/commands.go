@@ -16,17 +16,17 @@ import (
 // Commands is the list of slash commands registered with Discord.
 var Commands = []discord.ApplicationCommandCreate{
 	discord.SlashCommandCreate{
-		Name:                     "setup-speakers",
+		Name:                     "setup",
 		Description:              "List and configure all speaker bots in this server",
 		DefaultMemberPermissions: permPtr(discord.PermissionAdministrator),
 	},
 	discord.SlashCommandCreate{
-		Name:                     "start-voice-raid",
+		Name:                     "start",
 		Description:              "Make all enabled speakers join their bound voice channels",
 		DefaultMemberPermissions: permPtr(discord.PermissionManageGuild),
 	},
 	discord.SlashCommandCreate{
-		Name:                     "stop-voice-raid",
+		Name:                     "stop",
 		Description:              "Make all active speakers leave their voice channels",
 		DefaultMemberPermissions: permPtr(discord.PermissionManageGuild),
 	},
@@ -66,9 +66,9 @@ func NewCommandHandlers(m *manager.Service) *CommandHandlers {
 
 // Register attaches all routes to the given router.
 func (h *CommandHandlers) Register(r handler.Router) {
-	r.SlashCommand("/setup-speakers", h.handleSetupSpeakers)
-	r.SlashCommand("/start-voice-raid", h.handleStartVoiceRaid)
-	r.SlashCommand("/stop-voice-raid", h.handleStopVoiceRaid)
+	r.SlashCommand("/setup", h.handleSetupSpeakers)
+	r.SlashCommand("/start", h.handleStartVoiceRaid)
+	r.SlashCommand("/stop", h.handleStopVoiceRaid)
 	r.SlashCommand("/status", h.handleStatus)
 	r.SlashCommand("/bind-role", h.handleBindRole)
 
@@ -184,8 +184,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
 	}
 
+	ctx, cancelFunc := context.WithCancel(context.Background())
 	go func() {
-		if err = h.manager.StartVoiceRaid(context.Background(), guildID); err != nil {
+		if err = h.manager.StartVoiceRaid(ctx, cancelFunc, guildID); err != nil {
+			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))
 		}
 	}()
@@ -382,9 +384,9 @@ func ephemeral(content string) discord.MessageCreate {
 
 func statusEmoji(enabled bool) string {
 	if enabled {
-		return "✅"
+		return "🔊"
 	}
-	return "❌"
+	return "🔇"
 }
 
 func installUrl(clientID snowflake.ID, guildID snowflake.ID) string {

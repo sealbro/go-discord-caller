@@ -12,21 +12,18 @@ import (
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
-	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
 // Service manages the lifecycle of the pool of speaker gateways.
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client // token -> pre-connected gateway (available pool)
-	speakers    store.SpeakerStore
 }
 
 // NewService creates a new speaker Service.
-func NewService(speakers store.SpeakerStore) *Service {
+func NewService() *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
-		speakers:    speakers,
 	}
 }
 

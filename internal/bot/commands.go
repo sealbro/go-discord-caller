@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
@@ -106,7 +107,11 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	// Layout: row 1 = owner select, row 2 = all buttons, rows 3-5 = channel selects → max 3 speakers shown.
 	const maxSpeakersShown = 3
 
-	shown := status.Speakers
+	allSpeakers := make([]*domain.Speaker, 0, len(status.Speakers))
+	for _, sp := range status.Speakers {
+		allSpeakers = append(allSpeakers, sp)
+	}
+	shown := allSpeakers
 	if len(shown) > maxSpeakersShown {
 		shown = shown[:maxSpeakersShown]
 	}
@@ -252,7 +257,11 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 
 	// Resolve current enabled state.
 	status := h.manager.GetStatus(guildID)
-	enabled := status.Enabled[speakerID]
+	sp, ok := status.Speakers[speakerID]
+	if !ok {
+		return e.CreateMessage(ephemeral("❌ Speaker not found in this guild."))
+	}
+	enabled := sp.Enabled
 
 	if err := h.manager.ToggleSpeaker(guildID, speakerID, !enabled); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))

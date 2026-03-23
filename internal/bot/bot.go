@@ -58,10 +58,9 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Infrastructure
 	st := store.NewInMemoryStore()
 	statusSt := store.NewInMemoryStatusStore()
-	speakerSt := store.NewInMemorySpeakerStore()
-	poolSvc := pool.NewService(speakerSt)
-	speakerSvc := speaker.NewService(speakerSt, poolSvc)
-	managerSvc := manager.NewService(st, statusSt, speakerSt, speakerSvc, poolSvc, client)
+	poolSvc := pool.NewService()
+	speakerSvc := speaker.NewService(poolSvc)
+	managerSvc := manager.NewService(st, statusSt, speakerSvc, poolSvc, client)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
 	poolSvc.ConnectPool(ctx, cfg.SpeakerTokens)

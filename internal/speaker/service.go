@@ -11,22 +11,19 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
-	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
 // Client and Cancel are stored directly on each domain.Speaker.
 type Service struct {
-	mu       sync.RWMutex
-	speakers store.SpeakerStore
-	poolSvc  *pool.Service
+	mu      sync.RWMutex
+	poolSvc *pool.Service
 }
 
 // NewService creates a new speaker Service.
-func NewService(speakers store.SpeakerStore, poolSvc *pool.Service) *Service {
+func NewService(poolSvc *pool.Service) *Service {
 	return &Service{
-		speakers: speakers,
-		poolSvc:  poolSvc,
+		poolSvc: poolSvc,
 	}
 }
 
@@ -110,5 +107,5 @@ func (s *Service) LeaveChannel(ctx context.Context, guildID, speakerID snowflake
 
 func (s *Service) RemoveMember(guildID, userID snowflake.ID) {
 	s.LeaveChannel(context.Background(), guildID, userID)
-	s.speakers.RemoveSpeaker(userID)
+	// TODO: remove Speaker from statusStore
 }

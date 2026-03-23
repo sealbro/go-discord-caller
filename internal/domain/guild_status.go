@@ -10,25 +10,23 @@ import (
 
 // GuildStatus Status is the view model returned by GetStatus — built from StatusStore + SessionStore.
 type GuildStatus struct {
-	mu             sync.RWMutex
-	GuildID        snowflake.ID
-	Speakers       []*Speaker                    // all speakers registered for this guild
-	Enabled        map[snowflake.ID]bool         // speakerID -> enabled
-	BoundChannels  map[snowflake.ID]snowflake.ID // userID -> channelID
-	RoleID         *snowflake.ID
-	OwnerChannelID *snowflake.ID
-	Session        *VoiceSession
+	mu            sync.RWMutex
+	GuildID       snowflake.ID
+	OwnerUserID   snowflake.ID                  // owner bot user ID; look up channel via BoundChannels[OwnerUserID]
+	Speakers      map[snowflake.ID]*Speaker     // speakerID -> speaker (Enabled carries per-guild state)
+	BoundChannels map[snowflake.ID]snowflake.ID // userID -> channelID
+	RoleID        *snowflake.ID
+	Session       *VoiceSession
 }
 
-func NewGuildStatus(guildID snowflake.ID) *GuildStatus {
+func NewGuildStatus(guildID snowflake.ID, ownerUserID snowflake.ID) *GuildStatus {
 	return &GuildStatus{
-		GuildID:        guildID,
-		Speakers:       make([]*Speaker, 0),
-		Enabled:        make(map[snowflake.ID]bool, 2),
-		BoundChannels:  make(map[snowflake.ID]snowflake.ID, 2),
-		RoleID:         nil,
-		OwnerChannelID: nil,
-		Session:        nil,
+		GuildID:       guildID,
+		OwnerUserID:   ownerUserID,
+		Speakers:      make(map[snowflake.ID]*Speaker, 2),
+		BoundChannels: make(map[snowflake.ID]snowflake.ID, 2),
+		RoleID:        nil,
+		Session:       nil,
 	}
 }
 
@@ -51,7 +49,7 @@ func (s *GuildStatus) String() string {
 	sb.WriteString(fmt.Sprintf("**Speakers (%d):**\n", len(s.Speakers)))
 	for _, sp := range s.Speakers {
 		enabled := "✅"
-		if !s.Enabled[sp.ID] {
+		if !sp.Enabled {
 			enabled = "❌"
 		}
 		bound := "unbound"
@@ -67,8 +65,8 @@ func (s *GuildStatus) String() string {
 		sb.WriteString("\n**Capture Role:** not set\n")
 	}
 
-	if s.OwnerChannelID != nil {
-		sb.WriteString(fmt.Sprintf("\n**Owner Bot Channel:** <#%s>\n", s.OwnerChannelID))
+	if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
+		sb.WriteString(fmt.Sprintf("\n**Owner Bot Channel:** <#%s>\n", chID))
 	} else {
 		sb.WriteString("\n**Owner Bot Channel:** not set\n")
 	}

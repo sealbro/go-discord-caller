@@ -18,15 +18,15 @@ import (
 // Service orchestrates speaker bots and voice raid sessions.
 type Service struct {
 	store       store.Store
+	sessions    store.SessionStore
 	speaker     *speaker.Service
-	ownerClient *bot.Client
 	poolSvc     *pool.Service
+	ownerClient *bot.Client
 }
 
 // NewService creates a new manager Service.
-// pool is the ordered list of speaker bot tokens loaded from environment variables.
-func NewService(st store.Store, spk *speaker.Service, poolSvc *pool.Service, client *bot.Client) *Service {
-	return &Service{store: st, speaker: spk, poolSvc: poolSvc, ownerClient: client}
+func NewService(st store.Store, sessions store.SessionStore, spk *speaker.Service, poolSvc *pool.Service, client *bot.Client) *Service {
+	return &Service{store: st, sessions: sessions, speaker: spk, poolSvc: poolSvc, ownerClient: client}
 }
 
 // JoinChannel makes the owner bot join a voice channel.
@@ -217,7 +217,7 @@ func (m *Service) ListSpeakers(guildID snowflake.ID) []*domain.Speaker {
 
 // StartVoiceRaid makes all enabled, bound speakers join their voice channels.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) error {
-	if _, active := m.store.GetSession(guildID); active {
+	if _, active := m.sessions.GetSession(guildID); active {
 		return fmt.Errorf("a voice raid is already active in this server")
 	}
 
@@ -277,7 +277,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		return fmt.Errorf("set speaking flag: %w", err)
 	}
 
-	m.store.SetSession(session)
+	m.sessions.SetSession(session)
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
 		slog.Int("activeSpeakers", len(session.Speakers)),
@@ -316,7 +316,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 // StopVoiceRaid makes all active speakers leave their voice channels.
 func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error {
-	session, ok := m.store.GetSession(guildID)
+	session, ok := m.sessions.GetSession(guildID)
 	if !ok {
 		return fmt.Errorf("no active voice raid in this server")
 	}
@@ -327,7 +327,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 
 	m.LeaveChannel(ctx, guildID)
 
-	m.store.DeleteSession(guildID)
+	m.sessions.DeleteSession(guildID)
 	slog.Info("voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil
 }
@@ -339,7 +339,7 @@ func (m *Service) Shutdown(ctx context.Context) {
 	slog.Info("shutting down manager service...")
 
 	// Stop every active raid: cancels relay goroutines and leaves speaker channels.
-	for _, session := range m.store.ListSessions() {
+	for _, session := range m.sessions.ListSessions() {
 		if !session.Active {
 			continue
 		}
@@ -378,7 +378,7 @@ func (m *Service) GetStatus(guildID snowflake.ID) *Status {
 	if chID, ok := m.GetOwnerChannel(guildID); ok {
 		s.OwnerChannelID = &chID
 	}
-	if session, ok := m.store.GetSession(guildID); ok {
+	if session, ok := m.sessions.GetSession(guildID); ok {
 		s.Session = session
 	}
 	return s

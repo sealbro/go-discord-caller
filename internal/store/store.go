@@ -34,22 +34,15 @@ type Store interface {
 	BindRole(guildID, roleID snowflake.ID)
 	UnbindRole(guildID snowflake.ID)
 	GetBoundRole(guildID snowflake.ID) (snowflake.ID, bool)
-
-	// Session management
-	GetSession(guildID snowflake.ID) (*domain.VoiceSession, bool)
-	SetSession(s *domain.VoiceSession)
-	DeleteSession(guildID snowflake.ID)
-	ListSessions() []*domain.VoiceSession
 }
 
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
 	mu         sync.RWMutex
-	speakers   map[snowflake.ID]*domain.Speaker      // speakerID -> speaker
-	tokenIndex map[string]snowflake.ID               // botToken -> speakerID
-	roles      map[snowflake.ID]snowflake.ID         // guildID -> roleID
-	channels   map[channelKey]snowflake.ID           // (userID, guildID) -> channelID
-	sessions   map[snowflake.ID]*domain.VoiceSession // guildID -> session
+	speakers   map[snowflake.ID]*domain.Speaker // speakerID -> speaker
+	tokenIndex map[string]snowflake.ID          // botToken -> speakerID
+	roles      map[snowflake.ID]snowflake.ID    // guildID -> roleID
+	channels   map[channelKey]snowflake.ID      // (userID, guildID) -> channelID
 }
 
 // NewInMemoryStore creates a new empty InMemoryStore.
@@ -59,7 +52,6 @@ func NewInMemoryStore() *InMemoryStore {
 		tokenIndex: make(map[string]snowflake.ID),
 		roles:      make(map[snowflake.ID]snowflake.ID),
 		channels:   make(map[channelKey]snowflake.ID),
-		sessions:   make(map[snowflake.ID]*domain.VoiceSession),
 	}
 }
 
@@ -155,35 +147,6 @@ func (s *InMemoryStore) GetBoundRole(guildID snowflake.ID) (snowflake.ID, bool) 
 	defer s.mu.RUnlock()
 	roleID, ok := s.roles[guildID]
 	return roleID, ok
-}
-
-func (s *InMemoryStore) GetSession(guildID snowflake.ID) (*domain.VoiceSession, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	sess, ok := s.sessions[guildID]
-	return sess, ok
-}
-
-func (s *InMemoryStore) SetSession(sess *domain.VoiceSession) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sessions[sess.GuildID] = sess
-}
-
-func (s *InMemoryStore) DeleteSession(guildID snowflake.ID) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.sessions, guildID)
-}
-
-func (s *InMemoryStore) ListSessions() []*domain.VoiceSession {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	result := make([]*domain.VoiceSession, 0, len(s.sessions))
-	for _, sess := range s.sessions {
-		result = append(result, sess)
-	}
-	return result
 }
 
 func (s *InMemoryStore) ListAllSpeakers() []*domain.Speaker {

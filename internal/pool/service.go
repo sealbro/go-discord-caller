@@ -28,48 +28,71 @@ func NewService() *Service {
 	}
 }
 
-// ConnectPool pre-connects all gateways in the pool.
+// ConnectPool pre-connects all gateways in the pool concurrently and waits
+// for every goroutine to finish (or the context to expire) before returning.
 func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
-	for i, token := range tokens {
-		botUserID, ok := domain.BotUserID(token)
-		index := i + 1
-		if !ok {
-			slog.Warn("pool: invalid pool token", slog.Int("index", index))
-			continue
-		}
-
-		client, err := disgo.New(token,
-			bot.WithGatewayConfigOpts(
-				gateway.WithIntents(gateway.IntentGuildVoiceStates),
-			),
-			bot.WithVoiceManagerConfigOpts(
-				voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			),
-		)
-		if err != nil {
-			slog.Warn("pool: failed to build gateway",
-				slog.Int("index", index),
-				slog.Any("err", err),
-			)
-			continue
-		}
-
-		if err = client.OpenGateway(ctx); err != nil {
-			slog.Warn("pool: failed to open gateway",
-				slog.Int("index", index),
-				slog.Any("err", err),
-			)
-			client.Close(ctx)
-			continue
-		}
-
-		s.mu.Lock()
-		s.poolClients[botUserID] = client
-		s.ids = append(s.ids, botUserID)
-		s.mu.Unlock()
-
-		slog.Info("pool: speaker gateway ready", slog.Int("index", index))
+	type result struct {
+		index     int
+		botUserID snowflake.ID
+		client    *bot.Client
 	}
+
+	results := make([]result, len(tokens)) // pre-allocated; index is the slot
+
+	var wg sync.WaitGroup
+	wg.Add(len(tokens))
+	for i, token := range tokens {
+		go func(i int, token string) {
+			defer wg.Done()
+			index := i + 1
+
+			botUserID, ok := domain.BotUserID(token)
+			if !ok {
+				slog.Warn("pool: invalid pool token", slog.Int("index", index))
+				return
+			}
+
+			client, err := disgo.New(token,
+				bot.WithGatewayConfigOpts(
+					gateway.WithIntents(gateway.IntentGuildVoiceStates),
+				),
+				bot.WithVoiceManagerConfigOpts(
+					voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+				),
+			)
+			if err != nil {
+				slog.Warn("pool: failed to build gateway",
+					slog.Int("index", index),
+					slog.Any("err", err),
+				)
+				return
+			}
+
+			if err = client.OpenGateway(ctx); err != nil {
+				slog.Warn("pool: failed to open gateway",
+					slog.Int("index", index),
+					slog.Any("err", err),
+				)
+				client.Close(ctx)
+				return
+			}
+
+			slog.Info("pool: speaker gateway ready", slog.Int("index", index))
+			results[i] = result{index: index, botUserID: botUserID, client: client}
+		}(i, token)
+	}
+	wg.Wait()
+
+	// Merge results in token order so ids preserves the original ordering.
+	s.mu.Lock()
+	for _, r := range results {
+		if r.client == nil {
+			continue
+		}
+		s.poolClients[r.botUserID] = r.client
+		s.ids = append(s.ids, r.botUserID)
+	}
+	s.mu.Unlock()
 }
 
 // GetClientByID returns the client for the given botUserID if it exists.

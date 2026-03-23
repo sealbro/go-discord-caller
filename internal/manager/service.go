@@ -71,7 +71,8 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 	snap := *st
 	snap.Speakers = make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		snap.Speakers[k] = new(*v)
+		sp := *v
+		snap.Speakers[k] = &sp
 	}
 	snap.BoundChannels = make(map[snowflake.ID]snowflake.ID, len(st.BoundChannels))
 	for k, v := range st.BoundChannels {
@@ -357,8 +358,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 	}
 	speakers := make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		sp := *v
-		speakers[k] = &sp
+		speakers[k] = new(*v)
 	}
 	m.mu.RUnlock()
 
@@ -380,15 +380,13 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 	provider := opus.NewEmptyVoiceProvider()
 	conn.SetOpusFrameProvider(provider)
 
-	var outs []chan []byte
-	newOut := func() chan []byte {
-		ch := make(chan []byte, 10)
-		outs = append(outs, ch)
-		return ch
+	// Collect eligible speakers before spawning goroutines so map iteration
+	// is not mixed with concurrent reads.
+	type eligible struct {
+		sp        *domain.Speaker
+		channelID snowflake.ID
 	}
-
-	session := &domain.VoiceSession{GuildID: guildID, Cancel: cancelFunc}
-
+	var candidates []eligible
 	for spID, sp := range speakers {
 		if !sp.Enabled {
 			continue
@@ -397,19 +395,44 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 		if !hasChannel {
 			continue
 		}
-		if err := m.speaker.JoinChannel(ctx, spID, guildID, channelID); err != nil {
-			slog.Warn("speaker failed to join channel on raid start",
-				slog.String("speakerID", spID.String()),
-				slog.Any("err", err),
-			)
-			continue
-		}
-		session.Speakers = append(session.Speakers, sp)
+		candidates = append(candidates, eligible{sp, channelID})
+	}
 
-		chOut := newOut()
-		if err := m.speaker.Consume(ctx, spID, guildID, chOut); err != nil {
-			slog.Error("failed to consume voice data", slog.String("speakerID", spID.String()), slog.Any("err", err))
-		}
+	type joinResult struct {
+		sp    *domain.Speaker
+		chOut chan []byte
+	}
+	resultCh := make(chan joinResult, len(candidates))
+
+	var wg sync.WaitGroup
+	wg.Add(len(candidates))
+	for _, c := range candidates {
+		go func(sp *domain.Speaker, channelID snowflake.ID) {
+			defer wg.Done()
+			speakerID := sp.ID
+			if err := m.speaker.JoinChannel(ctx, speakerID, guildID, channelID); err != nil {
+				slog.Warn("speaker failed to join channel on raid start",
+					slog.String("speakerID", speakerID.String()),
+					slog.Any("err", err),
+				)
+				return
+			}
+			chOut := make(chan []byte, 10)
+			if err := m.speaker.Consume(ctx, speakerID, guildID, chOut); err != nil {
+				slog.Error("failed to consume voice data", slog.String("speakerID", speakerID.String()), slog.Any("err", err))
+				return
+			}
+			resultCh <- joinResult{sp, chOut}
+		}(c.sp, c.channelID)
+	}
+	wg.Wait()
+	close(resultCh)
+
+	var outs []chan []byte
+	session := &domain.VoiceSession{GuildID: guildID, Cancel: cancelFunc}
+	for r := range resultCh {
+		session.Speakers = append(session.Speakers, r.sp)
+		outs = append(outs, r.chOut)
 	}
 
 	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {

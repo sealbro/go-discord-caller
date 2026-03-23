@@ -14,7 +14,6 @@ type SpeakerStore interface {
 	GetSpeaker(id snowflake.ID) (*domain.Speaker, bool)
 	GetSpeakerByToken(token string) (*domain.Speaker, bool)
 	UpdateSpeaker(s *domain.Speaker) error
-	ListSpeakers(guildID snowflake.ID) []*domain.Speaker
 	ListAllSpeakers() []*domain.Speaker
 	RemoveSpeaker(id snowflake.ID)
 }
@@ -67,18 +66,6 @@ func (s *InMemorySpeakerStore) UpdateSpeaker(sp *domain.Speaker) error {
 	}
 	s.speakers[sp.ID] = sp
 	return nil
-}
-
-func (s *InMemorySpeakerStore) ListSpeakers(guildID snowflake.ID) []*domain.Speaker {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var result []*domain.Speaker
-	for _, sp := range s.speakers {
-		if _, ok := sp.Guilds[guildID]; ok {
-			result = append(result, sp)
-		}
-	}
-	return result
 }
 
 func (s *InMemorySpeakerStore) ListAllSpeakers() []*domain.Speaker {

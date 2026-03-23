@@ -6,7 +6,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// channelKey is the composite key used to look up a voice-channel binding.
+// channelKey is the composite key for a voice-channel binding.
 type channelKey struct {
 	userID  snowflake.ID
 	guildID snowflake.ID
@@ -14,12 +14,10 @@ type channelKey struct {
 
 // Store is the persistence layer for channel and role bindings.
 type Store interface {
-	// Channel binding — keyed by (userID, guildID) for both speaker bots and the owner bot.
-	BindChannel(guildID snowflake.ID, userID snowflake.ID, channelID snowflake.ID)
+	BindChannel(guildID, userID, channelID snowflake.ID)
 	UnbindChannel(guildID, userID snowflake.ID)
 	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
 
-	// Role binding
 	BindRole(guildID, roleID snowflake.ID)
 	UnbindRole(guildID snowflake.ID)
 	GetBoundRole(guildID snowflake.ID) (snowflake.ID, bool)
@@ -28,19 +26,18 @@ type Store interface {
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
 	mu       sync.RWMutex
-	roles    map[snowflake.ID]snowflake.ID // guildID -> roleID
 	channels map[channelKey]snowflake.ID   // (userID, guildID) -> channelID
+	roles    map[snowflake.ID]snowflake.ID // guildID -> roleID
 }
 
-// NewInMemoryStore creates a new empty InMemoryStore.
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		roles:    make(map[snowflake.ID]snowflake.ID),
 		channels: make(map[channelKey]snowflake.ID),
+		roles:    make(map[snowflake.ID]snowflake.ID),
 	}
 }
 
-func (s *InMemoryStore) BindChannel(guildID snowflake.ID, userID snowflake.ID, channelID snowflake.ID) {
+func (s *InMemoryStore) BindChannel(guildID, userID, channelID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.channels[channelKey{userID, guildID}] = channelID

@@ -9,17 +9,11 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// GuildMembership holds the per-guild state for a speaker bot.
-type GuildMembership struct {
-	Enabled bool
-}
-
-// Speaker represents a speaker bot instance that can be registered in one or more guilds.
+// Speaker represents a speaker bot instance.
 type Speaker struct {
 	ID       snowflake.ID
 	BotToken string
 	Username string
-	Guilds   map[snowflake.ID]*GuildMembership // guildID -> per-guild state
 
 	// Runtime state — not persisted.
 	Client *bot.Client
@@ -30,19 +24,10 @@ type Speaker struct {
 type VoiceSession struct {
 	GuildID  snowflake.ID
 	Active   bool
-	Speakers []*Speaker // speakers currently joined to voice channels
+	Speakers []*Speaker
 }
 
-// RoleBinding links a guild to the Discord role whose members' voice is captured.
-type RoleBinding struct {
-	GuildID snowflake.ID
-	RoleID  snowflake.ID
-}
-
-// BotUserID extracts the Discord ApplicationID (= bot user ID) from a
-// raw bot token.  Discord tokens are formatted as
-// "<base64(userID)>.<timestamp>.<hmac>", where the first segment is the
-// bot's user ID encoded with standard base64 (no padding).
+// BotUserID extracts the Discord ApplicationID (= bot user ID) from a raw bot token.
 func BotUserID(botToken string) (snowflake.ID, bool) {
 	idx := strings.IndexByte(botToken, '.')
 	if idx <= 0 {

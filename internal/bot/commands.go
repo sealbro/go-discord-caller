@@ -9,7 +9,6 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
@@ -118,17 +117,17 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		buttons = append(buttons, discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"))
 	}
 
-	buildButton := func(sp *domain.Speaker) discord.InteractiveComponent {
-		membership, _ := sp.Guilds[guildID]
-		button := discord.NewSecondaryButton(
-			fmt.Sprintf("%s %s", sp.Username, statusEmoji(membership.Enabled)),
-			fmt.Sprintf("/speakers/toggle/%s", sp.ID),
-		)
-		return button
-	}
-
+	status := h.manager.GetStatus(guildID)
 	for _, sp := range shown {
-		buttons = append(buttons, buildButton(sp))
+		enabled := status.Enabled[sp.ID]
+		label := "Enable"
+		if enabled {
+			label = "Disable"
+		}
+		buttons = append(buttons, discord.NewSecondaryButton(
+			fmt.Sprintf("%s %s (%s)", statusEmoji(enabled), sp.Username, label),
+			fmt.Sprintf("/speakers/toggle/%s", sp.ID),
+		))
 	}
 
 	if len(buttons) > 0 {
@@ -252,15 +251,7 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 
 	// Resolve current enabled state.
 	status := h.manager.GetStatus(guildID)
-	var enabled bool
-	for _, s := range status.Speakers {
-		if s.ID == speakerID {
-			if membership, ok := s.Guilds[guildID]; ok {
-				enabled = membership.Enabled
-			}
-			break
-		}
-	}
+	enabled := status.Enabled[speakerID]
 
 	if err := h.manager.ToggleSpeaker(speakerID, guildID, !enabled); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
@@ -334,9 +325,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	}
 
 	channelID := channels[0].ID
-	if err := h.manager.BindChannel(speakerID, guildID, channelID); err != nil {
-		return e.CreateMessage(ephemeral("❌ " + err.Error()))
-	}
+	h.manager.BindChannel(speakerID, guildID, channelID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("✅ Speaker <@%s> bound to <#%s>.", speakerID, channelID),

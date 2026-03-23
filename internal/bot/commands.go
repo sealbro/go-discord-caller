@@ -86,6 +86,10 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
+	if h.manager.HasActiveSession(guildID) {
+		return e.CreateMessage(ephemeral("⚠️ Setup is not available while a voice raid is active. Stop the raid first."))
+	}
+
 	msg, components := h.buildSetupMessage(guildID)
 	return e.CreateMessage(discord.MessageCreate{
 		Content:    msg,

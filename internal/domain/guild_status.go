@@ -47,21 +47,6 @@ func (s GuildStatus) GetSortedSpeakers() []*Speaker {
 func (s GuildStatus) String() string {
 	var sb strings.Builder
 
-	speakers := s.GetSortedSpeakers()
-
-	sb.WriteString(fmt.Sprintf("**Speakers (%d):**\n", len(speakers)))
-	for _, sp := range speakers {
-		enabled := "🔊"
-		if !sp.Enabled {
-			enabled = "🔇"
-		}
-		bound := "unbound"
-		if chID, ok := s.BoundChannels[sp.ID]; ok {
-			bound = fmt.Sprintf("<#%s>", chID)
-		}
-		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
-	}
-
 	if s.RoleID != nil {
 		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.RoleID))
 	} else {
@@ -72,6 +57,21 @@ func (s GuildStatus) String() string {
 		sb.WriteString(fmt.Sprintf("\n**Owner Bot Channel:** <#%s>\n", chID))
 	} else {
 		sb.WriteString("\n**Owner Bot Channel:** not set\n")
+	}
+
+	speakers := s.GetSortedSpeakers()
+
+	sb.WriteString(fmt.Sprintf("\n**Speakers (%d):**\n", len(speakers)))
+	for _, sp := range speakers {
+		enabled := "🔊"
+		if !sp.Enabled {
+			enabled = "🔇"
+		}
+		bound := "unbound"
+		if chID, ok := s.BoundChannels[sp.ID]; ok {
+			bound = fmt.Sprintf("<#%s>", chID)
+		}
+		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
 	}
 
 	if s.Session != nil {

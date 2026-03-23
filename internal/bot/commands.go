@@ -86,7 +86,7 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	speakers := h.manager.ListSpeakers(guildID)
+	status := h.manager.GetStatus(guildID)
 
 	var components []discord.LayoutComponent
 
@@ -106,7 +106,7 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	// Layout: row 1 = owner select, row 2 = all buttons, rows 3-5 = channel selects → max 3 speakers shown.
 	const maxSpeakersShown = 3
 
-	shown := speakers
+	shown := status.Speakers
 	if len(shown) > maxSpeakersShown {
 		shown = shown[:maxSpeakersShown]
 	}
@@ -117,7 +117,6 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		buttons = append(buttons, discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"))
 	}
 
-	status := h.manager.GetStatus(guildID)
 	for _, sp := range shown {
 		enabled := status.Enabled[sp.ID]
 		label := "Enable"
@@ -137,7 +136,7 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	// Rows 3-5 — one channel select per shown speaker.
 	for _, sp := range shown {
 		placeholder := fmt.Sprintf("Bind %s to a voice channel…", sp.Username)
-		if chID, ok := h.manager.GetBoundChannel(sp.ID, guildID); ok {
+		if chID, ok := h.manager.GetBoundChannel(guildID, sp.ID); ok {
 			placeholder = fmt.Sprintf("<@%s> → <#%s>", sp.ID, chID)
 		}
 		components = append(components,
@@ -149,6 +148,8 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 			),
 		)
 	}
+
+	speakers := status.Speakers
 
 	msg := "**Speaker Setup**\n"
 	if len(speakers) == 0 {
@@ -174,7 +175,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 	}
 
 	// Reject immediately if a raid is already running in this guild.
-	if status := h.manager.GetStatus(guildID); status.Session != nil && status.Session.Active {
+	if status := h.manager.GetStatus(guildID); status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
 	}
 
@@ -194,7 +195,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	}
 
 	// Reject immediately if there is no active raid in this guild.
-	if status := h.manager.GetStatus(guildID); status.Session == nil || !status.Session.Active {
+	if status := h.manager.GetStatus(guildID); !status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ There is no active voice raid in this server."))
 	}
 
@@ -253,7 +254,7 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 	status := h.manager.GetStatus(guildID)
 	enabled := status.Enabled[speakerID]
 
-	if err := h.manager.ToggleSpeaker(speakerID, guildID, !enabled); err != nil {
+	if err := h.manager.ToggleSpeaker(guildID, speakerID, !enabled); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 
@@ -317,7 +318,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 
 	channels := channelData.Channels()
 	if len(channels) == 0 {
-		h.manager.UnbindChannel(speakerID, guildID)
+		h.manager.UnbindChannel(guildID, speakerID)
 		return e.CreateMessage(discord.MessageCreate{
 			Content: "✅ Channel binding removed.",
 			Flags:   discord.MessageFlagEphemeral,
@@ -325,7 +326,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	}
 
 	channelID := channels[0].ID
-	h.manager.BindChannel(speakerID, guildID, channelID)
+	h.manager.BindChannel(guildID, speakerID, channelID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("✅ Speaker <@%s> bound to <#%s>.", speakerID, channelID),

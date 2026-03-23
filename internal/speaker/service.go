@@ -31,12 +31,12 @@ func NewService(speakers store.SpeakerStore, poolSvc *pool.Service) *Service {
 	}
 }
 
-// GetUserByToken returns the discord.User of the bot for the given pool token
+// GetUserByID returns the discord.User of the bot for the given pool token
 // by reading the self-user from the pre-connected gateway's cache.
 // Returns a zero User and false if the client is not in the pool or the
 // self-user is not yet available.
-func (s *Service) GetUserByToken(token string) (discord.User, bool) {
-	client, ok := s.poolSvc.GetClientByToken(token)
+func (s *Service) GetUserByID(botUserID snowflake.ID) (discord.User, bool) {
+	client, ok := s.poolSvc.GetClientByToken(botUserID)
 	if !ok {
 		return discord.User{}, false
 	}
@@ -54,7 +54,7 @@ func (s *Service) AssignClient(sp *domain.Speaker) {
 		return // already assigned
 	}
 
-	if poolClient, ok := s.poolSvc.GetClientByToken(sp.BotToken); ok {
+	if poolClient, ok := s.poolSvc.GetClientByToken(sp.ID); ok {
 		sp.Client = poolClient
 		slog.Info("speaker assigned from pool",
 			slog.String("speakerID", sp.ID.String()),

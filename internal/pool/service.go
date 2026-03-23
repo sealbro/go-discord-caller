@@ -10,20 +10,22 @@ import (
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
+	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
 // Service manages the lifecycle of the pool of speaker gateways.
 type Service struct {
 	mu          sync.RWMutex
-	poolClients map[string]*bot.Client // token -> pre-connected gateway (available pool)
+	poolClients map[snowflake.ID]*bot.Client // token -> pre-connected gateway (available pool)
 	speakers    store.SpeakerStore
 }
 
 // NewService creates a new speaker Service.
 func NewService(speakers store.SpeakerStore) *Service {
 	return &Service{
-		poolClients: make(map[string]*bot.Client),
+		poolClients: make(map[snowflake.ID]*bot.Client),
 		speakers:    speakers,
 	}
 }
@@ -31,6 +33,13 @@ func NewService(speakers store.SpeakerStore) *Service {
 // ConnectPool pre-connects all gateways in the pool.
 func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 	for i, token := range tokens {
+		botUserID, ok := domain.BotUserID(token)
+		index := i + 1
+		if !ok {
+			slog.Warn("pool: invalid pool token", slog.Int("index", index))
+			continue
+		}
+
 		client, err := disgo.New(token,
 			bot.WithGatewayConfigOpts(
 				gateway.WithIntents(gateway.IntentGuildVoiceStates),
@@ -41,34 +50,34 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 		)
 		if err != nil {
 			slog.Warn("pool: failed to build gateway",
-				slog.Int("index", i+1),
+				slog.Int("index", index),
 				slog.Any("err", err),
 			)
-			continue
+			return
 		}
 
 		if err = client.OpenGateway(ctx); err != nil {
 			slog.Warn("pool: failed to open gateway",
-				slog.Int("index", i+1),
+				slog.Int("index", index),
 				slog.Any("err", err),
 			)
 			client.Close(ctx)
-			continue
+			return
 		}
 
 		s.mu.Lock()
-		s.poolClients[token] = client
+		s.poolClients[botUserID] = client
 		s.mu.Unlock()
 
-		slog.Info("pool: speaker gateway ready", slog.Int("index", i+1))
+		slog.Info("pool: speaker gateway ready", slog.Int("index", index))
 	}
 }
 
-// GetClientByToken returns the client for the given token, if it exists.
-func (s *Service) GetClientByToken(token string) (*bot.Client, bool) {
+// GetClientByToken returns the client for the given botUserID if it exists.
+func (s *Service) GetClientByToken(botUserID snowflake.ID) (*bot.Client, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	client, ok := s.poolClients[token]
+	client, ok := s.poolClients[botUserID]
 	return client, ok
 }
 
@@ -85,10 +94,10 @@ func (s *Service) GetClients() []*bot.Client {
 	return clients
 }
 
-func (s *Service) GetTokens() []string {
+func (s *Service) GetIDs() []snowflake.ID {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	tokens := make([]string, len(s.poolClients))
+	tokens := make([]snowflake.ID, len(s.poolClients))
 	i := 0
 	for token := range s.poolClients {
 		tokens[i] = token

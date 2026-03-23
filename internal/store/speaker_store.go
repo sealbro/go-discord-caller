@@ -12,7 +12,6 @@ import (
 type SpeakerStore interface {
 	AddSpeaker(s *domain.Speaker)
 	GetSpeaker(id snowflake.ID) (*domain.Speaker, bool)
-	GetSpeakerByToken(token string) (*domain.Speaker, bool)
 	UpdateSpeaker(s *domain.Speaker) error
 	ListAllSpeakers() []*domain.Speaker
 	RemoveSpeaker(id snowflake.ID)
@@ -20,16 +19,14 @@ type SpeakerStore interface {
 
 // InMemorySpeakerStore is a thread-safe in-memory implementation of SpeakerStore.
 type InMemorySpeakerStore struct {
-	mu         sync.RWMutex
-	speakers   map[snowflake.ID]*domain.Speaker
-	tokenIndex map[string]snowflake.ID // botToken -> speakerID
+	mu       sync.RWMutex
+	speakers map[snowflake.ID]*domain.Speaker
 }
 
 // NewInMemorySpeakerStore creates a new empty InMemorySpeakerStore.
 func NewInMemorySpeakerStore() *InMemorySpeakerStore {
 	return &InMemorySpeakerStore{
-		speakers:   make(map[snowflake.ID]*domain.Speaker),
-		tokenIndex: make(map[string]snowflake.ID),
+		speakers: make(map[snowflake.ID]*domain.Speaker),
 	}
 }
 
@@ -37,23 +34,11 @@ func (s *InMemorySpeakerStore) AddSpeaker(sp *domain.Speaker) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.speakers[sp.ID] = sp
-	s.tokenIndex[sp.BotToken] = sp.ID
 }
 
 func (s *InMemorySpeakerStore) GetSpeaker(id snowflake.ID) (*domain.Speaker, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	sp, ok := s.speakers[id]
-	return sp, ok
-}
-
-func (s *InMemorySpeakerStore) GetSpeakerByToken(token string) (*domain.Speaker, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	id, ok := s.tokenIndex[token]
-	if !ok {
-		return nil, false
-	}
 	sp, ok := s.speakers[id]
 	return sp, ok
 }
@@ -81,8 +66,7 @@ func (s *InMemorySpeakerStore) ListAllSpeakers() []*domain.Speaker {
 func (s *InMemorySpeakerStore) RemoveSpeaker(id snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if sp, ok := s.speakers[id]; ok {
-		delete(s.tokenIndex, sp.BotToken)
+	if _, ok := s.speakers[id]; ok {
 		delete(s.speakers, id)
 	}
 }

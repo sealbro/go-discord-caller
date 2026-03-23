@@ -12,8 +12,8 @@ import (
 // Speaker represents a speaker bot instance.
 type Speaker struct {
 	ID       snowflake.ID
-	BotToken string
 	Username string
+	Enabled  bool
 
 	// Runtime state — not persisted.
 	Client *bot.Client

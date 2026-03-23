@@ -9,7 +9,7 @@ import (
 
 // StatusStore persists per-guild configuration (enabled speakers, bound channels, role).
 type StatusStore interface {
-	GetStatus(guildID snowflake.ID) (*domain.GuildStatus, bool)
+	GetStatus(guildID snowflake.ID) *domain.GuildStatus
 	SetStatus(s *domain.GuildStatus)
 	ListStatuses() []*domain.GuildStatus
 }
@@ -27,11 +27,11 @@ func NewInMemoryStatusStore() *InMemoryStatusStore {
 	}
 }
 
-func (s *InMemoryStatusStore) GetStatus(guildID snowflake.ID) (*domain.GuildStatus, bool) {
+func (s *InMemoryStatusStore) GetStatus(guildID snowflake.ID) *domain.GuildStatus {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	st, ok := s.statuses[guildID]
-	return st, ok
+	st, _ := s.statuses[guildID]
+	return st
 }
 
 func (s *InMemoryStatusStore) SetStatus(st *domain.GuildStatus) {

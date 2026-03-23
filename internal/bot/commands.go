@@ -9,7 +9,6 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
@@ -87,31 +86,32 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
+	msg, components := h.buildSetupMessage(guildID)
+	return e.CreateMessage(discord.MessageCreate{
+		Content:    msg,
+		Components: components,
+		Flags:      discord.MessageFlagEphemeral,
+	})
+}
+
+// buildSetupMessage builds the content and action-row components for the speaker setup UI.
+func (h *CommandHandlers) buildSetupMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 
 	var components []discord.LayoutComponent
 
 	// Row 1 — owner bot channel selector
-	ownerPlaceholder := "Bind caller bot to a voice channel…"
+	ownerMenu := discord.NewChannelSelectMenu("/owner/bind-channel", "Bind caller bot to a voice channel…").
+		WithChannelTypes(discord.ChannelTypeGuildVoice)
 	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
-		ownerPlaceholder = fmt.Sprintf("Owner bot channel: <#%s>", chID)
+		ownerMenu = ownerMenu.AddDefaultValue(chID)
 	}
-	components = append(components,
-		discord.NewActionRow(
-			discord.NewChannelSelectMenu("/owner/bind-channel", ownerPlaceholder).
-				WithChannelTypes(discord.ChannelTypeGuildVoice),
-		),
-	)
+	components = append(components, discord.NewActionRow(ownerMenu))
 
 	// Discord limit: 5 action rows per message.
 	// Layout: row 1 = owner select, row 2 = all buttons, rows 3-5 = channel selects → max 3 speakers shown.
 	const maxSpeakersShown = 3
-
-	allSpeakers := make([]*domain.Speaker, 0, len(status.Speakers))
-	for _, sp := range status.Speakers {
-		allSpeakers = append(allSpeakers, sp)
-	}
-	shown := allSpeakers
+	shown := status.GetSortedSpeakers()
 	if len(shown) > maxSpeakersShown {
 		shown = shown[:maxSpeakersShown]
 	}
@@ -140,22 +140,17 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 
 	// Rows 3-5 — one channel select per shown speaker.
 	for _, sp := range shown {
-		placeholder := fmt.Sprintf("Bind %s to a voice channel…", sp.Username)
+		spMenu := discord.NewChannelSelectMenu(
+			fmt.Sprintf("/speakers/bind-channel/%s", sp.ID),
+			fmt.Sprintf("Bind %s to a voice channel…", sp.Username),
+		).WithChannelTypes(discord.ChannelTypeGuildVoice)
 		if chID, ok := h.manager.GetBoundChannel(guildID, sp.ID); ok {
-			placeholder = fmt.Sprintf("<@%s> → <#%s>", sp.ID, chID)
+			spMenu = spMenu.AddDefaultValue(chID)
 		}
-		components = append(components,
-			discord.NewActionRow(
-				discord.NewChannelSelectMenu(
-					fmt.Sprintf("/speakers/bind-channel/%s", sp.ID),
-					placeholder,
-				).WithChannelTypes(discord.ChannelTypeGuildVoice),
-			),
-		)
+		components = append(components, discord.NewActionRow(spMenu))
 	}
 
 	speakers := status.Speakers
-
 	msg := "**Speaker Setup**\n"
 	if len(speakers) == 0 {
 		msg += "_No speakers registered yet. Use **Add Speaker** to register one._"
@@ -166,11 +161,7 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		}
 	}
 
-	return e.CreateMessage(discord.MessageCreate{
-		Content:    msg,
-		Components: components,
-		Flags:      discord.MessageFlagEphemeral,
-	})
+	return msg, components
 }
 
 func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
@@ -263,20 +254,16 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 	if !ok {
 		return e.CreateMessage(ephemeral("❌ Speaker not found in this guild."))
 	}
-	enabled := sp.Enabled
 
-	if err := h.manager.ToggleSpeaker(guildID, speakerID, !enabled); err != nil {
+	if err := h.manager.ToggleSpeaker(guildID, speakerID, !sp.Enabled); err != nil {
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 
-	action := "enabled"
-	if enabled {
-		action = "disabled"
-	}
-	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Speaker `%s` %s.", speakerID, action),
-		Flags:   discord.MessageFlagEphemeral,
-	})
+	// Rebuild and update the setup message in-place.
+	msg, components := h.buildSetupMessage(guildID)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
 }
 
 // handleAddSpeakerButton resolves the next pool bot's ApplicationID, builds a

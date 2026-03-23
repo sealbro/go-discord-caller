@@ -7,15 +7,14 @@ import (
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/manager"
-	"github.com/sealbro/go-discord-caller/internal/speaker"
 )
 
 // eventListeners returns all event listeners to register with the client.
-func eventListeners(speakerSvc *speaker.Service, managerSvc *manager.Service) []bot.EventListener {
+func eventListeners(managerSvc *manager.Service) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
-		bot.NewListenerFunc(onGuildMemberLeave(speakerSvc)),
+		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onVoiceJoin()),
 		bot.NewListenerFunc(onVoiceLeave()),
 	}
@@ -46,9 +45,10 @@ func onGuildMemberAdd(m *manager.Service) func(*events.GuildMemberJoin) {
 }
 
 // onGuildMemberLeave is called whenever a member leaves a guild.
-func onGuildMemberLeave(m *speaker.Service) func(leave *events.GuildMemberLeave) {
+// If the leaving member is a registered speaker bot it is removed from the guild status.
+func onGuildMemberLeave(m *manager.Service) func(leave *events.GuildMemberLeave) {
 	return func(e *events.GuildMemberLeave) {
-		go m.RemoveMember(e.GuildID, e.User.ID)
+		go m.RemoveSpeaker(e.GuildID, e.User.ID)
 	}
 }
 

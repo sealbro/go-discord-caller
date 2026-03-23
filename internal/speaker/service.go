@@ -62,7 +62,7 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 	return nil
 }
 
-// Consume starts the audio relay for the speaker; the cancel func is stored on sp.Cancel.
+// Consume streams audio data from the provided channel to a voice connection and sets up a no-op receiver for incoming frames.
 func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error {
 	client, ok := s.poolSvc.GetClientByID(speakerID)
 	if !ok {
@@ -103,9 +103,4 @@ func (s *Service) LeaveChannel(ctx context.Context, guildID, speakerID snowflake
 	}
 
 	slog.Info("speaker left channel", slog.String("speakerID", speakerID.String()))
-}
-
-func (s *Service) RemoveMember(guildID, userID snowflake.ID) {
-	s.LeaveChannel(context.Background(), guildID, userID)
-	// TODO: remove Speaker from statusStore
 }

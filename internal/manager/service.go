@@ -200,6 +200,22 @@ func (m *Service) ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) e
 	return nil
 }
 
+// RemoveSpeaker removes a speaker from a guild's status when they leave the server.
+func (m *Service) RemoveSpeaker(guildID, userID snowflake.ID) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	st := m.statuses[guildID]
+	if st == nil {
+		return
+	}
+	delete(st.Speakers, userID)
+	slog.Info("speaker removed from guild",
+		slog.String("userID", userID.String()),
+		slog.String("guildID", guildID.String()),
+	)
+}
+
 // TrySeedMember checks whether a newly-joined guild member is an unregistered
 // pool speaker bot and registers it if so.
 func (m *Service) TrySeedMember(guildID, newUserID snowflake.ID) {

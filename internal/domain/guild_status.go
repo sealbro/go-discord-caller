@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -32,12 +33,24 @@ func (s GuildStatus) HasActiveSession() bool {
 	return s.Session != nil
 }
 
+func (s GuildStatus) GetSortedSpeakers() []*Speaker {
+	return slices.SortedFunc(func(yield func(*Speaker) bool) {
+		for _, sp := range s.Speakers {
+			if !yield(sp) {
+				return
+			}
+		}
+	}, func(a, b *Speaker) int { return strings.Compare(a.Username, b.Username) })
+}
+
 // String returns a human-readable summary of the status.
 func (s GuildStatus) String() string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("**Speakers (%d):**\n", len(s.Speakers)))
-	for _, sp := range s.Speakers {
+	speakers := s.GetSortedSpeakers()
+
+	sb.WriteString(fmt.Sprintf("**Speakers (%d):**\n", len(speakers)))
+	for _, sp := range speakers {
 		enabled := "🔊"
 		if !sp.Enabled {
 			enabled = "🔇"

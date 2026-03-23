@@ -19,7 +19,6 @@ import (
 type Service struct {
 	store       store.Store
 	statusStore store.StatusStore
-	sessions    store.SessionStore
 	speakers    store.SpeakerStore
 	speaker     *speaker.Service
 	poolSvc     *pool.Service
@@ -27,11 +26,10 @@ type Service struct {
 }
 
 // NewService creates a new manager Service.
-func NewService(st store.Store, statusStore store.StatusStore, sessions store.SessionStore, speakers store.SpeakerStore, spk *speaker.Service, poolSvc *pool.Service, client *bot.Client) *Service {
+func NewService(st store.Store, statusStore store.StatusStore, speakers store.SpeakerStore, spk *speaker.Service, poolSvc *pool.Service, client *bot.Client) *Service {
 	return &Service{
 		store:       st,
 		statusStore: statusStore,
-		sessions:    sessions,
 		speakers:    speakers,
 		speaker:     spk,
 		poolSvc:     poolSvc,
@@ -41,9 +39,6 @@ func NewService(st store.Store, statusStore store.StatusStore, sessions store.Se
 
 // JoinChannel makes the owner bot join a voice channel.
 func (m *Service) JoinChannel(ctx context.Context, guildID, channelID snowflake.ID) error {
-	if m.ownerClient == nil {
-		return fmt.Errorf("owner client not set")
-	}
 	conn := m.ownerClient.VoiceManager.CreateConn(guildID)
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
 		return err
@@ -57,14 +52,10 @@ func (m *Service) JoinChannel(ctx context.Context, guildID, channelID snowflake.
 
 // LeaveChannel makes the owner bot leave its current voice channel in a guild.
 func (m *Service) LeaveChannel(ctx context.Context, guildID snowflake.ID) {
-	if m.ownerClient == nil {
-		return
+	if conn := m.ownerClient.VoiceManager.GetConn(guildID); conn != nil {
+		conn.Close(ctx)
 	}
-	conn := m.ownerClient.VoiceManager.GetConn(guildID)
-	if conn == nil {
-		return
-	}
-	conn.Close(ctx)
+
 	slog.Info("left voice channel", slog.String("guildID", guildID.String()))
 }
 
@@ -74,11 +65,7 @@ func (m *Service) LeaveChannel(ctx context.Context, guildID snowflake.ID) {
 // invited in a previous session are automatically re-registered.
 func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 	for _, guildID := range guildIDs {
-		status := &domain.GuildStatus{
-			GuildID:       guildID,
-			Enabled:       make(map[snowflake.ID]bool, 2),
-			BoundChannels: make(map[snowflake.ID]snowflake.ID, 2),
-		}
+		status := domain.NewGuildStatus(guildID)
 		for _, botUserID := range m.poolSvc.GetIDs() {
 			if !m.isGuildMember(guildID, botUserID) {
 				continue
@@ -180,12 +167,13 @@ func (m *Service) BindRole(guildID, roleID snowflake.ID) {
 }
 
 // StartVoiceRaid makes all enabled, bound speakers join their voice channels.
-func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) error {
-	if _, active := m.sessions.GetSession(guildID); active {
+func (m *Service) StartVoiceRaid(mainCtx context.Context, guildID snowflake.ID) error {
+	status := m.statusStore.GetStatus(guildID)
+	if status.HasActiveSession() {
 		return fmt.Errorf("a voice raid is already active in this server")
 	}
 
-	status := m.statusStore.GetStatus(guildID)
+	ctx, cancelFunc := context.WithCancel(mainCtx)
 
 	ownerUser, _ := m.ownerClient.Caches.SelfUser()
 
@@ -213,7 +201,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		return ch
 	}
 
-	session := &domain.VoiceSession{GuildID: guildID, Active: true}
+	session := &domain.VoiceSession{GuildID: guildID, Cancel: cancelFunc}
 
 	for spID, enabled := range status.Enabled {
 		if !enabled {
@@ -246,7 +234,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 		return fmt.Errorf("set speaking flag: %w", err)
 	}
 
-	m.sessions.SetSession(session)
+	status.SetSession(session)
+	m.statusStore.SetStatus(status)
+
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
 		slog.Int("activeSpeakers", len(session.Speakers)),
@@ -285,19 +275,17 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID) erro
 
 // StopVoiceRaid makes all active speakers leave their voice channels.
 func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error {
-	session, ok := m.sessions.GetSession(guildID)
-	if !ok {
+	status := m.statusStore.GetStatus(guildID)
+	if !status.HasActiveSession() {
 		return fmt.Errorf("no active voice raid in this server")
 	}
-	for _, sp := range session.Speakers {
+	for _, sp := range status.Session.Speakers {
 		m.speaker.LeaveChannel(ctx, guildID, sp.ID)
 	}
 	m.LeaveChannel(ctx, guildID)
-	m.sessions.DeleteSession(guildID)
 
-	status := m.statusStore.GetStatus(guildID)
-	status.Session = nil
-	m.statusStore.SetStatus(status)
+	status.Session.Cancel()
+	status.SetSession(nil)
 
 	slog.Info("voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil
@@ -306,17 +294,17 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 // Shutdown stops every active voice raid and closes all speaker gateways.
 func (m *Service) Shutdown(ctx context.Context) {
 	slog.Info("shutting down manager service...")
-	for _, session := range m.sessions.ListSessions() {
-		if !session.Active {
+
+	for _, status := range m.statusStore.ListStatuses() {
+		if !status.HasActiveSession() {
 			continue
 		}
-		if err := m.StopVoiceRaid(ctx, session.GuildID); err != nil {
+		if err := m.StopVoiceRaid(ctx, status.GuildID); err != nil {
 			slog.Warn("shutdown: failed to stop voice raid",
-				slog.String("guildID", session.GuildID.String()),
+				slog.String("guildID", status.GuildID.String()),
 				slog.Any("err", err),
 			)
 		}
-		m.LeaveChannel(ctx, session.GuildID)
 	}
 	m.poolSvc.Shutdown(ctx)
 }
@@ -342,9 +330,7 @@ func (m *Service) GetStatus(guildID snowflake.ID) *domain.GuildStatus {
 	if chID, ok := m.store.GetBoundChannel(guildID, ownerUser.ID); ok {
 		status.OwnerChannelID = &chID
 	}
-	if session, ok := m.sessions.GetSession(guildID); ok {
-		status.Session = session
-	}
+
 	return status
 }
 
@@ -386,7 +372,6 @@ func (m *Service) AddSpeaker(guildID, botUserID snowflake.ID) (*domain.Speaker, 
 			Username: user.Username,
 			Enabled:  true,
 		}
-		m.speaker.AssignClient(sp)
 		m.speakers.AddSpeaker(sp)
 	}
 

@@ -3,12 +3,14 @@ package domain
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
 )
 
 // GuildStatus Status is the view model returned by GetStatus — built from StatusStore + SessionStore.
 type GuildStatus struct {
+	mu             sync.RWMutex
 	GuildID        snowflake.ID
 	Speakers       []*Speaker                    // all speakers registered for this guild
 	Enabled        map[snowflake.ID]bool         // speakerID -> enabled
@@ -31,7 +33,15 @@ func NewGuildStatus(guildID snowflake.ID) *GuildStatus {
 }
 
 func (s *GuildStatus) HasActiveSession() bool {
-	return s.Session != nil && s.Session.Active
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.Session != nil
+}
+
+func (s *GuildStatus) SetSession(session *VoiceSession) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Session = session
 }
 
 // String returns a human-readable summary of the status.
@@ -63,7 +73,7 @@ func (s *GuildStatus) String() string {
 		sb.WriteString("\n**Owner Bot Channel:** not set\n")
 	}
 
-	if s.Session != nil && s.Session.Active {
+	if s.HasActiveSession() {
 		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
 	} else {
 		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")

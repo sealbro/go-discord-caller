@@ -9,7 +9,6 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
@@ -36,7 +35,7 @@ func NewService(speakers store.SpeakerStore, poolSvc *pool.Service) *Service {
 // Returns a zero User and false if the client is not in the pool or the
 // self-user is not yet available.
 func (s *Service) GetUserByID(botUserID snowflake.ID) (discord.User, bool) {
-	client, ok := s.poolSvc.GetClientByToken(botUserID)
+	client, ok := s.poolSvc.GetClientByID(botUserID)
 	if !ok {
 		return discord.User{}, false
 	}
@@ -47,33 +46,14 @@ func (s *Service) GetUserByID(botUserID snowflake.ID) (discord.User, bool) {
 	return selfUser.User, true
 }
 
-// AssignClient assigns an already-open pool gateway to the speaker, or opens a new one.
-// The client is stored directly on sp.Client.
-func (s *Service) AssignClient(sp *domain.Speaker) {
-	if sp.Client != nil {
-		return // already assigned
-	}
-
-	if poolClient, ok := s.poolSvc.GetClientByToken(sp.ID); ok {
-		sp.Client = poolClient
-		slog.Info("speaker assigned from pool",
-			slog.String("speakerID", sp.ID.String()),
-			slog.String("username", sp.Username),
-		)
-	}
-}
-
 // JoinChannel makes the speaker bot join the given voice channel.
 func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID snowflake.ID) error {
-	s.mu.RLock()
-	sp, ok := s.speakers.GetSpeaker(speakerID)
-	s.mu.RUnlock()
-
-	if !ok || sp.Client == nil {
-		return fmt.Errorf("speaker %s is not connected", speakerID)
+	client, ok := s.poolSvc.GetClientByID(speakerID)
+	if !ok {
+		return fmt.Errorf("speaker %s is not in the pool", speakerID)
 	}
 
-	conn := sp.Client.VoiceManager.CreateConn(guildID)
+	conn := client.VoiceManager.CreateConn(guildID)
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
 		return fmt.Errorf("speaker %s join channel %s: %w", speakerID, channelID, err)
 	}
@@ -87,17 +67,10 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 
 // Consume starts the audio relay for the speaker; the cancel func is stored on sp.Cancel.
 func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error {
-	s.mu.Lock()
-	sp, ok := s.speakers.GetSpeaker(speakerID)
-	if !ok || sp.Client == nil {
-		s.mu.Unlock()
-		return fmt.Errorf("speaker %s is not connected", speakerID)
+	client, ok := s.poolSvc.GetClientByID(speakerID)
+	if !ok {
+		return fmt.Errorf("speaker %s is not in the pool", speakerID)
 	}
-
-	relayCtx, cancel := context.WithCancel(ctx)
-	sp.Cancel = cancel
-	client := sp.Client
-	s.mu.Unlock()
 
 	conn := client.VoiceManager.GetConn(guildID)
 	if conn == nil {
@@ -109,12 +82,12 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 	conn.SetOpusFrameReceiver(receiver)
 
 	go func() {
-		<-relayCtx.Done()
+		<-ctx.Done()
 		provider.Close()
 		receiver.Close()
 	}()
 
-	if err := conn.SetSpeaking(relayCtx, voice.SpeakingFlagMicrophone); err != nil {
+	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
 		return fmt.Errorf("set speaking flag: %w", err)
 	}
 
@@ -123,21 +96,8 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 
 // LeaveChannel makes the speaker bot leave its current voice channel.
 func (s *Service) LeaveChannel(ctx context.Context, guildID, speakerID snowflake.ID) {
-	s.mu.Lock()
-	sp, ok := s.speakers.GetSpeaker(speakerID)
+	client, ok := s.poolSvc.GetClientByID(speakerID)
 	if !ok {
-		s.mu.Unlock()
-		return
-	}
-
-	if sp.Cancel != nil {
-		sp.Cancel()
-		sp.Cancel = nil
-	}
-	client := sp.Client
-	s.mu.Unlock()
-
-	if client == nil {
 		return
 	}
 

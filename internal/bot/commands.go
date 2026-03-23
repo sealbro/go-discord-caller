@@ -118,7 +118,7 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 	}
 
 	for _, sp := range shown {
-		enabled := status.Enabled[sp.ID]
+		enabled := sp.Enabled
 		label := "Enable"
 		if enabled {
 			label = "Disable"
@@ -174,13 +174,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	// Reject immediately if a raid is already running in this guild.
-	if status := h.manager.GetStatus(guildID); status.HasActiveSession() {
+	status := h.manager.GetStatus(guildID)
+	if status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
 	}
 
 	go func() {
-		if err = h.manager.StartVoiceRaid(context.TODO(), guildID); err != nil {
+		if err = h.manager.StartVoiceRaid(context.Background(), guildID); err != nil {
 			slog.Warn("failed to start voice raid", slog.Any("err", err))
 		}
 	}()

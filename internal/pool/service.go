@@ -73,8 +73,8 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 	}
 }
 
-// GetClientByToken returns the client for the given botUserID if it exists.
-func (s *Service) GetClientByToken(botUserID snowflake.ID) (*bot.Client, bool) {
+// GetClientByID returns the client for the given botUserID if it exists.
+func (s *Service) GetClientByID(botUserID snowflake.ID) (*bot.Client, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	client, ok := s.poolClients[botUserID]
@@ -110,14 +110,6 @@ func (s *Service) GetIDs() []snowflake.ID {
 func (s *Service) Shutdown(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	// Cancel all relay goroutines and close assigned gateways via the store.
-	for _, sp := range s.speakers.ListAllSpeakers() {
-		if sp.Cancel != nil {
-			sp.Cancel()
-			sp.Cancel = nil
-		}
-	}
 
 	// Close any pool gateways that were never assigned.
 	for token, client := range s.poolClients {

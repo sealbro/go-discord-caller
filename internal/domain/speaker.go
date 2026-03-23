@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"strings"
 
-	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/snowflake/v2"
 )
 
@@ -14,17 +13,13 @@ type Speaker struct {
 	ID       snowflake.ID
 	Username string
 	Enabled  bool
-
-	// Runtime state — not persisted.
-	Client *bot.Client
-	Cancel context.CancelFunc
 }
 
 // VoiceSession represents an active voice raid session inside a guild.
 type VoiceSession struct {
 	GuildID  snowflake.ID
-	Active   bool
 	Speakers []*Speaker
+	Cancel   context.CancelFunc
 }
 
 // BotUserID extracts the Discord ApplicationID (= bot user ID) from a raw bot token.

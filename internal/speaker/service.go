@@ -18,16 +18,16 @@ import (
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
 // Client and Cancel are stored directly on each domain.Speaker.
 type Service struct {
-	mu      sync.RWMutex
-	store   store.Store
-	poolSvc *pool.Service
+	mu       sync.RWMutex
+	speakers store.SpeakerStore
+	poolSvc  *pool.Service
 }
 
 // NewService creates a new speaker Service.
-func NewService(st store.Store, poolSvc *pool.Service) *Service {
+func NewService(speakers store.SpeakerStore, poolSvc *pool.Service) *Service {
 	return &Service{
-		store:   st,
-		poolSvc: poolSvc,
+		speakers: speakers,
+		poolSvc:  poolSvc,
 	}
 }
 
@@ -66,7 +66,7 @@ func (s *Service) AssignClient(sp *domain.Speaker) {
 // JoinChannel makes the speaker bot join the given voice channel.
 func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID snowflake.ID) error {
 	s.mu.RLock()
-	sp, ok := s.store.GetSpeaker(speakerID)
+	sp, ok := s.speakers.GetSpeaker(speakerID)
 	s.mu.RUnlock()
 
 	if !ok || sp.Client == nil {
@@ -88,7 +88,7 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 // Consume starts the audio relay for the speaker; the cancel func is stored on sp.Cancel.
 func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error {
 	s.mu.Lock()
-	sp, ok := s.store.GetSpeaker(speakerID)
+	sp, ok := s.speakers.GetSpeaker(speakerID)
 	if !ok || sp.Client == nil {
 		s.mu.Unlock()
 		return fmt.Errorf("speaker %s is not connected", speakerID)
@@ -124,7 +124,7 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 // LeaveChannel makes the speaker bot leave its current voice channel.
 func (s *Service) LeaveChannel(ctx context.Context, guildID, speakerID snowflake.ID) {
 	s.mu.Lock()
-	sp, ok := s.store.GetSpeaker(speakerID)
+	sp, ok := s.speakers.GetSpeaker(speakerID)
 	if !ok {
 		s.mu.Unlock()
 		return
@@ -150,5 +150,5 @@ func (s *Service) LeaveChannel(ctx context.Context, guildID, speakerID snowflake
 
 func (s *Service) RemoveMember(guildID, userID snowflake.ID) {
 	s.LeaveChannel(context.Background(), guildID, userID)
-	s.store.RemoveSpeaker(userID)
+	s.speakers.RemoveSpeaker(userID)
 }

@@ -17,14 +17,14 @@ import (
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[string]*bot.Client // token -> pre-connected gateway (available pool)
-	store       store.Store
+	speakers    store.SpeakerStore
 }
 
 // NewService creates a new speaker Service.
-func NewService(st store.Store) *Service {
+func NewService(speakers store.SpeakerStore) *Service {
 	return &Service{
 		poolClients: make(map[string]*bot.Client),
-		store:       st,
+		speakers:    speakers,
 	}
 }
 
@@ -103,7 +103,7 @@ func (s *Service) Shutdown(ctx context.Context) {
 	defer s.mu.Unlock()
 
 	// Cancel all relay goroutines and close assigned gateways via the store.
-	for _, sp := range s.store.ListAllSpeakers() {
+	for _, sp := range s.speakers.ListAllSpeakers() {
 		if sp.Cancel != nil {
 			sp.Cancel()
 			sp.Cancel = nil

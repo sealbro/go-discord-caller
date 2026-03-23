@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 
@@ -47,6 +48,10 @@ func Load() (*Config, error) {
 			break
 		}
 		speakerTokens = append(speakerTokens, token)
+	}
+
+	if len(speakerTokens) == 0 {
+		slog.Warn("no speaker tokens configured; voice relay will not work — set DISCORD_SPEAKER_1_BOT_TOKEN (and _2, _3 …)")
 	}
 
 	return &Config{

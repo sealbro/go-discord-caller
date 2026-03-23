@@ -17,7 +17,8 @@ import (
 // Service manages the lifecycle of the pool of speaker gateways.
 type Service struct {
 	mu          sync.RWMutex
-	poolClients map[snowflake.ID]*bot.Client // token -> pre-connected gateway (available pool)
+	poolClients map[snowflake.ID]*bot.Client // botUserID -> pre-connected gateway
+	ids         []snowflake.ID               // ordered; preserves token file order for NextSpeakerID
 }
 
 // NewService creates a new speaker Service.
@@ -50,7 +51,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				slog.Int("index", index),
 				slog.Any("err", err),
 			)
-			return
+			continue
 		}
 
 		if err = client.OpenGateway(ctx); err != nil {
@@ -59,11 +60,12 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				slog.Any("err", err),
 			)
 			client.Close(ctx)
-			return
+			continue
 		}
 
 		s.mu.Lock()
 		s.poolClients[botUserID] = client
+		s.ids = append(s.ids, botUserID)
 		s.mu.Unlock()
 
 		slog.Info("pool: speaker gateway ready", slog.Int("index", index))
@@ -78,29 +80,26 @@ func (s *Service) GetClientByID(botUserID snowflake.ID) (*bot.Client, bool) {
 	return client, ok
 }
 
-// GetClients returns a slice of all clients in the pool.
+// GetClients returns a slice of all clients in the pool in insertion order.
 func (s *Service) GetClients() []*bot.Client {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	clients := make([]*bot.Client, len(s.poolClients))
-	i := 0
-	for _, client := range s.poolClients {
-		clients[i] = client
-		i++
+	clients := make([]*bot.Client, 0, len(s.ids))
+	for _, id := range s.ids {
+		if c, ok := s.poolClients[id]; ok {
+			clients = append(clients, c)
+		}
 	}
 	return clients
 }
 
+// GetIDs returns bot user IDs in the order their tokens were supplied.
 func (s *Service) GetIDs() []snowflake.ID {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	tokens := make([]snowflake.ID, len(s.poolClients))
-	i := 0
-	for token := range s.poolClients {
-		tokens[i] = token
-		i++
-	}
-	return tokens
+	result := make([]snowflake.ID, len(s.ids))
+	copy(result, s.ids)
+	return result
 }
 
 // Shutdown closes all gateways and cancels all relay goroutines.
@@ -108,10 +107,12 @@ func (s *Service) Shutdown(ctx context.Context) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Close any pool gateways that were never assigned.
-	for token, client := range s.poolClients {
-		client.Close(ctx)
-		delete(s.poolClients, token)
+	for _, id := range s.ids {
+		if client, ok := s.poolClients[id]; ok {
+			client.Close(ctx)
+			delete(s.poolClients, id)
+		}
 	}
+	s.ids = nil
 	slog.Info("pool service shut down")
 }

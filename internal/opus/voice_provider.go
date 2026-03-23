@@ -6,32 +6,38 @@ import (
 	"github.com/disgoorg/disgo/voice"
 )
 
+// VoiceProvider streams Opus frames from a channel into a voice connection.
 type VoiceProvider struct {
 	voice.OpusFrameProvider
-	ch     <-chan []byte
-	closed bool
+	ch   <-chan []byte
+	done chan struct{}
 }
 
 func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
 	return &VoiceProvider{
-		ch: ch,
+		ch:   ch,
+		done: make(chan struct{}),
 	}
 }
 
 func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
-	if v.closed {
+	select {
+	case <-v.done:
 		return nil, fmt.Errorf("voice provider is closed")
+	case data, ok := <-v.ch:
+		if !ok {
+			return nil, fmt.Errorf("voice provider channel closed")
+		}
+		return data, nil
 	}
-	// Wait for a frame from the channel. If the provider is closed, return an error.
-	data, ok := <-v.ch
-	if !ok {
-		return nil, fmt.Errorf("voice provider channel closed")
-	}
-	return data, nil
 }
 
 func (v *VoiceProvider) Close() {
-	v.closed = true
+	select {
+	case <-v.done:
+	default:
+		close(v.done)
+	}
 }
 
 // EmptyVoiceProvider is a no-op OpusFrameProvider that never sends audio.

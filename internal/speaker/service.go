@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
@@ -14,9 +13,7 @@ import (
 )
 
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
-// Client and Cancel are stored directly on each domain.Speaker.
 type Service struct {
-	mu      sync.RWMutex
 	poolSvc *pool.Service
 }
 

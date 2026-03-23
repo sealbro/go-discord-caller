@@ -71,12 +71,18 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 	snap := *st
 	snap.Speakers = make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		sp := *v
-		snap.Speakers[k] = &sp
+		snap.Speakers[k] = new(*v)
 	}
 	snap.BoundChannels = make(map[snowflake.ID]snowflake.ID, len(st.BoundChannels))
 	for k, v := range st.BoundChannels {
 		snap.BoundChannels[k] = v
+	}
+	// Deep-copy the session so the snapshot holds a fully independent copy.
+	if st.Session != nil {
+		sessionCopy := *st.Session
+		sessionCopy.Speakers = make([]*domain.Speaker, len(st.Session.Speakers))
+		copy(sessionCopy.Speakers, st.Session.Speakers)
+		snap.Session = &sessionCopy
 	}
 	return snap
 }
@@ -128,9 +134,12 @@ func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 			entries = append(entries, entry{sp, err})
 		}
 
-		// Now apply under write lock.
 		m.mu.Lock()
-		st := domain.NewGuildStatus(guildID, ownerUser.ID)
+		st, ok := m.statuses[guildID]
+		if !ok {
+			st = domain.NewGuildStatus(guildID, ownerUser.ID)
+			m.statuses[guildID] = st
+		}
 		for _, e := range entries {
 			if e.err != nil {
 				slog.Warn("seed: failed to register existing speaker bot",
@@ -139,13 +148,14 @@ func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 				)
 				continue
 			}
-			st.Speakers[e.sp.ID] = &domain.Speaker{ID: e.sp.ID, Username: e.sp.Username, Enabled: true}
-			slog.Info("seed: registered existing speaker bot",
-				slog.String("username", e.sp.Username),
-				slog.String("guildID", guildID.String()),
-			)
+			if _, exists := st.Speakers[e.sp.ID]; !exists {
+				st.Speakers[e.sp.ID] = &domain.Speaker{ID: e.sp.ID, Username: e.sp.Username, Enabled: true}
+				slog.Info("seed: registered existing speaker bot",
+					slog.String("username", e.sp.Username),
+					slog.String("guildID", guildID.String()),
+				)
+			}
 		}
-		m.statuses[guildID] = st
 		m.mu.Unlock()
 	}
 }
@@ -234,11 +244,16 @@ func (m *Service) TrySeedMember(guildID, newUserID snowflake.ID) {
 	}
 	existing, exists := st.Speakers[newUserID]
 	if !exists {
-		return // not previously registered in this guild
+		st.Speakers[newUserID] = &domain.Speaker{ID: sp.ID, Username: sp.Username, Enabled: true}
+		slog.Info("member-join: registered speaker bot",
+			slog.String("username", sp.Username),
+			slog.String("guildID", guildID.String()),
+		)
+		return
 	}
 	// Refresh username, preserve per-guild Enabled state.
 	existing.Username = sp.Username
-	slog.Info("member-join: registered speaker bot",
+	slog.Info("member-join: refreshed speaker username",
 		slog.String("username", sp.Username),
 		slog.String("guildID", guildID.String()),
 	)
@@ -461,13 +476,14 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		return fmt.Errorf("no active voice raid in this server")
 	}
 	session := status.Session
+	ownerUserID := status.OwnerUserID
 	status.Session = nil
 	m.mu.Unlock()
 
 	for _, sp := range session.Speakers {
 		m.speaker.LeaveChannel(ctx, guildID, sp.ID)
 	}
-	m.LeaveChannel(ctx, guildID, status.OwnerUserID)
+	m.LeaveChannel(ctx, guildID, ownerUserID)
 	session.Cancel()
 
 	slog.Info("voice raid stopped", slog.String("guildID", guildID.String()))

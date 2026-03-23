@@ -1,17 +1,18 @@
 package opus
 
 import (
-	"fmt"
 	"log/slog"
+	"sync/atomic"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 )
 
+// VoiceReceiver forwards incoming Opus frames into a channel.
 type VoiceReceiver struct {
 	voice.OpusFrameReceiver
 	ch     chan<- []byte
-	closed bool
+	closed atomic.Bool
 	botID  snowflake.ID
 }
 
@@ -27,8 +28,8 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		return nil
 	}
 
-	if v.closed {
-		return fmt.Errorf("voice receiver is closed for user %d", userID)
+	if v.closed.Load() {
+		return nil // receiver is shut down; discard silently
 	}
 
 	// Ignore frames from our own bot to avoid re-echoing what we send.
@@ -53,11 +54,10 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 
 func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 	slog.Info("cleanup user", slog.Any("userID", userID))
-	return
 }
 
 func (v *VoiceReceiver) Close() {
-	v.closed = true
+	v.closed.Store(true)
 }
 
 // EmptyVoiceReceiver is a no-op OpusFrameReceiver that silently discards all incoming frames.

@@ -62,7 +62,9 @@ func New(cfg *config.Config) (*Bot, error) {
 	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
-	poolSvc.ConnectPool(ctx, cfg.SpeakerTokens)
+	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
+	poolSvc.ConnectPool(poolCtx, cfg.SpeakerTokens)
+	poolCancel()
 	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
 
 	// Wire command handlers.
@@ -113,12 +115,21 @@ func (b *Bot) Run() error {
 // processed by the cache, then returns the IDs of every guild the bot is in.
 // If the bot is not in any guild, nil is returned (global command registration).
 func (b *Bot) discoverGuildIDs(timeout time.Duration) []snowflake.ID {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if len(b.client.Caches.UnreadyGuildIDs()) == 0 {
-			break
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(100 * time.Millisecond)
+	defer tick.Stop()
+
+loop:
+	for {
+		select {
+		case <-deadline.C:
+			break loop
+		case <-tick.C:
+			if len(b.client.Caches.UnreadyGuildIDs()) == 0 {
+				break loop
+			}
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	var ids []snowflake.ID

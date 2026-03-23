@@ -28,7 +28,7 @@ func BotUserID(botToken string) (snowflake.ID, bool) {
 	if idx <= 0 {
 		return 0, false
 	}
-	data, err := base64.RawStdEncoding.DecodeString(botToken[:idx])
+	data, err := base64.RawURLEncoding.DecodeString(botToken[:idx])
 	if err != nil {
 		return 0, false
 	}

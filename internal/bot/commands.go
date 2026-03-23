@@ -177,7 +177,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	go func() {
-		if err = h.manager.StartVoiceRaid(ctx, cancelFunc, guildID); err != nil {
+		if err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID); err != nil {
 			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))
 		}
@@ -281,7 +281,7 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
 	}
 
-	installURL := installUrl(botUserID, guildID)
+	installURL := installURL(botUserID, guildID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: "**Add Speaker Bot**\n" +
@@ -376,7 +376,7 @@ func statusEmoji(enabled bool) string {
 	return "🔇"
 }
 
-func installUrl(clientID snowflake.ID, guildID snowflake.ID) string {
+func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
 	permissions := "391565762894144"
 	installURL := fmt.Sprintf(
 		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%s&guild_id=%s",

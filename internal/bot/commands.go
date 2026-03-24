@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/handler"
@@ -65,22 +66,148 @@ func NewCommandHandlers(m *manager.Service) *CommandHandlers {
 
 // Register attaches all routes to the given router.
 func (h *CommandHandlers) Register(r handler.Router) {
-	r.SlashCommand("/setup", h.handleSetupSpeakers)
+	r.SlashCommand("/setup", h.handleSetup)
 	r.SlashCommand("/start", h.handleStartVoiceRaid)
 	r.SlashCommand("/stop", h.handleStopVoiceRaid)
 	r.SlashCommand("/status", h.handleStatus)
 	r.SlashCommand("/bind-role", h.handleBindRole)
 
-	// Component routes
-	r.ButtonComponent("/speakers/toggle/{speakerID}", h.handleToggleSpeaker)
-	r.ButtonComponent("/speakers/add", h.handleAddSpeakerButton)
-	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}", h.handleBindChannel)
+	// Main setup menu components
+	r.SelectMenuComponent("/setup/bind-role", h.handleBindRoleMenu)
 	r.SelectMenuComponent("/owner/bind-channel", h.handleBindOwnerChannel)
+	r.ButtonComponent("/speakers/page/{page}", h.handleSpeakersPage)
+	r.ButtonComponent("/speakers/menu", h.handleMainMenu)
+
+	// Speaker page components (page number is embedded in the custom ID)
+	r.ButtonComponent("/speakers/toggle/{speakerID}/{page}", h.handleToggleSpeaker)
+	r.ButtonComponent("/speakers/add", h.handleAddSpeakerButton)
+	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}/{page}", h.handleBindChannel)
+}
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+// speakersPerPage is the maximum number of speakers shown per page in the
+// speaker bind menu.  Discord allows 5 action rows per message:
+//   - row 1 = toggle buttons
+//   - rows 2-4 = channel-select menus (one per speaker)
+//   - row 5 = navigation buttons
+const speakersPerPage = 3
+
+// ── Setup message builders ────────────────────────────────────────────────────
+
+// buildMainSetupMessage builds the main setup message:
+//   - Row 1: role select (combobox)
+//   - Row 2: owner channel select (combobox)
+//   - Row 3: "Bind Speakers" button
+func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
+	status := h.manager.GetStatus(guildID)
+	var components []discord.LayoutComponent
+
+	// Row 1 — role selector
+	roleMenu := discord.NewRoleSelectMenu("/setup/bind-role", "Select capture role…")
+	if status.RoleID != nil {
+		roleMenu = roleMenu.AddDefaultValue(*status.RoleID)
+	}
+	components = append(components, discord.NewActionRow(roleMenu))
+
+	// Row 2 — owner bot channel selector
+	ownerMenu := discord.NewChannelSelectMenu("/owner/bind-channel", "Bind caller bot to a voice channel…").
+		WithChannelTypes(discord.ChannelTypeGuildVoice)
+	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
+		ownerMenu = ownerMenu.AddDefaultValue(chID)
+	}
+	components = append(components, discord.NewActionRow(ownerMenu))
+
+	// Row 3 — "Bind Speakers" button
+	components = append(components, discord.NewActionRow(
+		discord.NewPrimaryButton("⚙️ Bind Speakers", "/speakers/page/0"),
+	))
+
+	return "**Speaker Setup**\n" + status.String(), components
+}
+
+// buildSpeakersPageMessage builds a paginated speaker bind page.
+//
+// Layout (≤5 rows):
+//   - Row 1: toggle buttons for each speaker + "Add Speaker" on last page (if token available)
+//   - Rows 2-4: voice-channel select menu per speaker (up to speakersPerPage)
+//   - Row 5: [◀◀ Prev] [🏠 Main Menu] [Next ▶▶]
+func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page int) (string, []discord.LayoutComponent) {
+	status := h.manager.GetStatus(guildID)
+	speakers := status.GetSortedSpeakers()
+
+	totalPages := (len(speakers) + speakersPerPage - 1) / speakersPerPage
+	if totalPages == 0 {
+		totalPages = 1
+	}
+	if page >= totalPages {
+		page = totalPages - 1
+	}
+	if page < 0 {
+		page = 0
+	}
+
+	start := page * speakersPerPage
+	end := start + speakersPerPage
+	if end > len(speakers) {
+		end = len(speakers)
+	}
+	pageSpeakers := speakers[start:end]
+
+	var components []discord.LayoutComponent
+
+	// Row 1 — toggle buttons (+ "Add Speaker" on last page when a token is available)
+	var buttons []discord.InteractiveComponent
+	for _, sp := range pageSpeakers {
+		label := "Enable"
+		if sp.Enabled {
+			label = "Disable"
+		}
+		buttons = append(buttons, discord.NewSecondaryButton(
+			fmt.Sprintf("%s %s (%s)", statusEmoji(sp.Enabled), sp.Username, label),
+			fmt.Sprintf("/speakers/toggle/%s/%d", sp.ID, page),
+		))
+	}
+	isLastPage := page == totalPages-1
+	if isLastPage && h.manager.HasAvailableToken(guildID) {
+		buttons = append(buttons, discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"))
+	}
+	if len(buttons) > 0 {
+		components = append(components, discord.NewActionRow(buttons...))
+	}
+
+	// Rows 2-4 — one channel select per speaker on this page
+	for _, sp := range pageSpeakers {
+		spMenu := discord.NewChannelSelectMenu(
+			fmt.Sprintf("/speakers/bind-channel/%s/%d", sp.ID, page),
+			fmt.Sprintf("Bind %s to a voice channel…", sp.Username),
+		).WithChannelTypes(discord.ChannelTypeGuildVoice)
+		if chID, ok := h.manager.GetBoundChannel(guildID, sp.ID); ok {
+			spMenu = spMenu.AddDefaultValue(chID)
+		}
+		components = append(components, discord.NewActionRow(spMenu))
+	}
+
+	// Row 5 — navigation
+	prevBtn := discord.NewSecondaryButton("◀◀ Prev", fmt.Sprintf("/speakers/page/%d", page-1)).
+		WithDisabled(page == 0)
+	mainBtn := discord.NewSecondaryButton("🏠 Main Menu", "/speakers/menu")
+	nextBtn := discord.NewSecondaryButton("Next ▶▶", fmt.Sprintf("/speakers/page/%d", page+1)).
+		WithDisabled(page >= totalPages-1)
+	components = append(components, discord.NewActionRow(prevBtn, mainBtn, nextBtn))
+
+	content := fmt.Sprintf("**Speaker Bindings** — Page %d/%d\n", page+1, totalPages)
+	if len(speakers) == 0 {
+		content += "_No speakers registered yet._"
+	} else {
+		content += fmt.Sprintf("_%d speaker(s) total._", len(speakers))
+	}
+	return content, components
 }
 
 // ── Slash command handlers ───────────────────────────────────────────────────
 
-func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
@@ -90,82 +217,12 @@ func (h *CommandHandlers) handleSetupSpeakers(_ discord.SlashCommandInteractionD
 		return e.CreateMessage(ephemeral("⚠️ Setup is not available while a voice raid is active. Stop the raid first."))
 	}
 
-	msg, components := h.buildSetupMessage(guildID)
+	msg, components := h.buildMainSetupMessage(guildID)
 	return e.CreateMessage(discord.MessageCreate{
 		Content:    msg,
 		Components: components,
 		Flags:      discord.MessageFlagEphemeral,
 	})
-}
-
-// buildSetupMessage builds the content and action-row components for the speaker setup UI.
-func (h *CommandHandlers) buildSetupMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
-	status := h.manager.GetStatus(guildID)
-
-	var components []discord.LayoutComponent
-
-	// Row 1 — owner bot channel selector
-	ownerMenu := discord.NewChannelSelectMenu("/owner/bind-channel", "Bind caller bot to a voice channel…").
-		WithChannelTypes(discord.ChannelTypeGuildVoice)
-	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
-		ownerMenu = ownerMenu.AddDefaultValue(chID)
-	}
-	components = append(components, discord.NewActionRow(ownerMenu))
-
-	// Discord limit: 5 action rows per message.
-	// Layout: row 1 = owner select, row 2 = all buttons, rows 3-5 = channel selects → max 3 speakers shown.
-	const maxSpeakersShown = 3
-	shown := status.GetSortedSpeakers()
-	if len(shown) > maxSpeakersShown {
-		shown = shown[:maxSpeakersShown]
-	}
-
-	// Row 2 — "Add Speaker" + one toggle button per shown speaker (all in one row, ≤5 buttons).
-	var buttons []discord.InteractiveComponent
-	if h.manager.HasAvailableToken(guildID) {
-		buttons = append(buttons, discord.NewSuccessButton("➕ Add Speaker", "/speakers/add"))
-	}
-
-	for _, sp := range shown {
-		enabled := sp.Enabled
-		label := "Enable"
-		if enabled {
-			label = "Disable"
-		}
-		buttons = append(buttons, discord.NewSecondaryButton(
-			fmt.Sprintf("%s %s (%s)", statusEmoji(enabled), sp.Username, label),
-			fmt.Sprintf("/speakers/toggle/%s", sp.ID),
-		))
-	}
-
-	if len(buttons) > 0 {
-		components = append(components, discord.NewActionRow(buttons...))
-	}
-
-	// Rows 3-5 — one channel select per shown speaker.
-	for _, sp := range shown {
-		spMenu := discord.NewChannelSelectMenu(
-			fmt.Sprintf("/speakers/bind-channel/%s", sp.ID),
-			fmt.Sprintf("Bind %s to a voice channel…", sp.Username),
-		).WithChannelTypes(discord.ChannelTypeGuildVoice)
-		if chID, ok := h.manager.GetBoundChannel(guildID, sp.ID); ok {
-			spMenu = spMenu.AddDefaultValue(chID)
-		}
-		components = append(components, discord.NewActionRow(spMenu))
-	}
-
-	speakers := status.Speakers
-	msg := "**Speaker Setup**\n"
-	if len(speakers) == 0 {
-		msg += "_No speakers registered yet. Use **Add Speaker** to register one._"
-	} else {
-		msg += fmt.Sprintf("_%d speaker(s) registered._", len(speakers))
-		if len(speakers) > maxSpeakersShown {
-			msg += fmt.Sprintf(" _(showing first %d)_", maxSpeakersShown)
-		}
-	}
-
-	return msg, components
 }
 
 func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
@@ -196,7 +253,6 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	// Reject immediately if there is no active raid in this guild.
 	if status := h.manager.GetStatus(guildID); !status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ There is no active voice raid in this server."))
 	}
@@ -240,19 +296,73 @@ func (h *CommandHandlers) handleBindRole(data discord.SlashCommandInteractionDat
 
 // ── Component handlers ───────────────────────────────────────────────────────
 
-// handleToggleSpeaker enables or disables a speaker when the toggle button is clicked.
+// handleSpeakersPage opens (or navigates to) a speaker bind page.
+func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	page, _ := strconv.Atoi(e.Vars["page"])
+
+	msg, components := h.buildSpeakersPageMessage(guildID, page)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
+}
+
+// handleMainMenu returns the user to the main setup message.
+func (h *CommandHandlers) handleMainMenu(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	msg, components := h.buildMainSetupMessage(guildID)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
+}
+
+// handleBindRoleMenu handles role selection from the setup message and refreshes it.
+func (h *CommandHandlers) handleBindRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	roleData, ok := data.(discord.RoleSelectMenuInteractionData)
+	if !ok {
+		return e.CreateMessage(ephemeral("unexpected interaction data type"))
+	}
+
+	roles := roleData.Roles()
+	if len(roles) == 0 {
+		return e.CreateMessage(ephemeral("❌ No role selected."))
+	}
+
+	h.manager.BindRole(guildID, roles[0].ID)
+
+	msg, components := h.buildMainSetupMessage(guildID)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
+}
+
+// handleToggleSpeaker enables or disables a speaker and refreshes the speaker page.
 func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	speakerID, err := snowflake.Parse(e.Vars["speakerID"])
 	if err != nil {
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
 
+	page, _ := strconv.Atoi(e.Vars["page"])
+
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	// Resolve current enabled state.
 	status := h.manager.GetStatus(guildID)
 	sp, ok := status.Speakers[speakerID]
 	if !ok {
@@ -263,8 +373,7 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 		return e.CreateMessage(ephemeral("❌ " + err.Error()))
 	}
 
-	// Rebuild and update the setup message in-place.
-	msg, components := h.buildSetupMessage(guildID)
+	msg, components := h.buildSpeakersPageMessage(guildID, page)
 	return e.UpdateMessage(discord.NewMessageUpdate().
 		WithContent(msg).
 		WithComponents(components...))
@@ -285,8 +394,6 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
 	}
 
-	installURL := installURL(botUserID, guildID)
-
 	return e.CreateMessage(discord.MessageCreate{
 		Content: "**Add Speaker Bot**\n" +
 			"1. Click **Invite to Server** — the bot will be pre-selected for this server.\n" +
@@ -294,19 +401,21 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 			"3. The bot will be registered automatically once it joins the server.",
 		Components: []discord.LayoutComponent{
 			discord.NewActionRow(
-				discord.NewLinkButton("🔗 Invite to Server", installURL),
+				discord.NewLinkButton("🔗 Invite to Server", installURL(botUserID, guildID)),
 			),
 		},
 		Flags: discord.MessageFlagEphemeral,
 	})
 }
 
-// handleBindChannel updates the voice channel bound to a speaker.
+// handleBindChannel updates the voice channel bound to a speaker and refreshes the speaker page.
 func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
 	speakerID, err := snowflake.Parse(e.Vars["speakerID"])
 	if err != nil {
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
+
+	page, _ := strconv.Atoi(e.Vars["page"])
 
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -321,22 +430,17 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	channels := channelData.Channels()
 	if len(channels) == 0 {
 		h.manager.UnbindChannel(guildID, speakerID)
-		return e.CreateMessage(discord.MessageCreate{
-			Content: "✅ Channel binding removed.",
-			Flags:   discord.MessageFlagEphemeral,
-		})
+	} else {
+		h.manager.BindChannel(guildID, speakerID, channels[0].ID)
 	}
 
-	channelID := channels[0].ID
-	h.manager.BindChannel(guildID, speakerID, channelID)
-
-	return e.CreateMessage(discord.MessageCreate{
-		Content: fmt.Sprintf("✅ Speaker <@%s> bound to <#%s>.", speakerID, channelID),
-		Flags:   discord.MessageFlagEphemeral,
-	})
+	msg, components := h.buildSpeakersPageMessage(guildID, page)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
 }
 
-// handleBindOwnerChannel updates the voice channel the owner bot will join.
+// handleBindOwnerChannel updates the owner bot's voice channel and refreshes the main setup message.
 func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -351,13 +455,14 @@ func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteract
 	channels := channelData.Channels()
 	if len(channels) == 0 {
 		h.manager.UnbindOwnerChannel(guildID)
-		return e.CreateMessage(ephemeral("✅ Owner bot channel binding removed."))
+	} else {
+		h.manager.BindOwnerChannel(guildID, channels[0].ID)
 	}
 
-	channelID := channels[0].ID
-	h.manager.BindOwnerChannel(guildID, channelID)
-
-	return e.CreateMessage(ephemeral(fmt.Sprintf("✅ Owner bot will join <#%s> during voice raids.", channelID)))
+	msg, components := h.buildMainSetupMessage(guildID)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -382,9 +487,8 @@ func statusEmoji(enabled bool) string {
 
 func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
 	permissions := "391565762894144"
-	installURL := fmt.Sprintf(
+	return fmt.Sprintf(
 		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%s&guild_id=%s",
 		clientID, permissions, guildID,
 	)
-	return installURL
 }

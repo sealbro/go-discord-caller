@@ -375,7 +375,33 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 	}
 
 	chIn := make(chan []byte, 10)
-	receiver := opus.NewVoiceReceiver(chIn, ownerUser.ID)
+
+	// Build an optional role filter: if a capture role is configured for this guild,
+	// pre-fetch all cached members who hold that role into a set so that
+	// ReceiveOpusFrame only needs a cheap map lookup on every frame.
+	var allowUser func(snowflake.ID) bool
+	if roleID, ok := m.store.GetBoundRole(guildID); ok {
+		allowed := make(map[snowflake.ID]struct{})
+		for member := range m.ownerClient.Caches.Members(guildID) {
+			for _, rID := range member.RoleIDs {
+				if rID == roleID {
+					allowed[member.User.ID] = struct{}{}
+					break
+				}
+			}
+		}
+		slog.Info("role filter built",
+			slog.String("guildID", guildID.String()),
+			slog.String("roleID", roleID.String()),
+			slog.Int("allowedUsers", len(allowed)),
+		)
+		allowUser = func(userID snowflake.ID) bool {
+			_, ok := allowed[userID]
+			return ok
+		}
+	}
+
+	receiver := opus.NewVoiceReceiver(chIn, ownerUser.ID, allowUser)
 	conn.SetOpusFrameReceiver(receiver)
 	provider := opus.NewEmptyVoiceProvider()
 	conn.SetOpusFrameProvider(provider)

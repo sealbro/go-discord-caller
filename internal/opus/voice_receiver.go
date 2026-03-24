@@ -11,15 +11,17 @@ import (
 // VoiceReceiver forwards incoming Opus frames into a channel.
 type VoiceReceiver struct {
 	voice.OpusFrameReceiver
-	ch     chan<- []byte
-	closed atomic.Bool
-	botID  snowflake.ID
+	ch        chan<- []byte
+	closed    atomic.Bool
+	botID     snowflake.ID
+	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 }
 
-func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID) *VoiceReceiver {
+func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool) *VoiceReceiver {
 	return &VoiceReceiver{
-		ch:    ch,
-		botID: botID,
+		ch:        ch,
+		botID:     botID,
+		allowUser: allowUser,
 	}
 }
 
@@ -34,6 +36,11 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 
 	// Ignore frames from our own bot to avoid re-echoing what we send.
 	if v.botID != 0 && userID == v.botID {
+		return nil
+	}
+
+	// Apply optional role/user filter.
+	if v.allowUser != nil && !v.allowUser(userID) {
 		return nil
 	}
 

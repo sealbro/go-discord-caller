@@ -10,6 +10,8 @@ import (
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/cache"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/disgo/voice"
@@ -36,6 +38,8 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Command router
 	r := handler.New()
 
+	memberCache := newGroupedCache[discord.Member](time.Minute * 5)
+
 	// Manager (owner) bot client
 	client, err := disgo.New(cfg.OwnerBotToken,
 		bot.WithGatewayConfigOpts(
@@ -47,6 +51,10 @@ func New(cfg *config.Config) (*Bot, error) {
 			),
 		),
 		bot.WithEventListeners(r),
+		bot.WithCacheConfigOpts(
+			cache.WithCaches(cache.FlagsAll),
+			cache.WithMemberCache(cache.NewMemberCache(memberCache)),
+		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 		),

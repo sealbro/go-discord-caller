@@ -2,7 +2,7 @@
 
 A Go Discord bot that captures voice audio from users with a specific role and relays it live to every bound speaker bot in a voice channel.
 
-[![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller](https://hub.docker.com/r/sealbro/go-discord-caller/)
+[![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
 
 ## How it works
 

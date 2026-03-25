@@ -15,6 +15,8 @@ type Config struct {
 	OwnerBotToken string
 	// SpeakerTokens is the ordered pool of speaker bot tokens loaded from env
 	SpeakerTokens []string
+	// StorePath is the path to the YAML persistence file (default: store.yaml)
+	StorePath string
 }
 
 // Load reads configuration from a .env file (if present) and then from environment variables.
@@ -57,5 +59,14 @@ func Load() (*Config, error) {
 	return &Config{
 		OwnerBotToken: ownerToken,
 		SpeakerTokens: speakerTokens,
+		StorePath:     storePath(),
 	}, nil
+}
+
+// storePath returns the YAML store file path from STORE_PATH, defaulting to "store.yaml".
+func storePath() string {
+	if p := os.Getenv("STORE_PATH"); p != "" {
+		return p
+	}
+	return "store.yaml"
 }

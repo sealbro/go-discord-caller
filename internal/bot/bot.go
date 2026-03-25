@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -64,7 +65,10 @@ func New(cfg *config.Config) (*Bot, error) {
 	}
 
 	// Infrastructure
-	st := store.NewInMemoryStore()
+	st, err := store.NewYAMLStore(cfg.StorePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
+	}
 	poolSvc := pool.NewService()
 	speakerSvc := speaker.NewService(poolSvc)
 	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client)

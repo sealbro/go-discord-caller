@@ -2,6 +2,8 @@
 
 A Go Discord bot that captures voice audio from users with a specific role and relays it live to every bound speaker bot in a voice channel.
 
+[![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller](https://hub.docker.com/r/sealbro/go-discord-caller/)
+
 ## How it works
 
 The system uses **two types of Discord bots**:
@@ -16,32 +18,37 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 ## Features
 
 - **Multi-speaker relay** – unlimited speaker bots, each bound to a different voice channel
-- **Per-guild configuration** – role, owner channel, and per-speaker bindings are stored per guild
+- **Per-guild configuration** – capture role, manager role, owner channel, and per-speaker bindings are stored per guild
 - **Interactive setup UI** – paginated slash-command menus with dropdowns and toggle buttons; no manual config file needed
+- **Role-based access control** – a dedicated manager role can be configured to control who can start/stop raids without granting full admin
 - **Auto-seeding** – speaker bots already in a guild are automatically registered on startup or when they join later
 - **Graceful shutdown** – stops all active voice sessions and closes all gateways cleanly on `SIGTERM` / `Ctrl+C`
 - **Docker-ready** – multi-stage Dockerfile produces a minimal distroless image with all shared libs bundled
 
 ## Slash commands
 
-| Command      | Permission    | Description                                                                            |
-|--------------|---------------|----------------------------------------------------------------------------------------|
-| `/setup`     | Administrator | Open the interactive setup panel (role selector, owner-channel picker, speaker binder) |
-| `/bind-role` | Administrator | Directly set the role whose members' voice will be captured and relayed                |
-| `/start`     | Manage Guild  | Make all enabled speakers join their bound voice channels and begin the voice raid     |
-| `/stop`      | Manage Guild  | Stop the active voice raid and make all speakers leave their channels                  |
-| `/status`    | Everyone      | Show the current capture role, owner channel, speaker bindings, and session state      |
+> Permissions are enforced at **runtime**. Users with the guild's configured manager role always satisfy the required permission check.
+
+| Command             | Permission           | Description                                                                                                  |
+|---------------------|----------------------|--------------------------------------------------------------------------------------------------------------|
+| `/setup`            | Administrator        | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)          |
+| `/bind-role`        | Administrator        | Directly set the role whose members' voice will be captured and relayed                                      |
+| `/bind-manager-role`| Administrator        | Set the role whose members are allowed to use `/setup`, `/start`, and `/stop`                                |
+| `/start`            | Manage Server        | Make all enabled speakers join their bound voice channels and begin the voice raid                           |
+| `/stop`             | Manage Server        | Stop the active voice raid and make all speakers leave their channels                                         |
+| `/status`           | Everyone             | Show the current capture role, manager role, owner channel, speaker bindings, and session state              |
 
 ## Configuration
 
 Configuration is loaded from environment variables (a `.env` file in the working directory is also supported via [godotenv](https://github.com/joho/godotenv)).
 
-| Variable                      | Required | Description                                          |
-|-------------------------------|----------|------------------------------------------------------|
-| `DISCORD_OWNER_BOT_TOKEN`     | ✅        | Token for the owner / caller bot                     |
-| `DISCORD_SPEAKER_1_BOT_TOKEN` | ⚠️       | Token for the first speaker bot                      |
-| `DISCORD_SPEAKER_2_BOT_TOKEN` | ⚠️       | Token for the second speaker bot                     |
-| `DISCORD_SPEAKER_N_BOT_TOKEN` | ⚠️       | … sequential indices; stops at the first missing one |
+| Variable                      | Required | Description                                                    |
+|-------------------------------|----------|----------------------------------------------------------------|
+| `DISCORD_OWNER_BOT_TOKEN`     | ✅        | Token for the owner / caller bot                               |
+| `DISCORD_SPEAKER_1_BOT_TOKEN` | ⚠️       | Token for the first speaker bot                                |
+| `DISCORD_SPEAKER_2_BOT_TOKEN` | ⚠️       | Token for the second speaker bot                               |
+| `DISCORD_SPEAKER_N_BOT_TOKEN` | ⚠️       | … sequential indices; stops at the first missing one           |
+| `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)      |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.
 
@@ -85,7 +92,7 @@ internal/
   pool/             – manages pre-connected speaker gateway clients
   speaker/          – joins channels and streams audio frames
   opus/             – voice frame provider/receiver adapters
-  store/            – in-memory state store
+  store/            – YAML-backed persistent state store
 ```
 
 ## Tech stack

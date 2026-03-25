@@ -1,21 +1,38 @@
-# Build stage
-FROM golang:1.24-alpine AS builder
+ARG GO_VERSION=latest
+ARG LIBDAVE_VERSION=v1.1.1
 
-WORKDIR /app
+FROM golang:${GO_VERSION} as builder
 
-COPY go.mod go.sum ./
-RUN go mod download
+ARG LIBDAVE_VERSION
 
+WORKDIR /src
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bot ./cmd/bot
 
-# Run stage
-FROM alpine:3.21
+WORKDIR /src/cmd/bot
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apt-get update \
+	&& apt-get install -y --no-install-recommends clang git ca-certificates bash pkg-config build-essential libusb-1.0-0-dev unzip cmake nasm zip \
+	&& git clone https://github.com/disgoorg/godave /tmp/godave \
+	&& chmod +x /tmp/godave/scripts/libdave_install.sh \
+	&& /bin/bash /tmp/godave/scripts/libdave_install.sh $LIBDAVE_VERSION
 
-WORKDIR /app
-COPY --from=builder /bot ./bot
+ENV PKG_CONFIG_PATH="/root/.local/lib/pkgconfig"
 
-ENTRYPOINT ["./bot"]
+RUN CGO_ENABLED=1 go build \
+    -o /bin/runner
 
+# Collect all shared library dependencies of the binary
+RUN mkdir -p /runtime-libs && \
+    ldd /bin/runner \
+        | grep "=> /" \
+        | awk '{print $3}' \
+        | xargs -I{} cp --dereference {} /runtime-libs/
+
+FROM gcr.io/distroless/base as runtime
+
+COPY --from=builder /bin/runner /
+COPY --from=builder /runtime-libs/ /usr/local/lib/
+
+ENV LD_LIBRARY_PATH=/usr/local/lib
+
+CMD ["/runner"]

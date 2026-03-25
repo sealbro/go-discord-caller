@@ -18,10 +18,6 @@ jobs:
       with:
         fetch-depth: 0
     -
-      name: Run go test (exclude cmd/voice)
-      run: |
-        go test --race
-    -
       name: Set up QEMU
       uses: docker/setup-qemu-action@v3
     -

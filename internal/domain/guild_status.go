@@ -15,8 +15,9 @@ type GuildStatus struct {
 	OwnerUserID   snowflake.ID                  // owner bot user ID; look up channel via BoundChannels[OwnerUserID]
 	Speakers      map[snowflake.ID]*Speaker     // speakerID -> speaker (Enabled carries per-guild state)
 	BoundChannels map[snowflake.ID]snowflake.ID // userID -> channelID
-	RoleID        *snowflake.ID
-	Session       *VoiceSession // nil when no active session
+	CallerRoleID  *snowflake.ID                 // caller role: members whose voice is captured
+	ManagerRoleID *snowflake.ID                 // manager role: members who can setup/start/stop the bot
+	Session       *VoiceSession                 // nil when no active session
 }
 
 func NewGuildStatus(guildID snowflake.ID, ownerUserID snowflake.ID) *GuildStatus {
@@ -47,10 +48,16 @@ func (s GuildStatus) GetSortedSpeakers() []*Speaker {
 func (s GuildStatus) String() string {
 	var sb strings.Builder
 
-	if s.RoleID != nil {
-		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.RoleID))
+	if s.CallerRoleID != nil {
+		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.CallerRoleID))
 	} else {
 		sb.WriteString("\n**Capture Role:** not set\n")
+	}
+
+	if s.ManagerRoleID != nil {
+		sb.WriteString(fmt.Sprintf("\n**Manager Role:** <@&%s>\n", s.ManagerRoleID))
+	} else {
+		sb.WriteString("\n**Manager Role:** not set\n")
 	}
 
 	if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {

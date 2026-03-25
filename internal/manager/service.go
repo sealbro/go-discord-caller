@@ -295,13 +295,37 @@ func (m *Service) GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool) {
 	return m.store.GetBoundChannel(guildID, ownerUser.ID)
 }
 
-// BindRole sets the Discord role whose members' voice will be captured in the guild.
-func (m *Service) BindRole(guildID, roleID snowflake.ID) {
-	m.store.BindRole(guildID, roleID)
-	slog.Info("role bound",
+// BindCallerRole sets the Discord role whose members' voice will be captured in the guild.
+func (m *Service) BindCallerRole(guildID, roleID snowflake.ID) {
+	m.store.BindRole(guildID, store.RoleTypeCaller, roleID)
+	slog.Info("caller role bound",
 		slog.String("guildID", guildID.String()),
 		slog.String("roleID", roleID.String()),
 	)
+}
+
+// BindManagerRole sets the Discord role whose members are allowed to setup, start and stop the bot.
+func (m *Service) BindManagerRole(guildID, roleID snowflake.ID) {
+	m.store.BindRole(guildID, store.RoleTypeManager, roleID)
+	slog.Info("manager role bound",
+		slog.String("guildID", guildID.String()),
+		slog.String("roleID", roleID.String()),
+	)
+}
+
+// HasManagerRole reports whether any of the supplied role IDs matches the
+// configured manager role for the guild.
+func (m *Service) HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool {
+	managerRoleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeManager)
+	if !ok {
+		return false
+	}
+	for _, id := range memberRoleIDs {
+		if id == managerRoleID {
+			return true
+		}
+	}
+	return false
 }
 
 // ── Status snapshot ───────────────────────────────────────────────────────────
@@ -319,8 +343,11 @@ func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
 			snap.BoundChannels[spID] = chID
 		}
 	}
-	if roleID, ok := m.store.GetBoundRole(guildID); ok {
-		snap.RoleID = &roleID
+	if roleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeCaller); ok {
+		snap.CallerRoleID = &roleID
+	}
+	if managerRoleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeManager); ok {
+		snap.ManagerRoleID = &managerRoleID
 	}
 	ownerUser, _ := m.ownerClient.Caches.SelfUser()
 	snap.OwnerUserID = ownerUser.ID
@@ -380,7 +407,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 	// pre-fetch all cached members who hold that role into a set so that
 	// ReceiveOpusFrame only needs a cheap map lookup on every frame.
 	var allowUser func(snowflake.ID) bool
-	if roleID, ok := m.store.GetBoundRole(guildID); ok {
+	if roleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeCaller); ok {
 		allowed := make(map[snowflake.ID]struct{})
 		for member := range m.ownerClient.Caches.Members(guildID) {
 			for _, rID := range member.RoleIDs {

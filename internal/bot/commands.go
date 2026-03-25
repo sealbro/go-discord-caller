@@ -16,19 +16,16 @@ import (
 // Commands is the list of slash commands registered with Discord.
 var Commands = []discord.ApplicationCommandCreate{
 	discord.SlashCommandCreate{
-		Name:                     "setup",
-		Description:              "List and configure all speaker bots in this server",
-		DefaultMemberPermissions: permPtr(discord.PermissionAdministrator),
+		Name:        "setup",
+		Description: "List and configure all speaker bots in this server",
 	},
 	discord.SlashCommandCreate{
-		Name:                     "start",
-		Description:              "Make all enabled speakers join their bound voice channels",
-		DefaultMemberPermissions: permPtr(discord.PermissionManageGuild),
+		Name:        "start",
+		Description: "Make all enabled speakers join their bound voice channels",
 	},
 	discord.SlashCommandCreate{
-		Name:                     "stop",
-		Description:              "Make all active speakers leave their voice channels",
-		DefaultMemberPermissions: permPtr(discord.PermissionManageGuild),
+		Name:        "stop",
+		Description: "Make all active speakers leave their voice channels",
 	},
 	discord.SlashCommandCreate{
 		Name:        "status",
@@ -42,6 +39,18 @@ var Commands = []discord.ApplicationCommandCreate{
 			discord.ApplicationCommandOptionRole{
 				Name:        "role",
 				Description: "The role to capture voice from",
+				Required:    true,
+			},
+		},
+	},
+	discord.SlashCommandCreate{
+		Name:                     "bind-manager-role",
+		Description:              "Set the role whose members are allowed to setup, start and stop the bot",
+		DefaultMemberPermissions: permPtr(discord.PermissionAdministrator),
+		Options: []discord.ApplicationCommandOption{
+			discord.ApplicationCommandOptionRole{
+				Name:        "role",
+				Description: "The manager role",
 				Required:    true,
 			},
 		},
@@ -71,9 +80,11 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	r.SlashCommand("/stop", h.handleStopVoiceRaid)
 	r.SlashCommand("/status", h.handleStatus)
 	r.SlashCommand("/bind-role", h.handleBindRole)
+	r.SlashCommand("/bind-manager-role", h.handleBindManagerRole)
 
 	// Main setup menu components
 	r.SelectMenuComponent("/setup/bind-role", h.handleBindRoleMenu)
+	r.SelectMenuComponent("/setup/bind-manager-role", h.handleBindManagerRoleMenu)
 	r.SelectMenuComponent("/owner/bind-channel", h.handleBindOwnerChannel)
 	r.ButtonComponent("/speakers/page/{page}", h.handleSpeakersPage)
 	r.ButtonComponent("/speakers/menu", h.handleMainMenu)
@@ -96,21 +107,29 @@ const speakersPerPage = 3
 // ── Setup message builders ────────────────────────────────────────────────────
 
 // buildMainSetupMessage builds the main setup message:
-//   - Row 1: role select (combobox)
-//   - Row 2: owner channel select (combobox)
-//   - Row 3: "Bind Speakers" button
+//   - Row 1: capture role select (combobox)
+//   - Row 2: manager role select (combobox)
+//   - Row 3: owner channel select (combobox)
+//   - Row 4: "Bind Speakers" button
 func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 	var components []discord.LayoutComponent
 
-	// Row 1 — role selector
+	// Row 1 — capture role selector
 	roleMenu := discord.NewRoleSelectMenu("/setup/bind-role", "Select capture role…")
-	if status.RoleID != nil {
-		roleMenu = roleMenu.AddDefaultValue(*status.RoleID)
+	if status.CallerRoleID != nil {
+		roleMenu = roleMenu.AddDefaultValue(*status.CallerRoleID)
 	}
 	components = append(components, discord.NewActionRow(roleMenu))
 
-	// Row 2 — owner bot channel selector
+	// Row 2 — manager role selector
+	managerRoleMenu := discord.NewRoleSelectMenu("/setup/bind-manager-role", "Select manager role…")
+	if status.ManagerRoleID != nil {
+		managerRoleMenu = managerRoleMenu.AddDefaultValue(*status.ManagerRoleID)
+	}
+	components = append(components, discord.NewActionRow(managerRoleMenu))
+
+	// Row 3 — owner bot channel selector
 	ownerMenu := discord.NewChannelSelectMenu("/owner/bind-channel", "Bind caller bot to a voice channel…").
 		WithChannelTypes(discord.ChannelTypeGuildVoice)
 	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
@@ -118,7 +137,7 @@ func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID) (string, [
 	}
 	components = append(components, discord.NewActionRow(ownerMenu))
 
-	// Row 3 — "Bind Speakers" button
+	// Row 4 — "Bind Speakers" button
 	components = append(components, discord.NewActionRow(
 		discord.NewPrimaryButton("⚙️ Bind Speakers", "/speakers/page/0"),
 	))
@@ -213,6 +232,10 @@ func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
+	if !h.isAdminAuthorized(guildID, e.Member()) {
+		return e.CreateMessage(ephemeral("❌ You need the Administrator permission or the server's manager role to use this command."))
+	}
+
 	if h.manager.HasActiveSession(guildID) {
 		return e.CreateMessage(ephemeral("⚠️ Setup is not available while a voice raid is active. Stop the raid first."))
 	}
@@ -229,6 +252,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	if !h.isManagerAuthorized(guildID, e.Member()) {
+		return e.CreateMessage(ephemeral("❌ You need the Manage Server permission or the server's manager role to use this command."))
 	}
 
 	status := h.manager.GetStatus(guildID)
@@ -251,6 +278,10 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	if !h.isManagerAuthorized(guildID, e.Member()) {
+		return e.CreateMessage(ephemeral("❌ You need the Manage Server permission or the server's manager role to use this command."))
 	}
 
 	if status := h.manager.GetStatus(guildID); !status.HasActiveSession() {
@@ -286,10 +317,25 @@ func (h *CommandHandlers) handleBindRole(data discord.SlashCommandInteractionDat
 	}
 
 	roleID := data.Role("role").ID
-	h.manager.BindRole(guildID, roleID)
+	h.manager.BindCallerRole(guildID, roleID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("✅ Capture role set to <@&%s>. Only members with this role will be relayed.", roleID),
+		Flags:   discord.MessageFlagEphemeral,
+	})
+}
+
+func (h *CommandHandlers) handleBindManagerRole(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	roleID := data.Role("role").ID
+	h.manager.BindManagerRole(guildID, roleID)
+
+	return e.CreateMessage(discord.MessageCreate{
+		Content: fmt.Sprintf("✅ Manager role set to <@&%s>. Members with this role can setup, start and stop the bot.", roleID),
 		Flags:   discord.MessageFlagEphemeral,
 	})
 }
@@ -324,7 +370,7 @@ func (h *CommandHandlers) handleMainMenu(_ discord.ButtonInteractionData, e *han
 		WithComponents(components...))
 }
 
-// handleBindRoleMenu handles role selection from the setup message and refreshes it.
+// handleBindRoleMenu handles capture role selection from the setup message and refreshes it.
 func (h *CommandHandlers) handleBindRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -341,7 +387,32 @@ func (h *CommandHandlers) handleBindRoleMenu(data discord.SelectMenuInteractionD
 		return e.CreateMessage(ephemeral("❌ No role selected."))
 	}
 
-	h.manager.BindRole(guildID, roles[0].ID)
+	h.manager.BindCallerRole(guildID, roles[0].ID)
+
+	msg, components := h.buildMainSetupMessage(guildID)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg).
+		WithComponents(components...))
+}
+
+// handleBindManagerRoleMenu handles manager role selection from the setup message and refreshes it.
+func (h *CommandHandlers) handleBindManagerRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	guildID, err := requireGuild(e.GuildID())
+	if err != nil {
+		return e.CreateMessage(ephemeral(err.Error()))
+	}
+
+	roleData, ok := data.(discord.RoleSelectMenuInteractionData)
+	if !ok {
+		return e.CreateMessage(ephemeral("unexpected interaction data type"))
+	}
+
+	roles := roleData.Roles()
+	if len(roles) == 0 {
+		return e.CreateMessage(ephemeral("❌ No role selected."))
+	}
+
+	h.manager.BindManagerRole(guildID, roles[0].ID)
 
 	msg, components := h.buildMainSetupMessage(guildID)
 	return e.UpdateMessage(discord.NewMessageUpdate().
@@ -483,6 +554,30 @@ func statusEmoji(enabled bool) string {
 		return "🔊"
 	}
 	return "🔇"
+}
+
+// isAdminAuthorized reports whether the member has Administrator permission
+// or holds the guild's configured manager role.
+func (h *CommandHandlers) isAdminAuthorized(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+	if member == nil {
+		return false
+	}
+	if member.Permissions.Has(discord.PermissionAdministrator) {
+		return true
+	}
+	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
+}
+
+// isManagerAuthorized reports whether the member has Manage Server permission
+// or holds the guild's configured manager role.
+func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+	if member == nil {
+		return false
+	}
+	if member.Permissions.Has(discord.PermissionManageGuild) {
+		return true
+	}
+	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
 }
 
 func installURL(clientID snowflake.ID, guildID snowflake.ID) string {

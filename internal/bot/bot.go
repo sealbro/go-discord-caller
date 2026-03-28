@@ -165,6 +165,12 @@ func (b *Bot) Run() error {
 		slog.Warn("failed to sync slash commands", slog.Any("err", err))
 	}
 
+	if selfUser, ok := b.client.Caches.SelfUser(); ok {
+		slog.Info("owner bot invite URL",
+			slog.String("url", installOwnerURL(selfUser.ID)),
+		)
+	}
+
 	slog.Info("bot is running. Press Ctrl+C to stop.")
 
 	stop := make(chan os.Signal, 1)

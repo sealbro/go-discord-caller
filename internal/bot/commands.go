@@ -591,10 +591,16 @@ func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *disc
 	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
 }
 
-func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
-	permissions := "391565762894144"
+func installOwnerURL(clientID snowflake.ID) string {
 	return fmt.Sprintf(
-		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%s&guild_id=%s",
-		clientID, permissions, guildID,
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144",
+		clientID,
+	)
+}
+
+func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
+	return fmt.Sprintf(
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144&guild_id=%s",
+		clientID, guildID,
 	)
 }

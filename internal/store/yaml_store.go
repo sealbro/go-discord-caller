@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"sync"
@@ -88,7 +89,7 @@ func (s *YAMLStore) load() error {
 
 // save serialises the current state to the YAML file.
 // Must be called with mu write-locked.
-func (s *YAMLStore) save() {
+func (s *YAMLStore) save() error {
 	// Collect all guild IDs present in either map.
 	guildSet := make(map[snowflake.ID]*yamlGuildEntry)
 	ensureGuild := func(id snowflake.ID) *yamlGuildEntry {
@@ -122,12 +123,12 @@ func (s *YAMLStore) save() {
 
 	out, err := yaml.Marshal(&yd)
 	if err != nil {
-		slog.Error("yaml store: marshal failed", slog.Any("err", err))
-		return
+		return fmt.Errorf("yaml store: marshal failed: %w", err)
 	}
 	if err := os.WriteFile(s.path, out, 0o644); err != nil {
-		slog.Error("yaml store: write failed", slog.String("path", s.path), slog.Any("err", err))
+		return fmt.Errorf("yaml store: write failed: %w", err)
 	}
+	return nil
 }
 
 // ── Store interface ───────────────────────────────────────────────────────────
@@ -136,14 +137,18 @@ func (s *YAMLStore) BindChannel(guildID, userID, channelID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.channels[channelKey{userID, guildID}] = channelID
-	s.save()
+	if err := s.save(); err != nil {
+		slog.Error("yaml store: failed to persist channel binding", slog.Any("err", err))
+	}
 }
 
 func (s *YAMLStore) UnbindChannel(guildID, userID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.channels, channelKey{userID, guildID})
-	s.save()
+	if err := s.save(); err != nil {
+		slog.Error("yaml store: failed to persist channel unbinding", slog.Any("err", err))
+	}
 }
 
 func (s *YAMLStore) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool) {
@@ -157,14 +162,18 @@ func (s *YAMLStore) BindRole(guildID snowflake.ID, roleType RoleType, roleID sno
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.roles[roleKey{guildID, roleType}] = roleID
-	s.save()
+	if err := s.save(); err != nil {
+		slog.Error("yaml store: failed to persist role binding", slog.Any("err", err))
+	}
 }
 
 func (s *YAMLStore) UnbindRole(guildID snowflake.ID, roleType RoleType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.roles, roleKey{guildID, roleType})
-	s.save()
+	if err := s.save(); err != nil {
+		slog.Error("yaml store: failed to persist role unbinding", slog.Any("err", err))
+	}
 }
 
 func (s *YAMLStore) GetBoundRole(guildID snowflake.ID, roleType RoleType) (snowflake.ID, bool) {

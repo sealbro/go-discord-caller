@@ -46,8 +46,11 @@ func NewService(st store.Store, spk *speaker.Service, poolSvc *pool.Service, cli
 func (m *Service) getOrCreateLocked(guildID snowflake.ID) *domain.GuildStatus {
 	st, ok := m.statuses[guildID]
 	if !ok {
-		ownerUser, _ := m.ownerClient.Caches.SelfUser()
-		st = domain.NewGuildStatus(guildID, ownerUser.ID)
+		var ownerID snowflake.ID
+		if ownerUser, ok := m.ownerClient.Caches.SelfUser(); ok {
+			ownerID = ownerUser.ID
+		}
+		st = domain.NewGuildStatus(guildID, ownerID)
 		m.statuses[guildID] = st
 	}
 	return st
@@ -58,10 +61,13 @@ func (m *Service) getOrCreateLocked(guildID snowflake.ID) *domain.GuildStatus {
 func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 	st, ok := m.statuses[guildID]
 	if !ok {
-		ownerUser, _ := m.ownerClient.Caches.SelfUser()
+		var ownerID snowflake.ID
+		if ownerUser, ok := m.ownerClient.Caches.SelfUser(); ok {
+			ownerID = ownerUser.ID
+		}
 		return domain.GuildStatus{
 			GuildID:       guildID,
-			OwnerUserID:   ownerUser.ID,
+			OwnerUserID:   ownerID,
 			Speakers:      make(map[snowflake.ID]*domain.Speaker),
 			BoundChannels: make(map[snowflake.ID]snowflake.ID),
 		}
@@ -118,7 +124,10 @@ func (m *Service) LeaveChannel(ctx context.Context, guildID, ownerUserID snowfla
 // Call this once on startup so that bots invited in a previous session are
 // automatically re-registered.
 func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
-	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	var ownerID snowflake.ID
+	if ownerUser, ok := m.ownerClient.Caches.SelfUser(); ok {
+		ownerID = ownerUser.ID
+	}
 
 	for _, guildID := range guildIDs {
 		// Collect speakers first (I/O outside the lock).
@@ -138,7 +147,7 @@ func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 		m.mu.Lock()
 		st, ok := m.statuses[guildID]
 		if !ok {
-			st = domain.NewGuildStatus(guildID, ownerUser.ID)
+			st = domain.NewGuildStatus(guildID, ownerID)
 			m.statuses[guildID] = st
 		}
 		for _, e := range entries {
@@ -174,17 +183,18 @@ func (m *Service) HasAvailableToken(guildID snowflake.ID) bool {
 // whose bot has NOT yet joined the guild.
 func (m *Service) NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool) {
 	m.mu.RLock()
-	st := m.statuses[guildID]
+	var registeredIDs map[snowflake.ID]struct{}
+	if st := m.statuses[guildID]; st != nil {
+		registeredIDs = make(map[snowflake.ID]struct{}, len(st.Speakers))
+		for id := range st.Speakers {
+			registeredIDs[id] = struct{}{}
+		}
+	}
 	m.mu.RUnlock()
 
 	for _, botUserID := range m.poolSvc.GetIDs() {
-		if st != nil {
-			m.mu.RLock()
-			_, exists := st.Speakers[botUserID]
-			m.mu.RUnlock()
-			if exists {
-				continue // already registered
-			}
+		if _, exists := registeredIDs[botUserID]; exists {
+			continue // already registered
 		}
 		if m.isGuildMember(guildID, botUserID) {
 			continue // already a guild member on Discord's side
@@ -279,19 +289,30 @@ func (m *Service) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, b
 
 // BindOwnerChannel binds a voice channel to the owner bot for a guild.
 func (m *Service) BindOwnerChannel(guildID, channelID snowflake.ID) {
-	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	ownerUser, ok := m.ownerClient.Caches.SelfUser()
+	if !ok {
+		slog.Warn("bind owner channel: self-user not yet cached", slog.String("guildID", guildID.String()))
+		return
+	}
 	m.store.BindChannel(guildID, ownerUser.ID, channelID)
 }
 
 // UnbindOwnerChannel removes the owner bot's channel binding for a guild.
 func (m *Service) UnbindOwnerChannel(guildID snowflake.ID) {
-	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	ownerUser, ok := m.ownerClient.Caches.SelfUser()
+	if !ok {
+		slog.Warn("unbind owner channel: self-user not yet cached", slog.String("guildID", guildID.String()))
+		return
+	}
 	m.store.UnbindChannel(guildID, ownerUser.ID)
 }
 
 // GetOwnerChannel returns the bound voice channel for the owner bot in a guild.
 func (m *Service) GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool) {
-	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	ownerUser, ok := m.ownerClient.Caches.SelfUser()
+	if !ok {
+		return 0, false
+	}
 	return m.store.GetBoundChannel(guildID, ownerUser.ID)
 }
 
@@ -349,10 +370,11 @@ func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
 	if managerRoleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeManager); ok {
 		snap.ManagerRoleID = &managerRoleID
 	}
-	ownerUser, _ := m.ownerClient.Caches.SelfUser()
-	snap.OwnerUserID = ownerUser.ID
-	if chID, ok := m.store.GetBoundChannel(guildID, ownerUser.ID); ok {
-		snap.BoundChannels[ownerUser.ID] = chID
+	if ownerUser, ok := m.ownerClient.Caches.SelfUser(); ok {
+		snap.OwnerUserID = ownerUser.ID
+		if chID, ok := m.store.GetBoundChannel(guildID, ownerUser.ID); ok {
+			snap.BoundChannels[ownerUser.ID] = chID
+		}
 	}
 
 	return snap
@@ -385,11 +407,15 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 	}
 	speakers := make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		speakers[k] = new(*v)
+		sp := *v
+		speakers[k] = &sp
 	}
 	m.mu.RUnlock()
 
-	ownerUser, _ := m.ownerClient.Caches.SelfUser()
+	ownerUser, ok := m.ownerClient.Caches.SelfUser()
+	if !ok {
+		return fmt.Errorf("owner bot self-user not yet cached")
+	}
 	if chID, ok := m.store.GetBoundChannel(guildID, ownerUser.ID); ok {
 		if err := m.JoinChannel(ctx, guildID, chID); err != nil {
 			return fmt.Errorf("failed to join owner channel: %w", err)
@@ -473,6 +499,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 			chOut := make(chan []byte, 10)
 			if err := m.speaker.Consume(ctx, speakerID, guildID, chOut); err != nil {
 				slog.Error("failed to consume voice data", slog.String("speakerID", speakerID.String()), slog.Any("err", err))
+				m.speaker.LeaveChannel(ctx, guildID, speakerID)
 				return
 			}
 			resultCh <- joinResult{sp, chOut}
@@ -513,22 +540,22 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 
 	go func() {
 		defer func() {
-			provider.Close()
+			// Close receiver first so no new frames are sent to chIn after we stop draining it.
 			receiver.Close()
+			provider.Close()
+			// Close each speaker output channel to signal VoiceProviders to stop.
 			for _, out := range outs {
 				close(out)
 			}
-			close(chIn)
+			// chIn is intentionally not closed here: VoiceReceiver.Close() guarantees
+			// no further sends, so the channel is safe to let the GC reclaim.
 			slog.Info("voice raid ended", slog.String("guildID", guildID.String()))
 		}()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			case pkt, ok := <-chIn:
-				if !ok {
-					return
-				}
+			case pkt := <-chIn:
 				for _, out := range outs {
 					select {
 					case out <- pkt:

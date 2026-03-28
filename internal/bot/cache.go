@@ -12,11 +12,16 @@ import (
 
 var _ cache.GroupedCache[discord.Member] = (*groupedCache[discord.Member])(nil)
 
-func newGroupedCache[T any](entityExpiration time.Duration) cache.GroupedCache[T] {
-	return &groupedCache[T]{
+func newGroupedCache[T any](entityExpiration time.Duration) *groupedCache[T] {
+	g := &groupedCache[T]{
 		cache:            make(map[snowflake.ID]map[snowflake.ID]cacheEntity[T]),
 		entityExpiration: entityExpiration,
+		stopCh:           make(chan struct{}),
 	}
+	if entityExpiration > 0 {
+		go g.cleanupLoop()
+	}
+	return g
 }
 
 type cacheEntity[T any] struct {
@@ -28,6 +33,7 @@ type groupedCache[T any] struct {
 	cache            map[snowflake.ID]map[snowflake.ID]cacheEntity[T]
 	mu               sync.RWMutex
 	entityExpiration time.Duration
+	stopCh           chan struct{}
 }
 
 func (g *groupedCache[T]) Get(groupID snowflake.ID, id snowflake.ID) (T, bool) {
@@ -53,17 +59,39 @@ func (g *groupedCache[T]) Put(groupID snowflake.ID, id snowflake.ID, entity T) {
 		groupEntities = make(map[snowflake.ID]cacheEntity[T])
 		g.cache[groupID] = groupEntities
 	}
-	if g.entityExpiration > 0 {
-		for _, gV := range g.cache {
-			for cK, cV := range gV {
-				if time.Since(cV.lastPut) > g.entityExpiration {
-					delete(gV, cK)
-				}
-			}
-		}
-	}
 
 	groupEntities[id] = cacheEntity[T]{value: entity, lastPut: time.Now()}
+}
+
+// cleanupLoop runs in the background and evicts expired entries every half-expiration interval.
+func (g *groupedCache[T]) cleanupLoop() {
+	ticker := time.NewTicker(g.entityExpiration / 2)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			g.mu.Lock()
+			for _, gV := range g.cache {
+				for cK, cV := range gV {
+					if time.Since(cV.lastPut) > g.entityExpiration {
+						delete(gV, cK)
+					}
+				}
+			}
+			g.mu.Unlock()
+		case <-g.stopCh:
+			return
+		}
+	}
+}
+
+// Stop shuts down the background cleanup goroutine.
+func (g *groupedCache[T]) Stop() {
+	select {
+	case <-g.stopCh:
+	default:
+		close(g.stopCh)
+	}
 }
 
 func (g *groupedCache[T]) Remove(groupID snowflake.ID, id snowflake.ID) (T, bool) {

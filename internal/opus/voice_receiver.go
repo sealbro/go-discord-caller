@@ -2,7 +2,6 @@ package opus
 
 import (
 	"log/slog"
-	"sync/atomic"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
@@ -12,7 +11,7 @@ import (
 type VoiceReceiver struct {
 	voice.OpusFrameReceiver
 	ch        chan<- []byte
-	closed    atomic.Bool
+	done      chan struct{}
 	botID     snowflake.ID
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 }
@@ -20,6 +19,7 @@ type VoiceReceiver struct {
 func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool) *VoiceReceiver {
 	return &VoiceReceiver{
 		ch:        ch,
+		done:      make(chan struct{}),
 		botID:     botID,
 		allowUser: allowUser,
 	}
@@ -30,8 +30,11 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		return nil
 	}
 
-	if v.closed.Load() {
-		return nil // receiver is shut down; discard silently
+	// Non-blocking check: if already closed, discard silently.
+	select {
+	case <-v.done:
+		return nil
+	default:
 	}
 
 	// Ignore frames from our own bot to avoid re-echoing what we send.
@@ -49,10 +52,12 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	data := make([]byte, len(packet.Opus))
 	copy(data, packet.Opus)
 
-	// Try to send the frame into the channel. If the channel is full, drop the frame
-	// to avoid blocking the receiver goroutine.
+	// Try to forward the frame. Selecting on done prevents a send to a
+	// channel that the relay goroutine has already stopped draining.
 	select {
 	case v.ch <- data:
+	case <-v.done:
+		// receiver was closed between the check above and here; discard safely
 	default:
 		slog.Info("dropping opus frame: channel full")
 	}
@@ -64,7 +69,11 @@ func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 }
 
 func (v *VoiceReceiver) Close() {
-	v.closed.Store(true)
+	select {
+	case <-v.done:
+	default:
+		close(v.done)
+	}
 }
 
 // EmptyVoiceReceiver is a no-op OpusFrameReceiver that silently discards all incoming frames.

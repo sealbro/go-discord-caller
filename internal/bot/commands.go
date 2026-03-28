@@ -289,7 +289,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	}
 
 	go func() {
-		if err := h.manager.StopVoiceRaid(context.TODO(), guildID); err != nil {
+		if err := h.manager.StopVoiceRaid(context.Background(), guildID); err != nil {
 			slog.Warn("failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
 		}
 	}()
@@ -349,7 +349,11 @@ func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e 
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	page, _ := strconv.Atoi(e.Vars["page"])
+	page, err := strconv.Atoi(e.Vars["page"])
+	if err != nil {
+		slog.Warn("handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		page = 0
+	}
 
 	msg, components := h.buildSpeakersPageMessage(guildID, page)
 	return e.UpdateMessage(discord.NewMessageUpdate().
@@ -427,7 +431,11 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
 
-	page, _ := strconv.Atoi(e.Vars["page"])
+	page, err := strconv.Atoi(e.Vars["page"])
+	if err != nil {
+		slog.Warn("handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		page = 0
+	}
 
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -486,7 +494,11 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
 
-	page, _ := strconv.Atoi(e.Vars["page"])
+	page, err := strconv.Atoi(e.Vars["page"])
+	if err != nil {
+		slog.Warn("handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		page = 0
+	}
 
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {

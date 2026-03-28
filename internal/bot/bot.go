@@ -13,24 +13,52 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/config"
+	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
+// ManagerService is the interface consumed by the bot layer (commands, handlers).
+// Defining it here keeps the bot package decoupled from the concrete manager.Service.
+type ManagerService interface {
+	GetStatus(guildID snowflake.ID) domain.GuildStatus
+	HasActiveSession(guildID snowflake.ID) bool
+	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) error
+	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
+	BindCallerRole(guildID, roleID snowflake.ID)
+	BindManagerRole(guildID, roleID snowflake.ID)
+	BindChannel(guildID, userID, channelID snowflake.ID)
+	UnbindChannel(guildID, userID snowflake.ID)
+	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
+	BindOwnerChannel(guildID, channelID snowflake.ID)
+	UnbindOwnerChannel(guildID snowflake.ID)
+	GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool)
+	HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
+	ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) error
+	NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool)
+	HasAvailableToken(guildID snowflake.ID) bool
+	SeedExistingSpeakers(guildIDs []snowflake.ID)
+	TrySeedMember(guildID, newUserID snowflake.ID)
+	RemoveSpeaker(guildID, userID snowflake.ID)
+	Shutdown(ctx context.Context)
+}
+
 // Bot wraps the disgo client and all application services.
 type Bot struct {
-	client      *bot.Client
-	manager     *manager.Service
-	cfg         *config.Config
-	memberCache *groupedCache[discord.Member]
+	client       *bot.Client
+	manager      ManagerService
+	cfg          *config.Config
+	memberCache  *groupedCache[discord.Member]
+	guildReadyCh chan []snowflake.ID
 }
 
 // New creates and configures a new Bot instance with all services wired together.
@@ -41,6 +69,9 @@ func New(cfg *config.Config) (*Bot, error) {
 	r := handler.New()
 
 	memberCache := newGroupedCache[discord.Member](5 * time.Minute)
+
+	// Buffered channel (cap 1) receives guild IDs from the Ready event for command sync.
+	guildReadyCh := make(chan []snowflake.ID, 1)
 
 	// Manager (owner) bot client
 	client, err := disgo.New(cfg.OwnerBotToken,
@@ -65,6 +96,18 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, err
 	}
 
+	// Capture guild IDs from the Ready event for use in command sync.
+	client.AddEventListeners(bot.NewListenerFunc(func(e *events.Ready) {
+		ids := make([]snowflake.ID, 0, len(e.Guilds))
+		for _, g := range e.Guilds {
+			ids = append(ids, g.ID)
+		}
+		select {
+		case guildReadyCh <- ids:
+		default:
+		}
+	}))
+
 	// Infrastructure
 	st, err := store.NewYAMLStore(cfg.StorePath)
 	if err != nil {
@@ -87,10 +130,11 @@ func New(cfg *config.Config) (*Bot, error) {
 	client.AddEventListeners(eventListeners(managerSvc)...)
 
 	return &Bot{
-		client:      client,
-		manager:     managerSvc,
-		cfg:         cfg,
-		memberCache: memberCache,
+		client:       client,
+		manager:      managerSvc,
+		cfg:          cfg,
+		memberCache:  memberCache,
+		guildReadyCh: guildReadyCh,
 	}, nil
 }
 
@@ -108,8 +152,14 @@ func (b *Bot) Run() error {
 		b.client.Close(ctx)
 	}()
 
-	// Register slash commands scoped to every guild the bot is already in.
-	guildIDs := b.discoverGuildIDs(5 * time.Second)
+	// Wait for the Ready event to deliver guild IDs, then sync slash commands.
+	// Falls back to global sync on timeout.
+	var guildIDs []snowflake.ID
+	select {
+	case guildIDs = <-b.guildReadyCh:
+	case <-time.After(10 * time.Second):
+		slog.Warn("timed out waiting for Ready event, syncing commands globally")
+	}
 	slog.Info("discovered guilds for command sync", slog.Int("count", len(guildIDs)))
 	if err := handler.SyncCommands(b.client, Commands, guildIDs); err != nil {
 		slog.Warn("failed to sync slash commands", slog.Any("err", err))
@@ -124,32 +174,4 @@ func (b *Bot) Run() error {
 	slog.Info("shutting down...")
 
 	return nil
-}
-
-// discoverGuildIDs waits (up to timeout) for all GUILD_CREATE events to be
-// processed by the cache, then returns the IDs of every guild the bot is in.
-// If the bot is not in any guild, nil is returned (global command registration).
-func (b *Bot) discoverGuildIDs(timeout time.Duration) []snowflake.ID {
-	deadline := time.NewTimer(timeout)
-	defer deadline.Stop()
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
-
-loop:
-	for {
-		select {
-		case <-deadline.C:
-			break loop
-		case <-tick.C:
-			if len(b.client.Caches.UnreadyGuildIDs()) == 0 {
-				break loop
-			}
-		}
-	}
-
-	var ids []snowflake.ID
-	for g := range b.client.Caches.Guilds() {
-		ids = append(ids, g.ID)
-	}
-	return ids
 }

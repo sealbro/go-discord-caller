@@ -23,13 +23,13 @@ type Service struct {
 	statuses map[snowflake.ID]*domain.GuildStatus // protected by mu
 
 	store       store.Store
-	speaker     *speaker.Service
-	poolSvc     *pool.Service
+	speaker     speaker.SpeakerService
+	poolSvc     pool.PoolService
 	ownerClient *bot.Client
 }
 
 // NewService creates a new manager Service.
-func NewService(st store.Store, spk *speaker.Service, poolSvc *pool.Service, client *bot.Client) *Service {
+func NewService(st store.Store, spk speaker.SpeakerService, poolSvc pool.PoolService, client *bot.Client) *Service {
 	return &Service{
 		statuses:    make(map[snowflake.ID]*domain.GuildStatus),
 		store:       st,
@@ -77,8 +77,7 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 	snap := *st
 	snap.Speakers = make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		sp := *v
-		snap.Speakers[k] = &sp
+		snap.Speakers[k] = new(*v)
 	}
 	snap.BoundChannels = make(map[snowflake.ID]snowflake.ID, len(st.BoundChannels))
 	for k, v := range st.BoundChannels {
@@ -430,27 +429,26 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 	chIn := make(chan []byte, 10)
 
 	// Build an optional role filter: if a capture role is configured for this guild,
-	// pre-fetch all cached members who hold that role into a set so that
-	// ReceiveOpusFrame only needs a cheap map lookup on every frame.
+	// close over a live lookup against the member cache so that role changes
+	// (grant/revoke) take effect on the next received frame without restarting the raid.
 	var allowUser func(snowflake.ID) bool
 	if roleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeCaller); ok {
-		allowed := make(map[snowflake.ID]struct{})
-		for member := range m.ownerClient.Caches.Members(guildID) {
-			for _, rID := range member.RoleIDs {
-				if rID == roleID {
-					allowed[member.User.ID] = struct{}{}
-					break
-				}
-			}
-		}
-		slog.Info("role filter built",
+		slog.Info("role filter active",
 			slog.String("guildID", guildID.String()),
 			slog.String("roleID", roleID.String()),
-			slog.Int("allowedUsers", len(allowed)),
 		)
+		caches := m.ownerClient.Caches
 		allowUser = func(userID snowflake.ID) bool {
-			_, ok := allowed[userID]
-			return ok
+			member, ok := caches.Member(guildID, userID)
+			if !ok {
+				return false
+			}
+			for _, rID := range member.RoleIDs {
+				if rID == roleID {
+					return true
+				}
+			}
+			return false
 		}
 	}
 

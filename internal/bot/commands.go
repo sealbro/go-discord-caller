@@ -10,7 +10,6 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -65,11 +64,11 @@ func permPtr(p discord.Permissions) omit.Omit[*discord.Permissions] {
 
 // CommandHandlers wires all slash command and component routes to the manager service.
 type CommandHandlers struct {
-	manager *manager.Service
+	manager ManagerService
 }
 
 // NewCommandHandlers creates a new CommandHandlers.
-func NewCommandHandlers(m *manager.Service) *CommandHandlers {
+func NewCommandHandlers(m ManagerService) *CommandHandlers {
 	return &CommandHandlers{manager: m}
 }
 

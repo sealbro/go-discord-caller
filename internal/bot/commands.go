@@ -10,7 +10,6 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -65,11 +64,11 @@ func permPtr(p discord.Permissions) omit.Omit[*discord.Permissions] {
 
 // CommandHandlers wires all slash command and component routes to the manager service.
 type CommandHandlers struct {
-	manager *manager.Service
+	manager ManagerService
 }
 
 // NewCommandHandlers creates a new CommandHandlers.
-func NewCommandHandlers(m *manager.Service) *CommandHandlers {
+func NewCommandHandlers(m ManagerService) *CommandHandlers {
 	return &CommandHandlers{manager: m}
 }
 
@@ -289,7 +288,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	}
 
 	go func() {
-		if err := h.manager.StopVoiceRaid(context.TODO(), guildID); err != nil {
+		if err := h.manager.StopVoiceRaid(context.Background(), guildID); err != nil {
 			slog.Warn("failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
 		}
 	}()
@@ -349,7 +348,11 @@ func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e 
 		return e.CreateMessage(ephemeral(err.Error()))
 	}
 
-	page, _ := strconv.Atoi(e.Vars["page"])
+	page, err := strconv.Atoi(e.Vars["page"])
+	if err != nil {
+		slog.Warn("handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		page = 0
+	}
 
 	msg, components := h.buildSpeakersPageMessage(guildID, page)
 	return e.UpdateMessage(discord.NewMessageUpdate().
@@ -427,7 +430,11 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
 
-	page, _ := strconv.Atoi(e.Vars["page"])
+	page, err := strconv.Atoi(e.Vars["page"])
+	if err != nil {
+		slog.Warn("handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		page = 0
+	}
 
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -486,7 +493,11 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
 	}
 
-	page, _ := strconv.Atoi(e.Vars["page"])
+	page, err := strconv.Atoi(e.Vars["page"])
+	if err != nil {
+		slog.Warn("handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		page = 0
+	}
 
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
@@ -580,10 +591,16 @@ func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *disc
 	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
 }
 
-func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
-	permissions := "391565762894144"
+func installOwnerURL(clientID snowflake.ID) string {
 	return fmt.Sprintf(
-		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%s&guild_id=%s",
-		clientID, permissions, guildID,
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144",
+		clientID,
+	)
+}
+
+func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
+	return fmt.Sprintf(
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144&guild_id=%s",
+		clientID, guildID,
 	)
 }

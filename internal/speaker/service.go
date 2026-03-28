@@ -12,13 +12,21 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
+// SpeakerService is the interface for speaker operations used by dependent packages.
+type SpeakerService interface {
+	GetUserByID(botUserID snowflake.ID) (discord.User, bool)
+	JoinChannel(ctx context.Context, speakerID, guildID, channelID snowflake.ID) error
+	Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error
+	LeaveChannel(ctx context.Context, guildID, speakerID snowflake.ID)
+}
+
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
 type Service struct {
-	poolSvc *pool.Service
+	poolSvc pool.PoolService
 }
 
 // NewService creates a new speaker Service.
-func NewService(poolSvc *pool.Service) *Service {
+func NewService(poolSvc pool.PoolService) *Service {
 	return &Service{
 		poolSvc: poolSvc,
 	}

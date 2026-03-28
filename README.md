@@ -1,10 +1,40 @@
 # go-discord-caller
 
-A Go Discord bot that captures voice audio from users with a specific role and relays it live to every bound speaker bot in a voice channel.
+A Go Discord bot that captures voice audio from a user with a specific role and relays it live to every bound speaker bot in a voice channel.
 
 [![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
 
 ## How it works
+
+```mermaid
+graph TB
+    subgraph Discord Guild
+        CR["🎙️ Capture Role - 'caller'"]
+        subgraph Owner Bot
+            OB["🤖 Owner / Caller Bot"]
+            OCH["🔊 Owner Voice Channel"]
+        end
+
+        subgraph Speaker Bots
+            SP1["📢 Speaker Bot 1"]
+            SP2["📢 Speaker Bot 2"]
+            SP3["📢 Speaker Bot N"]
+            SCH1["🔉 Speaker Channel 1"]
+            SCH2["🔉 Speaker Channel 2"]
+            SCH3["🔉 Speaker Channel N"]
+        end
+
+    end
+
+    CR -- "🗣️ user with role speaks" --> OCH
+    OB -- "👂 listens & captures audio" --> OCH
+    OB -- "📡 relays audio frames" --> SP1
+    OB -- "📡 relays audio frames" --> SP2
+    OB -- "📡 relays audio frames" --> SP3
+    SP1 -- "▶️ plays back" --> SCH1
+    SP2 -- "▶️ plays back" --> SCH2
+    SP3 -- "▶️ plays back" --> SCH3
+```
 
 The system uses **two types of Discord bots**:
 
@@ -22,21 +52,17 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 - **Interactive setup UI** – paginated slash-command menus with dropdowns and toggle buttons; no manual config file needed
 - **Role-based access control** – a dedicated manager role can be configured to control who can start/stop raids without granting full admin
 - **Auto-seeding** – speaker bots already in a guild are automatically registered on startup or when they join later
-- **Graceful shutdown** – stops all active voice sessions and closes all gateways cleanly on `SIGTERM` / `Ctrl+C`
-- **Docker-ready** – multi-stage Dockerfile produces a minimal distroless image with all shared libs bundled
 
 ## Slash commands
 
-> Permissions are enforced at **runtime**. Users with the guild's configured manager role always satisfy the required permission check.
+> Manager role is configured via `/setup`. `/status` is available to everyone.
 
-| Command             | Permission           | Description                                                                                                  |
-|---------------------|----------------------|--------------------------------------------------------------------------------------------------------------|
-| `/setup`            | Administrator        | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)          |
-| `/bind-role`        | Administrator        | Directly set the role whose members' voice will be captured and relayed                                      |
-| `/bind-manager-role`| Administrator        | Set the role whose members are allowed to use `/setup`, `/start`, and `/stop`                                |
-| `/start`            | Manage Server        | Make all enabled speakers join their bound voice channels and begin the voice raid                           |
-| `/stop`             | Manage Server        | Stop the active voice raid and make all speakers leave their channels                                         |
-| `/status`           | Everyone             | Show the current capture role, manager role, owner channel, speaker bindings, and session state              |
+| Command   | Required role      | Description                                                                                         |
+|-----------|--------------------|-----------------------------------------------------------------------------------------------------|
+| `/setup`  | Manager role       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder) |
+| `/start`  | Manager role       | Make all enabled speakers join their bound voice channels and begin the voice raid                  |
+| `/stop`   | Manager role       | Stop the active voice raid and make all speakers leave their channels                               |
+| `/status` | Everyone           | Show the current capture role, manager role, owner channel, speaker bindings, and session state     |
 
 ## Configuration
 
@@ -45,20 +71,49 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | Variable                      | Required | Description                                                    |
 |-------------------------------|----------|----------------------------------------------------------------|
 | `DISCORD_OWNER_BOT_TOKEN`     | ✅        | Token for the owner / caller bot                               |
-| `DISCORD_SPEAKER_1_BOT_TOKEN` | ⚠️       | Token for the first speaker bot                                |
-| `DISCORD_SPEAKER_2_BOT_TOKEN` | ⚠️       | Token for the second speaker bot                               |
-| `DISCORD_SPEAKER_N_BOT_TOKEN` | ⚠️       | … sequential indices; stops at the first missing one           |
+| `DISCORD_SPEAKER_BOT_TOKEN_1` | ⚠️       | Token for the first speaker bot                                |
+| `DISCORD_SPEAKER_BOT_TOKEN_2` | ⚠️       | Token for the second speaker bot                               |
+| `DISCORD_SPEAKER_BOT_TOKEN_N` | ⚠️       | … any numeric suffix; gaps in numbering are supported          |
 | `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)      |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.
 
-### Example `.env`
+## Discord app setup
 
+### 1. Create the bots
+
+For each bot (owner first, then one per speaker) go to [https://discord.com/developers/applications](https://discord.com/developers/applications), click **New Application**, give it a name, set a profile image and banner.
+
+Then open the **Bot** section:
+- Click **Reset Token**, copy and save it — you won't see it again
+- **Owner bot only:** enable **Server Members Intent** under *Privileged Gateway Intents*
+
+Add all tokens to your `.env`:
 ```env
-DISCORD_OWNER_BOT_TOKEN=your-owner-bot-token
-DISCORD_SPEAKER_1_BOT_TOKEN=your-speaker-1-token
-DISCORD_SPEAKER_2_BOT_TOKEN=your-speaker-2-token
+DISCORD_OWNER_BOT_TOKEN=your-owner-token
+DISCORD_SPEAKER_BOT_TOKEN_1=your-speaker-1-token
+DISCORD_SPEAKER_BOT_TOKEN_2=your-speaker-2-token
 ```
+
+To invite the **owner bot** to your server, open the **Installation** section, copy the Install Link and append the required scope and permissions:
+```
+https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions=391565762894144
+```
+> The ready-to-use invite URL is also printed to the logs automatically when the bot starts (`owner bot invite URL`).
+
+> Speaker bots do **not** need to be added to the server manually — use the `/setup` command after the bot is running to invite them one by one.
+
+### 2. Start the bot and finish setup
+
+1. Start the bot (see [Running locally](#running-locally) or [Docker](#docker)).
+2. In your Discord server, run `/setup` to open the interactive panel:
+   - Bind the **capture role** — members with this role will have their voice relayed
+   - Bind the **manager role** — members with this role can use `/start` and `/stop`
+   - Bind the **owner bot** to a voice channel
+   - Add speaker bots via the **Add Speaker** button and bind each to a voice channel
+3. Run `/start` to begin a voice raid.
+
+---
 
 ## Running locally
 
@@ -70,34 +125,42 @@ go run ./cmd/bot
 
 ## Docker
 
+### Pull from Docker Hub
+
 ```bash
-# Build
+# Pull and run (recommended)
+docker run -d \
+  --env-file .env \
+  -e STORE_PATH=/data/store.yaml \
+  -v $(pwd)/data:/data \
+  sealbro/go-discord-caller
+```
+
+The YAML store is mounted from `./data/store.yaml` on the host so bindings survive container restarts.
+
+Individual env variables can be passed with `-e` instead of `--env-file`:
+
+```bash
+docker run -d \
+  -e DISCORD_OWNER_BOT_TOKEN=your-owner-token \
+  -e DISCORD_SPEAKER_BOT_TOKEN_1=your-speaker-1-token \
+  -e STORE_PATH=/data/store.yaml \
+  -v $(pwd)/data:/data \
+  sealbro/go-discord-caller
+```
+
+### Build locally
+
+```bash
 docker build -t go-discord-caller .
 
-# Run
-docker run --env-file .env go-discord-caller
+docker run -d --env-file .env go-discord-caller
 ```
 
 The multi-stage build installs `libdave`, compiles the binary with CGO, then copies the binary and all shared-library dependencies into a minimal `distroless/base` image.
-
-## Project structure
-
-```
-cmd/bot/            – application entry point
-internal/
-  bot/              – disgo client wiring, slash-command handlers, event listeners
-  config/           – environment-variable loader
-  domain/           – core types: GuildStatus, Speaker, VoiceSession
-  manager/          – orchestrates speaker lifecycle and voice raid sessions
-  pool/             – manages pre-connected speaker gateway clients
-  speaker/          – joins channels and streams audio frames
-  opus/             – voice frame provider/receiver adapters
-  store/            – YAML-backed persistent state store
-```
 
 ## Tech stack
 
 - [disgo](https://github.com/disgoorg/disgo) – Discord API & gateway client
 - [godave / libdave](https://github.com/disgoorg/godave) – Discord DAVE E2EE voice protocol (CGO)
 - [godotenv](https://github.com/joho/godotenv) – `.env` file loading
-- Go 1.26+

@@ -6,11 +6,10 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
 // eventListeners returns all event listeners to register with the client.
-func eventListeners(managerSvc *manager.Service) []bot.EventListener {
+func eventListeners(managerSvc ManagerService) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
@@ -22,7 +21,7 @@ func eventListeners(managerSvc *manager.Service) []bot.EventListener {
 
 // onReady is called when the bot has connected and is ready.
 // It seeds the speaker list with any pool bots already joined to each guild.
-func onReady(m *manager.Service) func(*events.Ready) {
+func onReady(m ManagerService) func(*events.Ready) {
 	return func(e *events.Ready) {
 		slog.Info("bot is ready", slog.String("username", e.User.Username))
 
@@ -38,7 +37,7 @@ func onReady(m *manager.Service) func(*events.Ready) {
 // onGuildMemberAdd is called whenever a new member joins a guild.
 // If the member is an unregistered pool speaker bot it is automatically
 // registered, mirroring the startup seeding logic in SeedExistingSpeakers.
-func onGuildMemberAdd(m *manager.Service) func(*events.GuildMemberJoin) {
+func onGuildMemberAdd(m ManagerService) func(*events.GuildMemberJoin) {
 	return func(e *events.GuildMemberJoin) {
 		go m.TrySeedMember(e.GuildID, e.Member.User.ID)
 	}
@@ -46,7 +45,7 @@ func onGuildMemberAdd(m *manager.Service) func(*events.GuildMemberJoin) {
 
 // onGuildMemberLeave is called whenever a member leaves a guild.
 // If the leaving member is a registered speaker bot it is removed from the guild status.
-func onGuildMemberLeave(m *manager.Service) func(leave *events.GuildMemberLeave) {
+func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 	return func(e *events.GuildMemberLeave) {
 		go m.RemoveSpeaker(e.GuildID, e.User.ID)
 	}

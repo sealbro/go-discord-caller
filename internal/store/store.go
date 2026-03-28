@@ -7,13 +7,13 @@ import (
 )
 
 // RoleType distinguishes the two role kinds the bot tracks per guild.
-type RoleType uint8
+type RoleType string
 
 const (
 	// RoleTypeCaller is the role whose members' voice is captured and relayed.
-	RoleTypeCaller RoleType = iota
+	RoleTypeCaller RoleType = "caller"
 	// RoleTypeManager is the role whose members are allowed to setup, start and stop the bot.
-	RoleTypeManager
+	RoleTypeManager RoleType = "manager"
 )
 
 // channelKey is the composite key for a voice-channel binding.

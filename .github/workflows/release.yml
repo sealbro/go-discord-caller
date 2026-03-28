@@ -41,3 +41,23 @@ jobs:
         build-args: "GO_VERSION=${{ env.GO_VERSION }}"
         push: true
         tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest,${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}
+    -
+      name: Extract changelog for release
+      id: changelog
+      run: |
+        version="${{ env.RELEASE_VERSION }}"
+        notes=$(awk "/^## \[${version}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+        {
+          echo "notes<<EOF"
+          echo "$notes"
+          echo "EOF"
+        } >> $GITHUB_OUTPUT
+    -
+      name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ env.RELEASE_VERSION }}
+        name: ${{ env.RELEASE_VERSION }}
+        body: ${{ steps.changelog.notes }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

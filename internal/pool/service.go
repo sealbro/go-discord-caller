@@ -14,6 +14,13 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/domain"
 )
 
+// PoolService is the interface for speaker pool operations used by dependent packages.
+type PoolService interface {
+	GetClientByID(botUserID snowflake.ID) (*bot.Client, bool)
+	GetIDs() []snowflake.ID
+	Shutdown(ctx context.Context)
+}
+
 // Service manages the lifecycle of the pool of speaker gateways.
 type Service struct {
 	mu          sync.RWMutex

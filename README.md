@@ -6,6 +6,36 @@ A Go Discord bot that captures voice audio from a user with a specific role and 
 
 ## How it works
 
+```mermaid
+graph TB
+    subgraph Discord Guild
+        CR["🎙️ Capture Role - 'caller'"]
+        subgraph Owner Bot
+            OB["🤖 Owner / Caller Bot"]
+            OCH["🔊 Owner Voice Channel"]
+        end
+
+        subgraph Speaker Bots
+            SP1["📢 Speaker Bot 1"]
+            SP2["📢 Speaker Bot 2"]
+            SP3["📢 Speaker Bot N"]
+            SCH1["🔉 Speaker Channel 1"]
+            SCH2["🔉 Speaker Channel 2"]
+            SCH3["🔉 Speaker Channel N"]
+        end
+
+    end
+
+    CR -- "🗣️ user with role speaks" --> OCH
+    OB -- "👂 listens & captures audio" --> OCH
+    OB -- "📡 relays audio frames" --> SP1
+    OB -- "📡 relays audio frames" --> SP2
+    OB -- "📡 relays audio frames" --> SP3
+    SP1 -- "▶️ plays back" --> SCH1
+    SP2 -- "▶️ plays back" --> SCH2
+    SP3 -- "▶️ plays back" --> SCH3
+```
+
 The system uses **two types of Discord bots**:
 
 | Role                   | Description                                                                                                                                               |
@@ -134,4 +164,3 @@ The multi-stage build installs `libdave`, compiles the binary with CGO, then cop
 - [disgo](https://github.com/disgoorg/disgo) – Discord API & gateway client
 - [godave / libdave](https://github.com/disgoorg/godave) – Discord DAVE E2EE voice protocol (CGO)
 - [godotenv](https://github.com/joho/godotenv) – `.env` file loading
-- Go 1.26+

@@ -14,7 +14,7 @@ func eventListeners(managerSvc ManagerService) []bot.EventListener {
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
-		bot.NewListenerFunc(onVoiceJoin()),
+		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
 		bot.NewListenerFunc(onVoiceLeave()),
 	}
 }
@@ -52,19 +52,21 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 }
 
 // onVoiceJoin is called whenever a user joins a voice channel.
-func onVoiceJoin() func(*events.GuildVoiceJoin) {
+// It checks whether the joining user holds the guild's configured caller role.
+func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
 		// Ignore the bot's own voice state changes.
 		if e.Member.User.ID == e.Client().ID() {
 			return
 		}
 
-		channelID := e.VoiceState.ChannelID
+		guildID := e.VoiceState.GuildID
+		allowed := m.HasCallerRole(guildID, e.Member.RoleIDs)
 		slog.Info("user joined voice channel",
 			slog.String("userID", e.Member.User.ID.String()),
-			slog.String("channelID", channelID.String()),
+			slog.String("channelID", e.VoiceState.ChannelID.String()),
+			slog.Bool("allowedToSpeak", allowed),
 		)
-		// TODO: add your call logic here (e.g. join when a user enters a channel)
 	}
 }
 

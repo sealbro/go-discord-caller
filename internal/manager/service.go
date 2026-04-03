@@ -348,6 +348,22 @@ func (m *Service) HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake
 	return false
 }
 
+// HasCallerRole reports whether any of the supplied role IDs matches the
+// configured caller role for the guild. If no caller role is set, returns true
+// so that all users are allowed when the role is unconfigured.
+func (m *Service) HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool {
+	callerRoleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
+	if !ok {
+		return true // no restriction configured
+	}
+	for _, id := range memberRoleIDs {
+		if id == callerRoleID {
+			return true
+		}
+	}
+	return false
+}
+
 // ── Status snapshot ───────────────────────────────────────────────────────────
 
 // GetStatus returns a safe, enriched value snapshot of the guild status.

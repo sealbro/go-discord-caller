@@ -43,6 +43,7 @@ type ManagerService interface {
 	UnbindOwnerChannel(guildID snowflake.ID)
 	GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool)
 	HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
+	HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
 	ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) error
 	NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool)
 	HasAvailableToken(guildID snowflake.ID) bool
@@ -121,7 +122,16 @@ func New(cfg *config.Config) (*Bot, error) {
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
 	poolSvc.ConnectPool(poolCtx, cfg.SpeakerTokens)
 	poolCancel()
-	slog.Info("speaker pool ready", slog.Int("total", len(cfg.SpeakerTokens)))
+
+	total := len(poolSvc.GetIDs())
+	connected := len(poolSvc.GetClients())
+	if connected < total {
+		return nil, fmt.Errorf("speaker pool: only %d/%d speaker gateways connected at startup", connected, total)
+	}
+	slog.Info("speaker pool ready", slog.Int("total", total))
+
+	// Start watchdog to monitor gateway health and reconnect bots that failed at startup.
+	poolSvc.StartWatchdog(ctx, 30*time.Second)
 
 	// Wire command handlers.
 	cmdHandlers := NewCommandHandlers(managerSvc)

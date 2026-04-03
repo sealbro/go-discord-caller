@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-03
+
+### Added
+- **Setup UI — "Bind Roles" page**: capture role and manager role selectors extracted from the main setup menu into a dedicated sub-page, navigated via a `🎭 Bind Roles` button alongside `⚙️ Bind Speakers`
+- **Setup UI — "Add Speaker" sub-page**: `➕ Add Speaker` moved to the main menu and now updates the message in-place showing the OAuth invite link and a `🏠 Main Menu` return button, keeping navigation consistent
+- **Speaker gateway watchdog**: `pool.Service.StartWatchdog` runs every 30 s; logs a warning for any disconnected gateway (disgo's internal backoff handles reconnection) and actively reconnects bots whose gateway never connected at startup
+- **Gateway reconnection on member join**: `TrySeedMember` and `SeedExistingSpeakers` attempt `pool.Reconnect` before giving up when `newSpeaker` fails due to a missing pool client
+- **Recovery for unregistered guild members**: `NextSpeakerID` now calls `TrySeedMember` in the background for any pool bot that is already a guild member but missing from the speakers map (e.g. seeding failed at startup)
+- **Caller role check on voice join**: `onVoiceJoin` logs whether the joining user holds the configured capture role (`allowedToSpeak`)
+- **Hard startup validation**: `bot.New` returns an error if any speaker gateway fails to connect; owner gateway failure in `bot.Run` is surfaced as an error to `main`
+
+### Changed
+- `pool.ConnectPool` stores a `*bot.Client` for every valid-token bot even when `OpenGateway` fails, preserving the token for later reconnection
+- `GetClientByID` now returns `false` for bots whose gateway is not in `StatusReady` (was: any stored client)
+
 ## [0.2.0] - 2026-03-28
 
 ### Added

@@ -32,6 +32,7 @@ FROM gcr.io/distroless/base as runtime
 
 COPY --from=builder /bin/runner /
 COPY --from=builder /runtime-libs/ /usr/local/lib/
+COPY samples/ /samples/
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 

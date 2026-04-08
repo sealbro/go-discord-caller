@@ -17,9 +17,11 @@ type Speaker struct {
 
 // VoiceSession represents an active voice raid session inside a guild.
 type VoiceSession struct {
-	GuildID  snowflake.ID
-	Speakers []*Speaker
-	Cancel   context.CancelFunc
+	GuildID   snowflake.ID
+	Speakers  []*Speaker
+	Cancel    context.CancelFunc
+	RelayCode string // set for host sessions; empty for standalone raids
+	IsGuest   bool   // true when this guild joined another guild's session
 }
 
 // BotUserID extracts the Discord ApplicationID (= bot user ID) from a raw bot token.

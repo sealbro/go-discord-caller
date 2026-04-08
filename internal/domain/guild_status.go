@@ -17,6 +17,7 @@ type GuildStatus struct {
 	BoundChannels map[snowflake.ID]snowflake.ID // userID -> channelID
 	CallerRoleID  *snowflake.ID                 // caller role: members whose voice is captured
 	ManagerRoleID *snowflake.ID                 // manager role: members who can setup/start/stop the bot
+	RelayCode     string                        // persistent relay code for this guild (always set after seeding)
 	Session       *VoiceSession                 // nil when no active session
 }
 
@@ -81,8 +82,17 @@ func (s GuildStatus) String() string {
 		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
 	}
 
+	if s.RelayCode != "" {
+		sb.WriteString(fmt.Sprintf("\n**Relay Code:** `%s`\n", s.RelayCode))
+	}
+
 	if s.Session != nil {
-		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
+		switch {
+		case s.Session.IsGuest:
+			sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 guest relay (host code: `%s`, %d speakers joined)\n", s.Session.RelayCode, len(s.Session.Speakers)))
+		default:
+			sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
+		}
 	} else {
 		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")
 	}

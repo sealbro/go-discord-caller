@@ -32,7 +32,8 @@ import (
 type ManagerService interface {
 	GetStatus(guildID snowflake.ID) domain.GuildStatus
 	HasActiveSession(guildID snowflake.ID) bool
-	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) error
+	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) (string, error)
+	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code string, guildID snowflake.ID) error
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	BindCallerRole(guildID, roleID snowflake.ID)
 	BindManagerRole(guildID, roleID snowflake.ID)
@@ -48,6 +49,7 @@ type ManagerService interface {
 	NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool)
 	HasAvailableToken(guildID snowflake.ID) bool
 	SeedExistingSpeakers(guildIDs []snowflake.ID)
+	SeedGuild(guildID snowflake.ID)
 	TrySeedMember(guildID, newUserID snowflake.ID)
 	RemoveSpeaker(guildID, userID snowflake.ID)
 	Shutdown(ctx context.Context)

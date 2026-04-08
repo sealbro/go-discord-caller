@@ -20,7 +20,14 @@ var Commands = []discord.ApplicationCommandCreate{
 	},
 	discord.SlashCommandCreate{
 		Name:        "start",
-		Description: "Make all enabled speakers join their bound voice channels",
+		Description: "Start a voice raid, or join an existing one as a guest using a relay code",
+		Options: []discord.ApplicationCommandOption{
+			discord.ApplicationCommandOptionString{
+				Name:        "code",
+				Description: "Relay code from another server's active voice raid (leave empty to start a new one)",
+				Required:    false,
+			},
+		},
 	},
 	discord.SlashCommandCreate{
 		Name:        "stop",
@@ -263,7 +270,7 @@ func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *
 	})
 }
 
-func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
@@ -278,15 +285,30 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
 	}
 
+	code, hasCode := data.OptString("code")
+
 	ctx, cancelFunc := context.WithCancel(context.Background())
+	if hasCode && code != "" {
+		go func() {
+			if err := h.manager.JoinSession(ctx, cancelFunc, code, guildID); err != nil {
+				cancelFunc()
+				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
+			}
+		}()
+		return e.CreateMessage(ephemeral(fmt.Sprintf("🔴 **Joined relay session** `%s`. Speakers are connecting to their bound channels.", code)))
+	}
+
 	go func() {
-		if err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID); err != nil {
+		relayCode, err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID)
+		if err != nil {
 			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))
+		} else {
+			slog.Info("voice raid started", slog.String("relayCode", relayCode))
 		}
 	}()
 
-	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels."))
+	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Use `/status` to see the relay code."))
 }
 
 func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {

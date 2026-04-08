@@ -1,6 +1,9 @@
 package store
 
 import (
+	"crypto/rand"
+	"encoding/base32"
+	"strings"
 	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -37,19 +40,34 @@ type Store interface {
 	BindRole(guildID snowflake.ID, roleType RoleType, roleID snowflake.ID)
 	UnbindRole(guildID snowflake.ID, roleType RoleType)
 	GetBoundRole(guildID snowflake.ID, roleType RoleType) (snowflake.ID, bool)
+
+	// GetOrCreateRelayCode returns the persistent relay code for guildID.
+	// If none exists it generates, persists, and returns a new one.
+	GetOrCreateRelayCode(guildID snowflake.ID) string
+	// GetRelayCode returns the stored relay code for guildID without creating one.
+	GetRelayCode(guildID snowflake.ID) (string, bool)
+}
+
+// generateRelayCode creates a cryptographically random 8-character uppercase code.
+func generateRelayCode() string {
+	b := make([]byte, 5)
+	_, _ = rand.Read(b)
+	return strings.ToUpper(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))[:8]
 }
 
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
-	mu       sync.RWMutex
-	channels map[channelKey]snowflake.ID // (userID, guildID) -> channelID
-	roles    map[roleKey]snowflake.ID    // (guildID, roleType) -> roleID
+	mu         sync.RWMutex
+	channels   map[channelKey]snowflake.ID // (userID, guildID) -> channelID
+	roles      map[roleKey]snowflake.ID    // (guildID, roleType) -> roleID
+	relayCodes map[snowflake.ID]string     // guildID -> relay code
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		channels: make(map[channelKey]snowflake.ID),
-		roles:    make(map[roleKey]snowflake.ID),
+		channels:   make(map[channelKey]snowflake.ID),
+		roles:      make(map[roleKey]snowflake.ID),
+		relayCodes: make(map[snowflake.ID]string),
 	}
 }
 
@@ -89,4 +107,22 @@ func (s *InMemoryStore) GetBoundRole(guildID snowflake.ID, roleType RoleType) (s
 	defer s.mu.RUnlock()
 	roleID, ok := s.roles[roleKey{guildID, roleType}]
 	return roleID, ok
+}
+
+func (s *InMemoryStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if code, ok := s.relayCodes[guildID]; ok {
+		return code
+	}
+	code := generateRelayCode()
+	s.relayCodes[guildID] = code
+	return code
+}
+
+func (s *InMemoryStore) GetRelayCode(guildID snowflake.ID) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	code, ok := s.relayCodes[guildID]
+	return code, ok
 }

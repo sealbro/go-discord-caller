@@ -23,9 +23,10 @@ type yamlRoleEntry struct {
 }
 
 type yamlGuildEntry struct {
-	GuildID  uint64             `yaml:"guild_id"`
-	Channels []yamlChannelEntry `yaml:"channels,omitempty"`
-	Roles    []yamlRoleEntry    `yaml:"roles,omitempty"`
+	GuildID   uint64             `yaml:"guild_id"`
+	RelayCode string             `yaml:"relay_code,omitempty"`
+	Channels  []yamlChannelEntry `yaml:"channels,omitempty"`
+	Roles     []yamlRoleEntry    `yaml:"roles,omitempty"`
 }
 
 type yamlData struct {
@@ -37,18 +38,20 @@ type yamlData struct {
 // YAMLStore is a thread-safe, file-backed implementation of Store.
 // All bindings are persisted to a YAML file after every mutation.
 type YAMLStore struct {
-	mu       sync.RWMutex
-	path     string
-	channels map[channelKey]snowflake.ID
-	roles    map[roleKey]snowflake.ID
+	mu         sync.RWMutex
+	path       string
+	channels   map[channelKey]snowflake.ID
+	roles      map[roleKey]snowflake.ID
+	relayCodes map[snowflake.ID]string
 }
 
 // NewYAMLStore opens (or creates) the YAML file at path and loads existing bindings.
 func NewYAMLStore(path string) (*YAMLStore, error) {
 	s := &YAMLStore{
-		path:     path,
-		channels: make(map[channelKey]snowflake.ID),
-		roles:    make(map[roleKey]snowflake.ID),
+		path:       path,
+		channels:   make(map[channelKey]snowflake.ID),
+		roles:      make(map[roleKey]snowflake.ID),
+		relayCodes: make(map[snowflake.ID]string),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -83,6 +86,9 @@ func (s *YAMLStore) load() error {
 		for _, r := range g.Roles {
 			s.roles[roleKey{guildID, r.RoleType}] = snowflake.ID(r.RoleID)
 		}
+		if g.RelayCode != "" {
+			s.relayCodes[guildID] = g.RelayCode
+		}
 	}
 	return nil
 }
@@ -114,6 +120,10 @@ func (s *YAMLStore) save() error {
 			RoleType: k.roleType,
 			RoleID:   uint64(v),
 		})
+	}
+	for guildID, code := range s.relayCodes {
+		g := ensureGuild(guildID)
+		g.RelayCode = code
 	}
 
 	yd := yamlData{}
@@ -181,4 +191,25 @@ func (s *YAMLStore) GetBoundRole(guildID snowflake.ID, roleType RoleType) (snowf
 	defer s.mu.RUnlock()
 	roleID, ok := s.roles[roleKey{guildID, roleType}]
 	return roleID, ok
+}
+
+func (s *YAMLStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if code, ok := s.relayCodes[guildID]; ok {
+		return code
+	}
+	code := generateRelayCode()
+	s.relayCodes[guildID] = code
+	if err := s.save(); err != nil {
+		slog.Error("yaml store: failed to persist relay code", slog.Any("err", err))
+	}
+	return code
+}
+
+func (s *YAMLStore) GetRelayCode(guildID snowflake.ID) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	code, ok := s.relayCodes[guildID]
+	return code, ok
 }

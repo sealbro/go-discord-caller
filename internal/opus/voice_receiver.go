@@ -59,7 +59,7 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	case <-v.done:
 		// receiver was closed between the check above and here; discard safely
 	default:
-		slog.Info("dropping opus frame: channel full")
+		slog.Debug("dropping opus frame: channel full", slog.String("botID", v.botID.String()))
 	}
 	return nil
 }

@@ -91,6 +91,7 @@ func New(cfg *config.Config) (*Bot, error) {
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			voice.WithLogger(slog.New(slog.DiscardHandler)),
 		),
 	)
 	if err != nil {
@@ -115,8 +116,8 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
 	}
 	poolSvc := pool.NewService()
-	speakerSvc := speaker.NewService(poolSvc)
-	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client)
+	speakerSvc := speaker.NewService(poolSvc, cfg.Test)
+	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client, cfg.Test)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)

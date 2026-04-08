@@ -8,6 +8,7 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
@@ -23,12 +24,14 @@ type SpeakerService interface {
 // Service manages the lifecycle of speaker bot gateway connections and audio relay.
 type Service struct {
 	poolSvc pool.PoolService
+	test    config.TestConfig
 }
 
 // NewService creates a new speaker Service.
-func NewService(poolSvc pool.PoolService) *Service {
+func NewService(poolSvc pool.PoolService, test config.TestConfig) *Service {
 	return &Service{
 		poolSvc: poolSvc,
+		test:    test,
 	}
 }
 
@@ -78,7 +81,23 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 	if conn == nil {
 		return fmt.Errorf("speaker %s is not connected to a voice channel in guild %s", speakerID, guildID)
 	}
-	provider := opus.NewVoiceProvider(chOut)
+
+	var provider voice.OpusFrameProvider
+	if s.test.IsTestBot(speakerID) {
+		provider, _ = opus.NewFileVoiceProvider(s.test.FileDCA)
+		go func() {
+			for {
+				_, closed := <-chOut
+				if !closed {
+					slog.Info("closing file voice channel")
+					return
+				}
+			}
+		}()
+	} else {
+		provider = opus.NewVoiceProvider(chOut)
+	}
+
 	conn.SetOpusFrameProvider(provider)
 	receiver := opus.NewEmptyVoiceReceiver()
 	conn.SetOpusFrameReceiver(receiver)

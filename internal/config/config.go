@@ -9,8 +9,25 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/disgoorg/snowflake/v2"
 	"github.com/joho/godotenv"
 )
+
+// TestConfig holds optional test/debug overrides for audio playback.
+type TestConfig struct {
+	// SpeakerBotID is the bot user ID that plays FileDCA instead of relaying audio (zero = disabled)
+	SpeakerBotID snowflake.ID
+	// FileDCA is the path to a .dca file played by SpeakerBotID (empty = disabled)
+	FileDCA string
+}
+
+func (t TestConfig) Enabled() bool {
+	return t.SpeakerBotID != 0 && t.FileDCA != ""
+}
+
+func (t TestConfig) IsTestBot(id snowflake.ID) bool {
+	return t.Enabled() && id == t.SpeakerBotID
+}
 
 // Config holds all application configuration.
 type Config struct {
@@ -20,6 +37,8 @@ type Config struct {
 	SpeakerTokens []string
 	// StorePath is the path to the YAML persistence file (default: store.yaml)
 	StorePath string
+	// Test holds optional test/debug audio overrides
+	Test TestConfig
 }
 
 var speakerTokenPattern = regexp.MustCompile(`^DISCORD_SPEAKER_BOT_TOKEN_(\d+)$`)
@@ -56,6 +75,10 @@ func Load() (*Config, error) {
 		OwnerBotToken: ownerToken,
 		SpeakerTokens: speakerTokens,
 		StorePath:     storePath(),
+		Test: TestConfig{
+			SpeakerBotID: parseSnowflake(os.Getenv("TEST_SPEAKER_BOT_ID")),
+			FileDCA:      os.Getenv("TEST_FILE_DCA"),
+		},
 	}, nil
 }
 
@@ -92,6 +115,18 @@ func loadSpeakerTokens() []string {
 		tokens = append(tokens, t.token)
 	}
 	return tokens
+}
+
+func parseSnowflake(s string) snowflake.ID {
+	if s == "" {
+		return 0
+	}
+	id, err := snowflake.Parse(s)
+	if err != nil {
+		slog.Warn("invalid snowflake ID, ignoring", slog.String("value", s), slog.Any("err", err))
+		return 0
+	}
+	return id
 }
 
 // storePath returns the YAML store file path from STORE_PATH, defaulting to "store.yaml".

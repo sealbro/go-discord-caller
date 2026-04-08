@@ -164,3 +164,7 @@ The multi-stage build installs `libdave`, compiles the binary with CGO, then cop
 - [disgo](https://github.com/disgoorg/disgo) – Discord API & gateway client
 - [godave / libdave](https://github.com/disgoorg/godave) – Discord DAVE E2EE voice protocol (CGO)
 - [godotenv](https://github.com/joho/godotenv) – `.env` file loading
+
+## Articles
+
+- [Building a Discord Caller (Voice Relay) Bot in Go](https://dev.to/sealbro/building-a-discord-caller-voice-relay-bot-in-go-5b9h)

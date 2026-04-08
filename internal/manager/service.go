@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
@@ -26,16 +27,18 @@ type Service struct {
 	speaker     speaker.SpeakerService
 	poolSvc     pool.PoolService
 	ownerClient *bot.Client
+	test        config.TestConfig
 }
 
 // NewService creates a new manager Service.
-func NewService(st store.Store, spk speaker.SpeakerService, poolSvc pool.PoolService, client *bot.Client) *Service {
+func NewService(st store.Store, spk speaker.SpeakerService, poolSvc pool.PoolService, client *bot.Client, test config.TestConfig) *Service {
 	return &Service{
 		statuses:    make(map[snowflake.ID]*domain.GuildStatus),
 		store:       st,
 		speaker:     spk,
 		poolSvc:     poolSvc,
 		ownerClient: client,
+		test:        test,
 	}
 }
 
@@ -455,10 +458,15 @@ func (m *Service) StartVoiceRaid(ctx context.Context, cancelFunc context.CancelF
 		)
 		caches := m.ownerClient.Caches
 		allowUser = func(userID snowflake.ID) bool {
+			if m.test.IsTestBot(userID) {
+				return true // allowlist the special testing user for convenience
+			}
+
 			member, ok := caches.Member(guildID, userID)
 			if !ok {
 				return false
 			}
+
 			for _, rID := range member.RoleIDs {
 				if rID == roleID {
 					return true

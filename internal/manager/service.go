@@ -428,10 +428,20 @@ func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
 	if guild, ok := m.ownerClient.Caches.Guild(guildID); ok {
 		snap.GuildName = guild.Name
 	}
-	if snap.Session != nil && snap.Session.IsGuest {
+	if snap.Session != nil {
 		if relaySess, ok := m.sessions.GetByGuild(guildID); ok {
-			if hostGuild, ok := m.ownerClient.Caches.Guild(relaySess.HostGuildID); ok {
-				snap.HostGuildName = hostGuild.Name
+			if snap.Session.IsGuest {
+				if hostGuild, ok := m.ownerClient.Caches.Guild(relaySess.HostGuildID); ok {
+					snap.HostGuildName = hostGuild.Name
+				}
+			} else {
+				for _, guestID := range relaySess.GuestGuildIDs() {
+					name := guestID.String()
+					if g, ok := m.ownerClient.Caches.Guild(guestID); ok {
+						name = g.Name
+					}
+					snap.GuestGuildNames = append(snap.GuestGuildNames, name)
+				}
 			}
 		}
 	}

@@ -62,6 +62,19 @@ func (s *Session) Broadcast(pkt []byte) {
 	}
 }
 
+// GuestGuildIDs returns the IDs of all guilds attached to this session except the host.
+func (s *Session) GuestGuildIDs() []snowflake.ID {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ids := make([]snowflake.ID, 0, len(s.outs))
+	for id := range s.outs {
+		if id != s.HostGuildID {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // Done returns a channel closed when the host ends the session.
 func (s *Session) Done() <-chan struct{} {
 	return s.done

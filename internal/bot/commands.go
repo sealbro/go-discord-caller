@@ -229,13 +229,43 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 		components = append(components, discord.NewActionRow(spMenu))
 	}
 
-	// Row 5 — navigation
-	prevBtn := discord.NewSecondaryButton("◀◀ Prev", fmt.Sprintf("/speakers/page/%d", page-1)).
-		WithDisabled(page == 0)
-	mainBtn := discord.NewSecondaryButton("🏠 Main Menu", "/speakers/menu")
-	nextBtn := discord.NewSecondaryButton("Next ▶▶", fmt.Sprintf("/speakers/page/%d", page+1)).
-		WithDisabled(page >= totalPages-1)
-	components = append(components, discord.NewActionRow(prevBtn, mainBtn, nextBtn))
+	// Row 5 — navigation: [🏠 Main Menu] + up to 4 page-range jump buttons.
+	// The current page's button is primary+disabled; others are secondary.
+	// When totalPages > 4 a sliding window of 4 is centered on the current page.
+	const maxPageBtns = 4
+	windowStart, windowEnd := 0, totalPages
+	if totalPages > maxPageBtns {
+		half := maxPageBtns / 2
+		windowStart = page - half
+		windowEnd = windowStart + maxPageBtns
+		if windowStart < 0 {
+			windowStart = 0
+			windowEnd = maxPageBtns
+		}
+		if windowEnd > totalPages {
+			windowEnd = totalPages
+			windowStart = windowEnd - maxPageBtns
+		}
+	}
+
+	navButtons := []discord.InteractiveComponent{
+		discord.NewSecondaryButton("🏠 Main Menu", "/speakers/menu"),
+	}
+	for p := windowStart; p < windowEnd; p++ {
+		rangeStart := p*speakersPerPage + 1
+		rangeEnd := (p + 1) * speakersPerPage
+		if rangeEnd > len(speakers) {
+			rangeEnd = len(speakers)
+		}
+		label := fmt.Sprintf("%d-%d", rangeStart, rangeEnd)
+		customID := fmt.Sprintf("/speakers/page/%d", p)
+		if p == page {
+			navButtons = append(navButtons, discord.NewPrimaryButton(label, customID).WithDisabled(true))
+		} else {
+			navButtons = append(navButtons, discord.NewSecondaryButton(label, customID))
+		}
+	}
+	components = append(components, discord.NewActionRow(navButtons...))
 
 	content := fmt.Sprintf("**Speaker Bindings** — Page %d/%d\n", page+1, totalPages)
 	if len(speakers) == 0 {

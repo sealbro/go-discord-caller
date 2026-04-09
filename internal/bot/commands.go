@@ -20,7 +20,14 @@ var Commands = []discord.ApplicationCommandCreate{
 	},
 	discord.SlashCommandCreate{
 		Name:        "start",
-		Description: "Make all enabled speakers join their bound voice channels",
+		Description: "Start a voice raid, or join an existing one as a guest using a relay code",
+		Options: []discord.ApplicationCommandOption{
+			discord.ApplicationCommandOptionString{
+				Name:        "code",
+				Description: "Relay code from another server's active voice raid (leave empty to start a new one)",
+				Required:    false,
+			},
+		},
 	},
 	discord.SlashCommandCreate{
 		Name:        "stop",
@@ -222,13 +229,43 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 		components = append(components, discord.NewActionRow(spMenu))
 	}
 
-	// Row 5 — navigation
-	prevBtn := discord.NewSecondaryButton("◀◀ Prev", fmt.Sprintf("/speakers/page/%d", page-1)).
-		WithDisabled(page == 0)
-	mainBtn := discord.NewSecondaryButton("🏠 Main Menu", "/speakers/menu")
-	nextBtn := discord.NewSecondaryButton("Next ▶▶", fmt.Sprintf("/speakers/page/%d", page+1)).
-		WithDisabled(page >= totalPages-1)
-	components = append(components, discord.NewActionRow(prevBtn, mainBtn, nextBtn))
+	// Row 5 — navigation: [🏠 Main Menu] + up to 4 page-range jump buttons.
+	// The current page's button is primary+disabled; others are secondary.
+	// When totalPages > 4 a sliding window of 4 is centered on the current page.
+	const maxPageBtns = 4
+	windowStart, windowEnd := 0, totalPages
+	if totalPages > maxPageBtns {
+		half := maxPageBtns / 2
+		windowStart = page - half
+		windowEnd = windowStart + maxPageBtns
+		if windowStart < 0 {
+			windowStart = 0
+			windowEnd = maxPageBtns
+		}
+		if windowEnd > totalPages {
+			windowEnd = totalPages
+			windowStart = windowEnd - maxPageBtns
+		}
+	}
+
+	navButtons := []discord.InteractiveComponent{
+		discord.NewSecondaryButton("🏠 Main Menu", "/speakers/menu"),
+	}
+	for p := windowStart; p < windowEnd; p++ {
+		rangeStart := p*speakersPerPage + 1
+		rangeEnd := (p + 1) * speakersPerPage
+		if rangeEnd > len(speakers) {
+			rangeEnd = len(speakers)
+		}
+		label := fmt.Sprintf("%d-%d", rangeStart, rangeEnd)
+		customID := fmt.Sprintf("/speakers/page/%d", p)
+		if p == page {
+			navButtons = append(navButtons, discord.NewPrimaryButton(label, customID).WithDisabled(true))
+		} else {
+			navButtons = append(navButtons, discord.NewSecondaryButton(label, customID))
+		}
+	}
+	components = append(components, discord.NewActionRow(navButtons...))
 
 	content := fmt.Sprintf("**Speaker Bindings** — Page %d/%d\n", page+1, totalPages)
 	if len(speakers) == 0 {
@@ -263,7 +300,7 @@ func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *
 	})
 }
 
-func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	guildID, err := requireGuild(e.GuildID())
 	if err != nil {
 		return e.CreateMessage(ephemeral(err.Error()))
@@ -278,15 +315,30 @@ func (h *CommandHandlers) handleStartVoiceRaid(_ discord.SlashCommandInteraction
 		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
 	}
 
+	code, hasCode := data.OptString("code")
+
 	ctx, cancelFunc := context.WithCancel(context.Background())
+	if hasCode && code != "" {
+		go func() {
+			if err := h.manager.JoinSession(ctx, cancelFunc, code, guildID); err != nil {
+				cancelFunc()
+				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
+			}
+		}()
+		return e.CreateMessage(ephemeral(fmt.Sprintf("🔴 **Joined relay session** `%s`. Speakers are connecting to their bound channels.", code)))
+	}
+
 	go func() {
-		if err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID); err != nil {
+		relayCode, err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID)
+		if err != nil {
 			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))
+		} else {
+			slog.Info("voice raid started", slog.String("relayCode", relayCode))
 		}
 	}()
 
-	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels."))
+	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Use `/status` to see the relay code."))
 }
 
 func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {

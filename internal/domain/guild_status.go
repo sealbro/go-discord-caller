@@ -11,13 +11,17 @@ import (
 // GuildStatus is the per-guild state managed exclusively by manager.Service.
 // All mutations go through the manager; callers receive a value copy from GetStatus.
 type GuildStatus struct {
-	GuildID       snowflake.ID
-	OwnerUserID   snowflake.ID                  // owner bot user ID; look up channel via BoundChannels[OwnerUserID]
-	Speakers      map[snowflake.ID]*Speaker     // speakerID -> speaker (Enabled carries per-guild state)
-	BoundChannels map[snowflake.ID]snowflake.ID // userID -> channelID
-	CallerRoleID  *snowflake.ID                 // caller role: members whose voice is captured
-	ManagerRoleID *snowflake.ID                 // manager role: members who can setup/start/stop the bot
-	Session       *VoiceSession                 // nil when no active session
+	GuildID         snowflake.ID
+	GuildName       string                        // display name of this guild
+	OwnerUserID     snowflake.ID                  // owner bot user ID; look up channel via BoundChannels[OwnerUserID]
+	Speakers        map[snowflake.ID]*Speaker     // speakerID -> speaker (Enabled carries per-guild state)
+	BoundChannels   map[snowflake.ID]snowflake.ID // userID -> channelID
+	CallerRoleID    *snowflake.ID                 // caller role: members whose voice is captured
+	ManagerRoleID   *snowflake.ID                 // manager role: members who can setup/start/stop the bot
+	RelayCode       string                        // persistent relay code for this guild (always set after seeding)
+	Session         *VoiceSession                 // nil when no active session
+	HostGuildName   string                        // set when this guild is a guest in another guild's relay session
+	GuestGuildNames []string                      // set when this guild is the host: names of connected guest guilds
 }
 
 func NewGuildStatus(guildID snowflake.ID, ownerUserID snowflake.ID) *GuildStatus {
@@ -47,6 +51,10 @@ func (s GuildStatus) GetSortedSpeakers() []*Speaker {
 // String returns a human-readable summary of the status.
 func (s GuildStatus) String() string {
 	var sb strings.Builder
+
+	if s.GuildName != "" {
+		sb.WriteString(fmt.Sprintf("\n**Guild:** %s\n", s.GuildName))
+	}
 
 	if s.CallerRoleID != nil {
 		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.CallerRoleID))
@@ -81,8 +89,25 @@ func (s GuildStatus) String() string {
 		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
 	}
 
+	if s.RelayCode != "" {
+		sb.WriteString(fmt.Sprintf("\n**Relay Code:** `%s`\n", s.RelayCode))
+	}
+
 	if s.Session != nil {
-		sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
+		if s.Session.IsGuest {
+			host := s.Session.RelayCode
+			if s.HostGuildName != "" {
+				host = fmt.Sprintf("%s (`%s`)", s.HostGuildName, s.Session.RelayCode)
+			}
+			sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 guest relay → %s (%d speakers joined)\n", host, len(s.Session.Speakers)))
+		} else {
+			if len(s.GuestGuildNames) > 0 {
+				sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined) — guests: %s\n",
+					len(s.Session.Speakers), strings.Join(s.GuestGuildNames, ", ")))
+			} else {
+				sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
+			}
+		}
 	} else {
 		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")
 	}

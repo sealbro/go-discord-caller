@@ -12,6 +12,7 @@ import (
 func eventListeners(managerSvc ManagerService) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
+		bot.NewListenerFunc(onGuildJoin(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
@@ -31,6 +32,14 @@ func onReady(m ManagerService) func(*events.Ready) {
 		}
 
 		go m.SeedExistingSpeakers(guildIDs)
+	}
+}
+
+// onGuildJoin is called when the owner bot is added to a new guild.
+// It seeds speakers and ensures the guild has a persistent relay code.
+func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
+	return func(e *events.GuildJoin) {
+		go m.SeedGuild(e.GuildID)
 	}
 }
 

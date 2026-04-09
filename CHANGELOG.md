@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-04-09
+
+### Added
+- **Inter-guild relay (`/start code:XXXXXXXX`)**: a guild can join another guild's active voice raid as a guest — the owner bot relays audio from the host and all enabled speakers join their bound channels; the session tears down automatically when the host stops or the guest cancels
+- **Persistent relay codes**: each guild is assigned a unique 8-character base32 relay code stored in YAML; codes are generated on first guild seed (startup or bot join) and guaranteed collision-free across all guilds; visible in `/status`
+- **Guest owner relay**: when a guest guild joins a session, its owner bot also connects to its bound channel as a voice relay (not just the speaker bots), enabling full fan-out on the guest side
+- **Guest guild names in host `/status`**: the host's Voice Raid line now lists the names of all connected guest guilds, e.g. `🔴 active (3 speakers joined) — guests: GuestServer1, GuestServer2`
+- **`/status` guild and host names**: guild display name shown at the top of every status message; guest sessions show the host guild name next to the relay code
+- **Speaker bind menu — range navigation buttons**: Prev/Next replaced with labeled page-range jump buttons (`1-3`, `4-6`, …); the current page is highlighted (primary, disabled); a sliding window of 4 keeps the row within Discord's 5-button limit for large pools
+- **`internal/discache` package**: `FlatCache[T]` and `GroupedCache[T]` extracted from the `bot` package into a reusable `internal/discache` package; both implement the corresponding `disgo/cache` interfaces with compile-time assertions
+- **Guild cache wired**: owner bot now uses a custom `FlatCache[discord.Guild]` via `cache.WithGuildCache`, enabling guild name lookups from `ownerClient.Caches.Guild()`
+
+### Changed
+- `StartVoiceRaid` now returns `(relay.RelayCode, error)` instead of `error`; the relay code is derived from the persistent per-guild store value
+- `JoinChannel` signature changed to `(ctx, guildID, userID)` — bound channel lookup moved inside the method; callers no longer need to look up the channel ID themselves
+- `SeedGuild` is now called on `GUILD_CREATE` events (bot joining a new server) to seed speakers and ensure a relay code is generated immediately
+- `relay.RelayCode` introduced as a named type alias for `string` used throughout the API
+- `groupedCache` TTL (`cacheEntity` wrapper) removed — the 5-minute eviction was silently causing `Caches.Member()` to return `false`, blocking callers from speaking after the TTL expired
+
 ## [0.3.0] - 2026-04-03
 
 ### Added

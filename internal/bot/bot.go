@@ -20,6 +20,7 @@ import (
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/config"
+	"github.com/sealbro/go-discord-caller/internal/discache"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
@@ -61,7 +62,6 @@ type Bot struct {
 	client       *bot.Client
 	manager      ManagerService
 	cfg          *config.Config
-	memberCache  *groupedCache[discord.Member]
 	guildReadyCh chan []snowflake.ID
 }
 
@@ -72,9 +72,9 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Command router
 	r := handler.New()
 
-	memberCache := newGroupedCache[discord.Member](5 * time.Minute)
-	roleCache := newGroupedCache[discord.Role](5 * time.Minute)
-	//guildCache := newGroupedCache[discord.Guild](5 * time.Minute)
+	memberCache := discache.NewGroupedCache[discord.Member]()
+	roleCache := discache.NewGroupedCache[discord.Role]()
+	guildCache := discache.NewFlatCache[discord.Guild]()
 
 	// Buffered channel (cap 1) receives guild IDs from the Ready event for command sync.
 	guildReadyCh := make(chan []snowflake.ID, 1)
@@ -94,7 +94,7 @@ func New(cfg *config.Config) (*Bot, error) {
 			cache.WithCaches(cache.FlagsAll),
 			cache.WithMemberCache(cache.NewMemberCache(memberCache)),
 			cache.WithRoleCache(cache.NewRoleCache(roleCache)),
-			//cache.WithGuildCache(cache.NewGuildCache(guildCache)),
+			cache.WithGuildCache(cache.NewGuildCache(guildCache, cache.NewSet[snowflake.ID](), cache.NewSet[snowflake.ID]())),
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
@@ -151,7 +151,6 @@ func New(cfg *config.Config) (*Bot, error) {
 		client:       client,
 		manager:      managerSvc,
 		cfg:          cfg,
-		memberCache:  memberCache,
 		guildReadyCh: guildReadyCh,
 	}, nil
 }
@@ -165,7 +164,6 @@ func (b *Bot) Run() error {
 	}
 	defer func() {
 		// Graceful shutdown: stop all raids, close all speaker gateways, then the owner gateway.
-		b.memberCache.Stop()
 		b.manager.Shutdown(ctx)
 		b.client.Close(ctx)
 	}()

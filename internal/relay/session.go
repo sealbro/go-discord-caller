@@ -7,11 +7,14 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
+// RelayCode is the unique 8-character code that identifies a relay session.
+type RelayCode = string
+
 // Session is an active cross-guild audio relay owned by one host guild.
 // Guest guilds attach their speaker output channels via AddGuild; the host's
 // relay goroutine calls Broadcast on every incoming packet.
 type Session struct {
-	Code        string
+	Code        RelayCode
 	HostGuildID snowflake.ID
 
 	done chan struct{}
@@ -20,7 +23,7 @@ type Session struct {
 	outs map[snowflake.ID][]chan []byte // guildID → speaker chOut channels
 }
 
-func newSession(code string, hostGuildID snowflake.ID) *Session {
+func newSession(code RelayCode, hostGuildID snowflake.ID) *Session {
 	return &Session{
 		Code:        code,
 		HostGuildID: hostGuildID,
@@ -76,20 +79,20 @@ func (s *Session) close() {
 // Manager is the global registry of active relay sessions.
 type Manager struct {
 	mu       sync.Mutex
-	sessions map[string]*Session       // code → session
+	sessions map[RelayCode]*Session    // code → session
 	byGuild  map[snowflake.ID]*Session // guildID (host or guest) → session
 }
 
 func NewManager() *Manager {
 	return &Manager{
-		sessions: make(map[string]*Session),
+		sessions: make(map[RelayCode]*Session),
 		byGuild:  make(map[snowflake.ID]*Session),
 	}
 }
 
 // Create registers a new session for hostGuildID using the supplied code and returns it.
 // The caller is responsible for providing a stable, unique code (e.g. from the store).
-func (m *Manager) Create(code string, hostGuildID snowflake.ID) *Session {
+func (m *Manager) Create(code RelayCode, hostGuildID snowflake.ID) *Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s := newSession(code, hostGuildID)
@@ -99,7 +102,7 @@ func (m *Manager) Create(code string, hostGuildID snowflake.ID) *Session {
 }
 
 // Join attaches guildID to the session identified by code.
-func (m *Manager) Join(code string, guildID snowflake.ID) (*Session, error) {
+func (m *Manager) Join(code RelayCode, guildID snowflake.ID) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.sessions[code]

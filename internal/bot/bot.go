@@ -23,6 +23,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/relay"
 	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
@@ -32,8 +33,8 @@ import (
 type ManagerService interface {
 	GetStatus(guildID snowflake.ID) domain.GuildStatus
 	HasActiveSession(guildID snowflake.ID) bool
-	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) (string, error)
-	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code string, guildID snowflake.ID) error
+	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) (relay.RelayCode, error)
+	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code relay.RelayCode, guildID snowflake.ID) error
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	BindCallerRole(guildID, roleID snowflake.ID)
 	BindManagerRole(guildID, roleID snowflake.ID)
@@ -72,6 +73,8 @@ func New(cfg *config.Config) (*Bot, error) {
 	r := handler.New()
 
 	memberCache := newGroupedCache[discord.Member](5 * time.Minute)
+	roleCache := newGroupedCache[discord.Role](5 * time.Minute)
+	//guildCache := newGroupedCache[discord.Guild](5 * time.Minute)
 
 	// Buffered channel (cap 1) receives guild IDs from the Ready event for command sync.
 	guildReadyCh := make(chan []snowflake.ID, 1)
@@ -90,6 +93,8 @@ func New(cfg *config.Config) (*Bot, error) {
 		bot.WithCacheConfigOpts(
 			cache.WithCaches(cache.FlagsAll),
 			cache.WithMemberCache(cache.NewMemberCache(memberCache)),
+			cache.WithRoleCache(cache.NewRoleCache(roleCache)),
+			//cache.WithGuildCache(cache.NewGuildCache(guildCache)),
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),

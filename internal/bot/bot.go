@@ -12,7 +12,6 @@ import (
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
-	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/handler"
@@ -20,7 +19,6 @@ import (
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/config"
-	"github.com/sealbro/go-discord-caller/internal/discache"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
@@ -72,10 +70,6 @@ func New(cfg *config.Config) (*Bot, error) {
 	// Command router
 	r := handler.New()
 
-	memberCache := discache.NewGroupedCache[discord.Member]()
-	roleCache := discache.NewGroupedCache[discord.Role]()
-	guildCache := discache.NewFlatCache[discord.Guild]()
-
 	// Buffered channel (cap 1) receives guild IDs from the Ready event for command sync.
 	guildReadyCh := make(chan []snowflake.ID, 1)
 
@@ -92,9 +86,6 @@ func New(cfg *config.Config) (*Bot, error) {
 		bot.WithEventListeners(r),
 		bot.WithCacheConfigOpts(
 			cache.WithCaches(cache.FlagsAll),
-			cache.WithMemberCache(cache.NewMemberCache(memberCache)),
-			cache.WithRoleCache(cache.NewRoleCache(roleCache)),
-			cache.WithGuildCache(cache.NewGuildCache(guildCache, cache.NewSet[snowflake.ID](), cache.NewSet[snowflake.ID]())),
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),

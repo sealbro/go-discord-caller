@@ -18,6 +18,10 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
+// audioChanBuf is the buffer size for Opus frame channels between the voice
+// receiver/provider and the relay fan-out goroutines.
+const audioChanBuf = 15
+
 // Service orchestrates speaker bots and voice raid sessions.
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.
 type Service struct {
@@ -83,7 +87,8 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 	snap := *st
 	snap.Speakers = make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		snap.Speakers[k] = new(*v)
+		cp := *v
+		snap.Speakers[k] = &cp
 	}
 	snap.BoundChannels = make(map[snowflake.ID]snowflake.ID, len(st.BoundChannels))
 	for k, v := range st.BoundChannels {
@@ -93,7 +98,10 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 	if st.Session != nil {
 		sessionCopy := *st.Session
 		sessionCopy.Speakers = make([]*domain.Speaker, len(st.Session.Speakers))
-		copy(sessionCopy.Speakers, st.Session.Speakers)
+		for i, sp := range st.Session.Speakers {
+			cp := *sp
+			sessionCopy.Speakers[i] = &cp
+		}
 		snap.Session = &sessionCopy
 	}
 	return snap
@@ -509,7 +517,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				slog.Warn("speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				return
 			}
-			chOut := make(chan []byte, 10)
+			chOut := make(chan []byte, audioChanBuf)
 			if err := m.speaker.Consume(ctx, sp.ID, guildID, chOut); err != nil {
 				slog.Error("failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				m.speaker.LeaveChannel(ctx, guildID, sp.ID)
@@ -553,6 +561,25 @@ func (m *Service) setupOwnerCapture(ctx context.Context, conn voice.Conn, ownerU
 	if roleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeCaller); ok {
 		slog.Info("role filter active", slog.String("guildID", guildID.String()), slog.String("roleID", roleID.String()))
 		caches := m.ownerClient.Caches
+
+		// Pre-fetch full member data for every user currently in the owner's voice
+		// channel via a single RequestMembers gateway op. Discord responds with
+		// GUILD_MEMBERS_CHUNK events that populate the cache with complete RoleIDs,
+		// replacing any partial entries written by earlier VOICE_STATE_UPDATE events.
+		if chID := conn.ChannelID(); chID != nil {
+			var userIDs []snowflake.ID
+			for vs := range caches.VoiceStates(guildID) {
+				if vs.ChannelID != nil && *vs.ChannelID == *chID && vs.UserID != ownerUserID {
+					userIDs = append(userIDs, vs.UserID)
+				}
+			}
+			if len(userIDs) > 0 {
+				if err := m.ownerClient.RequestMembers(ctx, guildID, false, "", userIDs...); err != nil {
+					slog.Warn("setupOwnerCapture: RequestMembers failed", slog.Any("err", err))
+				}
+			}
+		}
+
 		allowUser = func(userID snowflake.ID) bool {
 			if m.test.IsTestBot(userID) {
 				return true
@@ -570,7 +597,7 @@ func (m *Service) setupOwnerCapture(ctx context.Context, conn voice.Conn, ownerU
 		}
 	}
 
-	chIn := make(chan []byte, 10)
+	chIn := make(chan []byte, audioChanBuf)
 	receiver := opus.NewVoiceReceiver(chIn, ownerUserID, allowUser)
 	provider := opus.NewEmptyVoiceProvider()
 	conn.SetOpusFrameReceiver(receiver)
@@ -585,7 +612,7 @@ func (m *Service) setupOwnerCapture(ctx context.Context, conn voice.Conn, ownerU
 // The owner plays frames from chOut and discards any incoming voice.
 // Returns chOut and provider so the caller can close them on teardown.
 func (m *Service) setupOwnerRelay(ctx context.Context, conn voice.Conn) (chan []byte, *opus.VoiceProvider, error) {
-	chOut := make(chan []byte, 10)
+	chOut := make(chan []byte, audioChanBuf)
 	provider := opus.NewVoiceProvider(chOut)
 	conn.SetOpusFrameProvider(provider)
 	conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
@@ -725,12 +752,17 @@ func (m *Service) JoinSession(ctx context.Context, cancelFunc context.CancelFunc
 
 	go func() {
 		defer func() {
-			for _, out := range outs {
-				close(out)
+			// Leave channels before closing audio channels so consumers are not
+			// reading from a closed channel while still connected.
+			for _, sp := range joinedSpeakers {
+				m.speaker.LeaveChannel(context.Background(), guestGuildID, sp.ID)
 			}
 			if ownerProvider != nil {
 				ownerProvider.Close()
 				m.LeaveChannel(context.Background(), guestGuildID, ownerUserID)
+			}
+			for _, out := range outs {
+				close(out)
 			}
 			relaySession.RemoveGuild(guestGuildID)
 			m.sessions.RemoveGuest(guestGuildID)
@@ -739,9 +771,6 @@ func (m *Service) JoinSession(ctx context.Context, cancelFunc context.CancelFunc
 				st.Session = nil
 			}
 			m.mu.Unlock()
-			for _, sp := range joinedSpeakers {
-				m.speaker.LeaveChannel(context.Background(), guestGuildID, sp.ID)
-			}
 			slog.Info("guest session ended", slog.String("guildID", guestGuildID.String()))
 		}()
 		select {
@@ -768,6 +797,8 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	status.Session = nil
 	m.mu.Unlock()
 
+	// Cancel first to stop the relay broadcast goroutine before closing channels.
+	session.Cancel()
 	for _, sp := range session.Speakers {
 		m.speaker.LeaveChannel(ctx, guildID, sp.ID)
 	}
@@ -775,7 +806,6 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		m.LeaveChannel(ctx, guildID, ownerUserID)
 		m.sessions.RemoveHost(guildID)
 	}
-	session.Cancel()
 
 	slog.Info("voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil

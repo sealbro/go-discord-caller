@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -126,9 +127,23 @@ func (s *YAMLStore) save() error {
 		g.RelayCode = code
 	}
 
+	// Sort by guild ID for deterministic output.
+	guildIDs := make([]snowflake.ID, 0, len(guildSet))
+	for id := range guildSet {
+		guildIDs = append(guildIDs, id)
+	}
+	slices.SortFunc(guildIDs, func(a, b snowflake.ID) int {
+		if a < b {
+			return -1
+		}
+		if a > b {
+			return 1
+		}
+		return 0
+	})
 	yd := yamlData{}
-	for _, g := range guildSet {
-		yd.Guilds = append(yd.Guilds, *g)
+	for _, id := range guildIDs {
+		yd.Guilds = append(yd.Guilds, *guildSet[id])
 	}
 
 	out, err := yaml.Marshal(&yd)

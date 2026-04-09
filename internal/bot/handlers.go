@@ -61,7 +61,9 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 }
 
 // onVoiceJoin is called whenever a user joins a voice channel.
-// It checks whether the joining user holds the guild's configured caller role.
+// It refreshes the member cache with the full member object from the event
+// (VOICE_STATE_UPDATE payloads can carry partial members without RoleIDs, so
+// we overwrite whatever disgo stored with the authoritative data from this event).
 func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
 		// Ignore the bot's own voice state changes.
@@ -70,6 +72,10 @@ func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 		}
 
 		guildID := e.VoiceState.GuildID
+
+		// Overwrite the cache entry with the full member (including RoleIDs).
+		e.Client().Caches.MemberCache().Put(guildID, e.Member.User.ID, e.Member)
+
 		allowed := m.HasCallerRole(guildID, e.Member.RoleIDs)
 		slog.Info("user joined voice channel",
 			slog.String("userID", e.Member.User.ID.String()),

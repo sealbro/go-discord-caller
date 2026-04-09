@@ -55,6 +55,21 @@ func generateRelayCode() string {
 	return strings.ToUpper(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))[:8]
 }
 
+// uniqueRelayCode generates a relay code that does not already appear as a
+// value in existing. Must be called with the store's write lock held.
+func uniqueRelayCode(existing map[snowflake.ID]string) string {
+	used := make(map[string]struct{}, len(existing))
+	for _, c := range existing {
+		used[c] = struct{}{}
+	}
+	for {
+		code := generateRelayCode()
+		if _, collision := used[code]; !collision {
+			return code
+		}
+	}
+}
+
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
 	mu         sync.RWMutex
@@ -115,7 +130,7 @@ func (s *InMemoryStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
 	if code, ok := s.relayCodes[guildID]; ok {
 		return code
 	}
-	code := generateRelayCode()
+	code := uniqueRelayCode(s.relayCodes)
 	s.relayCodes[guildID] = code
 	return code
 }

@@ -199,7 +199,7 @@ func (s *YAMLStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
 	if code, ok := s.relayCodes[guildID]; ok {
 		return code
 	}
-	code := generateRelayCode()
+	code := uniqueRelayCode(s.relayCodes)
 	s.relayCodes[guildID] = code
 	if err := s.save(); err != nil {
 		slog.Error("yaml store: failed to persist relay code", slog.Any("err", err))

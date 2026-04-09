@@ -704,6 +704,33 @@ func (m *Service) JoinSession(ctx context.Context, cancelFunc context.CancelFunc
 		session.Speakers = append(session.Speakers, r.sp)
 		outs = append(outs, r.chOut)
 	}
+
+	// Also join the owner bot to its bound channel in the guest guild so it
+	// relays audio from the host session into a local voice channel.
+	var ownerProvider *opus.VoiceProvider
+	var ownerConn voice.Conn
+	ownerUser, ownerOK := m.ownerClient.Caches.SelfUser()
+	if ownerOK {
+		if chID, hasCh := m.store.GetBoundChannel(guildID, ownerUser.ID); hasCh {
+			if err := m.JoinChannel(ctx, guildID, chID); err != nil {
+				slog.Warn("guest: failed to join owner channel", slog.Any("err", err))
+			} else {
+				ownerConn = m.ownerClient.VoiceManager.GetConn(guildID)
+			}
+		}
+	}
+	if ownerConn != nil {
+		ownerChOut := make(chan []byte, 10)
+		ownerProvider = opus.NewVoiceProvider(ownerChOut)
+		ownerReceiver := opus.NewEmptyVoiceReceiver()
+		ownerConn.SetOpusFrameProvider(ownerProvider)
+		ownerConn.SetOpusFrameReceiver(ownerReceiver)
+		if err := ownerConn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+			slog.Warn("guest: failed to set owner speaking flag", slog.Any("err", err))
+		}
+		outs = append(outs, ownerChOut)
+	}
+
 	relaySession.AddGuild(guildID, outs)
 
 	// Write-lock to set the session; re-check to guard against concurrent starts.
@@ -726,12 +753,17 @@ func (m *Service) JoinSession(ctx context.Context, cancelFunc context.CancelFunc
 		slog.String("guildID", guildID.String()),
 		slog.String("code", code),
 		slog.Int("activeSpeakers", len(session.Speakers)),
+		slog.Bool("ownerRelaying", ownerConn != nil),
 	)
 
 	go func() {
 		defer func() {
 			for _, out := range outs {
 				close(out)
+			}
+			if ownerProvider != nil {
+				ownerProvider.Close()
+				m.LeaveChannel(context.Background(), guildID, ownerUser.ID)
 			}
 			relaySession.RemoveGuild(guildID)
 			m.sessions.RemoveGuest(guildID)

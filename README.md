@@ -1,6 +1,6 @@
 # go-discord-caller
 
-A Go Discord bot that captures voice audio from a user with a specific role and relays it live to every bound speaker bot in a voice channel.
+A Go Discord bot that captures voice audio from a user with a specific role and relays it live to every bound speaker bot — across one or multiple Discord servers simultaneously.
 
 [![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
 
@@ -48,21 +48,35 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 ## Features
 
 - **Multi-speaker relay** – unlimited speaker bots, each bound to a different voice channel
-- **Per-guild configuration** – capture role, manager role, owner channel, and per-speaker bindings are stored per guild
-- **Interactive setup UI** – paginated slash-command menus with dropdowns and toggle buttons; no manual config file needed
-- **Role-based access control** – a dedicated manager role can be configured to control who can start/stop raids without granting full admin
+- **Inter-guild relay** – guest guilds can join a host guild's active session using a relay code; audio fans out across all participating servers
+- **Persistent relay codes** – each guild has a unique 8-character code stored in YAML; shared via `/status` so other servers can join
+- **Per-guild configuration** – capture role, manager role, owner channel, and per-speaker bindings are stored per guild and survive restarts
+- **Interactive setup UI** – paginated slash-command menus with dropdowns, toggle buttons, and quick page-range navigation; no manual config file needed
+- **Role-based access control** – a dedicated manager role controls who can start/stop raids without granting full admin
 - **Auto-seeding** – speaker bots already in a guild are automatically registered on startup or when they join later
+- **Speaker gateway watchdog** – reconnects any speaker gateway that failed at startup; logs health every 30 s
 
 ## Slash commands
 
 > Manager role is configured via `/setup`. `/status` is available to everyone.
 
-| Command   | Required role      | Description                                                                                         |
-|-----------|--------------------|-----------------------------------------------------------------------------------------------------|
-| `/setup`  | Manager role       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder) |
-| `/start`  | Manager role       | Make all enabled speakers join their bound voice channels and begin the voice raid                  |
-| `/stop`   | Manager role       | Stop the active voice raid and make all speakers leave their channels                               |
-| `/status` | Everyone           | Show the current capture role, manager role, owner channel, speaker bindings, and session state     |
+| Command              | Required role | Description                                                                                                 |
+|----------------------|---------------|-------------------------------------------------------------------------------------------------------------|
+| `/setup`             | Manager       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)         |
+| `/start`             | Manager       | Make all enabled speakers join their bound voice channels and begin the voice raid                          |
+| `/start code:XXXXXX` | Manager       | Join an existing voice raid on another server as a guest using its relay code                               |
+| `/stop`              | Manager       | Stop the active voice raid and make all speakers leave their channels                                       |
+| `/status`            | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state |
+
+## Inter-guild relay
+
+Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown in `/status`.
+
+**To start a cross-guild relay:**
+1. Guild A runs `/start` — its session becomes active; the relay code is visible in `/status`.
+2. Guild B runs `/start code:A3BX7KQP` — its owner bot and speakers connect as a guest.
+3. Audio captured in Guild A is broadcast to all speakers in both guilds in real time.
+4. When Guild A runs `/stop`, all guest sessions are torn down automatically.
 
 ## Configuration
 
@@ -112,6 +126,7 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
    - Bind the **owner bot** to a voice channel
    - Add speaker bots via the **Add Speaker** button and bind each to a voice channel
 3. Run `/start` to begin a voice raid.
+4. Share your relay code (from `/status`) with another server so they can join with `/start code:XXXXXX`.
 
 ---
 

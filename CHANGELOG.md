@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-04-10
+
+### Fixed
+- **`allowUser` blocking on audio frames**: replaced per-frame REST `GetMember` fallback with a non-blocking approach — a single `RequestMembers` gateway op at session start pre-fetches all users currently in the owner's voice channel; `onVoiceJoin` overwrites the cache with the full member (including `RoleIDs`) from the event, preventing stale partial entries written by `VOICE_STATE_UPDATE`
+
+### Changed
+- `internal/discache` package removed — disgo's built-in `cache.NewCache` / `cache.NewGroupedCache` are identical implementations; `cache.WithMemberCache`, `cache.WithRoleCache`, and `cache.WithGuildCache` removed from bot wiring since disgo creates them automatically when only `cache.WithCaches(cache.FlagsAll)` is set
+- Audio frame channel buffer size extracted to `audioChanBuf` constant in `manager/service.go`
+
 ## [0.4.0] - 2026-04-09
 
 ### Added

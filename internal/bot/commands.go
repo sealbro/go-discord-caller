@@ -113,9 +113,11 @@ const speakersPerPage = 3
 
 // ── Setup message builders ────────────────────────────────────────────────────
 
-// buildMainSetupMessage builds the main setup message:
-//   - Row 1: owner channel select (combobox)
-//   - Row 2: "Bind Roles", "Bind Speakers", and "Add Speaker" (when token available) buttons
+// buildMainSetupMessage builds the main setup message.
+//
+// Layout:
+//   - Row 1: owner voice-channel select menu
+//   - Row 2: "🎭 Bind Roles", "⚙️ Bind Speakers" buttons; "➕ Add Speaker" appended when an uninvited pool bot is available
 func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 	var components []discord.LayoutComponent
@@ -141,10 +143,12 @@ func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID) (string, [
 	return "**Speaker Setup**\n" + status.String(), components
 }
 
-// buildRolesPageMessage builds the roles bind page:
-//   - Row 1: capture role select (combobox)
-//   - Row 2: manager role select (combobox)
-//   - Row 3: "Main Menu" button
+// buildRolesPageMessage builds the "Bind Roles" sub-page.
+//
+// Layout:
+//   - Row 1: capture role select menu (pre-filled with current binding)
+//   - Row 2: manager role select menu (pre-filled with current binding)
+//   - Row 3: "🏠 Main Menu" button
 func (h *CommandHandlers) buildRolesPageMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 	var components []discord.LayoutComponent
@@ -171,12 +175,15 @@ func (h *CommandHandlers) buildRolesPageMessage(guildID snowflake.ID) (string, [
 	return "**Role Bindings**\n" + status.String(), components
 }
 
-// buildSpeakersPageMessage builds a paginated speaker bind page.
+// buildSpeakersPageMessage builds a paginated "Bind Speakers" sub-page.
 //
-// Layout (≤5 rows):
-//   - Row 1: toggle buttons for each speaker
-//   - Rows 2-4: voice-channel select menu per speaker (up to speakersPerPage)
-//   - Row 5: [◀◀ Prev] [🏠 Main Menu] [Next ▶▶]
+// Layout (≤5 action rows, Discord limit):
+//   - Row 1: enable/disable toggle button per speaker on this page
+//   - Rows 2–4: voice-channel select menu per speaker (up to speakersPerPage = 3)
+//   - Row 5: "🏠 Main Menu" + page-range jump buttons ("1-3", "4-6", …)
+//
+// Navigation uses a sliding window of up to maxPageBtns (4) pages centred on
+// the current page. The current page's button is primary+disabled; others are secondary.
 func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page int) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 	speakers := status.GetSortedSpeakers()
@@ -278,10 +285,13 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 
 // ── Slash command handlers ───────────────────────────────────────────────────
 
+// handleSetup opens the interactive setup panel as an ephemeral message.
+// Requires Administrator permission or the configured manager role.
+// Blocked while a voice raid is active.
 func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	if !h.isAdminAuthorized(guildID, e.Member()) {
@@ -300,10 +310,21 @@ func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *
 	})
 }
 
+// handleStartVoiceRaid starts a new voice raid or joins an existing one as a guest.
+//
+// Without code: calls StartVoiceRaid — owner bot joins its bound channel, all enabled
+// speakers join theirs, and the relay session begins. The relay code is visible in /status.
+//
+// With code: calls JoinSession — owner bot and speakers join as a guest of the host guild
+// identified by the relay code; session tears down when the host stops or this guild cancels.
+//
+// Both operations are async (goroutine); failures are logged only — the initial Discord
+// response is sent before the goroutine completes, so the user always sees the "started"
+// message regardless of whether the underlying operation succeeds.
 func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	if !h.isManagerAuthorized(guildID, e.Member()) {
@@ -341,10 +362,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Use `/status` to see the relay code."))
 }
 
+// handleStopVoiceRaid stops the active voice raid: cancels the relay goroutine,
+// makes all speakers leave their channels, and disconnects the owner bot.
+// For a host guild this also closes the relay session, signalling all guests to tear down.
 func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	if !h.isManagerAuthorized(guildID, e.Member()) {
@@ -364,10 +388,12 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 	return e.CreateMessage(ephemeral("⚫ **Voice raid stopped.** All speakers have left their channels."))
 }
 
+// handleStatus responds with an ephemeral snapshot of the guild's configuration and
+// session state: roles, channel bindings, relay code, active session, and guest guild names.
 func (h *CommandHandlers) handleStatus(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	status := h.manager.GetStatus(guildID)
@@ -377,10 +403,11 @@ func (h *CommandHandlers) handleStatus(_ discord.SlashCommandInteractionData, e 
 	})
 }
 
+// handleBindRole sets the capture role directly via the /bind-role slash command.
 func (h *CommandHandlers) handleBindRole(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	roleID := data.Role("role").ID
@@ -392,10 +419,11 @@ func (h *CommandHandlers) handleBindRole(data discord.SlashCommandInteractionDat
 	})
 }
 
+// handleBindManagerRole sets the manager role directly via the /bind-manager-role slash command.
 func (h *CommandHandlers) handleBindManagerRole(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	roleID := data.Role("role").ID
@@ -411,9 +439,9 @@ func (h *CommandHandlers) handleBindManagerRole(data discord.SlashCommandInterac
 
 // handleSpeakersPage opens (or navigates to) a speaker bind page.
 func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	page, err := strconv.Atoi(e.Vars["page"])
@@ -430,9 +458,9 @@ func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e 
 
 // handleRolesMenu opens the roles bind page.
 func (h *CommandHandlers) handleRolesMenu(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	msg, components := h.buildRolesPageMessage(guildID)
@@ -443,9 +471,9 @@ func (h *CommandHandlers) handleRolesMenu(_ discord.ButtonInteractionData, e *ha
 
 // handleMainMenu returns the user to the main setup message.
 func (h *CommandHandlers) handleMainMenu(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	msg, components := h.buildMainSetupMessage(guildID)
@@ -456,9 +484,9 @@ func (h *CommandHandlers) handleMainMenu(_ discord.ButtonInteractionData, e *han
 
 // handleBindRoleMenu handles capture role selection from the setup message and refreshes it.
 func (h *CommandHandlers) handleBindRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	roleData, ok := data.(discord.RoleSelectMenuInteractionData)
@@ -481,9 +509,9 @@ func (h *CommandHandlers) handleBindRoleMenu(data discord.SelectMenuInteractionD
 
 // handleBindManagerRoleMenu handles manager role selection from the roles page and refreshes it.
 func (h *CommandHandlers) handleBindManagerRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	roleData, ok := data.(discord.RoleSelectMenuInteractionData)
@@ -517,9 +545,9 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 		page = 0
 	}
 
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	status := h.manager.GetStatus(guildID)
@@ -538,14 +566,14 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 		WithComponents(components...))
 }
 
-// handleAddSpeakerButton resolves the next pool bot's ApplicationID, builds a
-// Discord OAuth2 invite URL pre-targeted at the current guild, and navigates to
-// an "Add Speaker" sub-page with a link button and a Main Menu return button.
-// The bot is registered automatically once it joins the server via the GuildMemberJoin event listener.
+// handleAddSpeakerButton navigates to the "Add Speaker" sub-page.
+// It resolves the next uninvited pool bot, builds a Discord OAuth2 invite URL
+// pre-targeted at this guild, and shows a link button alongside a "🏠 Main Menu" return.
+// The bot is registered automatically via the GuildMemberJoin event once it accepts the invite.
 func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	botUserID, ok := h.manager.NextSpeakerID(guildID)
@@ -581,9 +609,9 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 		page = 0
 	}
 
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
@@ -606,9 +634,9 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 
 // handleBindOwnerChannel updates the owner bot's voice channel and refreshes the main setup message.
 func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	guildID, err := requireGuild(e.GuildID())
-	if err != nil {
-		return e.CreateMessage(ephemeral(err.Error()))
+	guildID, errMsg := requireGuild(e.GuildID())
+	if errMsg != nil {
+		return e.CreateMessage(*errMsg)
 	}
 
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
@@ -631,9 +659,9 @@ func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteract
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-func requireGuild(guildID *snowflake.ID) (snowflake.ID, error) {
+func requireGuild(guildID *snowflake.ID) (snowflake.ID, *discord.MessageCreate) {
 	if guildID == nil {
-		return 0, fmt.Errorf("this command can only be used inside a server")
+		return 0, new(ephemeral("this command can only be used inside a server"))
 	}
 	return *guildID, nil
 }

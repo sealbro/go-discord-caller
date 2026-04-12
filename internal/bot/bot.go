@@ -32,8 +32,8 @@ import (
 type ManagerService interface {
 	GetStatus(guildID snowflake.ID) domain.GuildStatus
 	HasActiveSession(guildID snowflake.ID) bool
-	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) (relay.RelayCode, error)
-	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code relay.RelayCode, guildID snowflake.ID) error
+	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID, mode domain.RaidMode) (relay.RelayCode, error)
+	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code relay.RelayCode, guildID snowflake.ID, mode domain.RaidMode) error
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	BindCallerRole(guildID, roleID snowflake.ID)
 	BindManagerRole(guildID, roleID snowflake.ID)

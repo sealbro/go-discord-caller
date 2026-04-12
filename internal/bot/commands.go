@@ -10,6 +10,7 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/domain"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -26,6 +27,15 @@ var Commands = []discord.ApplicationCommandCreate{
 				Name:        "code",
 				Description: "Relay code from another server's active voice raid (leave empty to start a new one)",
 				Required:    false,
+			},
+			discord.ApplicationCommandOptionString{
+				Name:        "mode",
+				Description: "One Caller: only owner channel captures. Many Callers: all channels capture and mix. (default: One Caller)",
+				Required:    false,
+				Choices: []discord.ApplicationCommandOptionChoiceString{
+					{Name: "One Caller", Value: string(callerModeOne)},
+					{Name: "Many Callers", Value: string(callerModeMany)},
+				},
 			},
 		},
 	},
@@ -103,6 +113,14 @@ func (h *CommandHandlers) Register(r handler.Router) {
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+
+// callerModeChoice is the value of the "mode" slash command option.
+type callerModeChoice string
+
+const (
+	callerModeOne  callerModeChoice = "one"
+	callerModeMany callerModeChoice = "many"
+)
 
 // speakersPerPage is the maximum number of speakers shown per page in the
 // speaker bind menu.  Discord allows 5 action rows per message:
@@ -337,11 +355,19 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 	}
 
 	code, hasCode := data.OptString("code")
+	manyCallers := false
+	if modeStr, ok := data.OptString("mode"); ok {
+		manyCallers = callerModeChoice(modeStr) == callerModeMany
+	}
 
-	ctx, cancelFunc := context.WithCancel(context.Background())
 	if hasCode && code != "" {
+		mode := domain.RaidModeGuestOne
+		if manyCallers {
+			mode = domain.RaidModeAllyCaller
+		}
+		ctx, cancelFunc := context.WithCancel(context.Background())
 		go func() {
-			if err := h.manager.JoinSession(ctx, cancelFunc, code, guildID); err != nil {
+			if err := h.manager.JoinSession(ctx, cancelFunc, code, guildID, mode); err != nil {
 				cancelFunc()
 				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
 			}
@@ -349,8 +375,14 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 		return e.CreateMessage(ephemeral(fmt.Sprintf("🔴 **Joined relay session** `%s`. Speakers are connecting to their bound channels.", code)))
 	}
 
+	mode := domain.RaidModeOneCaller
+	if manyCallers {
+		mode = domain.RaidModeGuildCaller
+	}
+
+	ctx, cancelFunc := context.WithCancel(context.Background())
 	go func() {
-		relayCode, err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID)
+		relayCode, err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID, mode)
 		if err != nil {
 			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))

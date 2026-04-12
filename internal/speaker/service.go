@@ -17,7 +17,7 @@ import (
 type SpeakerService interface {
 	GetUserByID(botUserID snowflake.ID) (discord.User, bool)
 	JoinChannel(ctx context.Context, speakerID, guildID, channelID snowflake.ID) error
-	Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error
+	Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte, chCapture chan<- []byte) error
 	LeaveChannel(ctx context.Context, guildID, speakerID snowflake.ID)
 }
 
@@ -70,8 +70,10 @@ func (s *Service) JoinChannel(ctx context.Context, speakerID, guildID, channelID
 	return nil
 }
 
-// Consume streams audio data from the provided channel to a voice connection and sets up a no-op receiver for incoming frames.
-func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte) error {
+// Consume sets up audio for the speaker's voice connection.
+// chOut is the provider channel (frames to play). chCapture, when non-nil,
+// receives frames captured from the speaker's channel (for mixing); nil disables capture.
+func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte, chCapture chan<- []byte) error {
 	client, ok := s.poolSvc.GetClientByID(speakerID)
 	if !ok {
 		return fmt.Errorf("speaker %s is not in the pool", speakerID)
@@ -84,14 +86,21 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 
 	var provider voice.OpusFrameProvider
 	if s.test.IsTestBot(speakerID) {
-		provider, _ = opus.NewFileVoiceProvider(s.test.FileDCA)
+		fp, err := opus.NewFileVoiceProvider(s.test.FileDCA)
+		if err != nil {
+			return fmt.Errorf("open dca file: %w", err)
+		}
+		if chCapture != nil {
+			// Tee file audio into chCapture so it feeds the relay mixer.
+			// Set chCapture to nil so the block below uses EmptyVoiceReceiver
+			// instead of also attaching a VoiceReceiver to the same channel.
+			provider = opus.NewTeeProvider(fp, chCapture)
+			chCapture = nil
+		} else {
+			provider = fp
+		}
 		go func() {
-			for {
-				_, closed := <-chOut
-				if !closed {
-					slog.Info("closing file voice channel")
-					return
-				}
+			for range chOut {
 			}
 		}()
 	} else {
@@ -99,8 +108,19 @@ func (s *Service) Consume(ctx context.Context, speakerID, guildID snowflake.ID, 
 	}
 
 	conn.SetOpusFrameProvider(provider)
-	receiver := opus.NewEmptyVoiceReceiver()
-	conn.SetOpusFrameReceiver(receiver)
+
+	var receiver interface {
+		Close()
+	}
+	if chCapture != nil {
+		r := opus.NewVoiceReceiver(chCapture, speakerID, nil)
+		conn.SetOpusFrameReceiver(r)
+		receiver = r
+	} else {
+		r := opus.NewEmptyVoiceReceiver()
+		conn.SetOpusFrameReceiver(r)
+		receiver = r
+	}
 
 	go func() {
 		<-ctx.Done()

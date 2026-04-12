@@ -118,6 +118,32 @@ func skipDCAHeader(f *os.File) (int64, error) {
 	return pos, nil
 }
 
+// TeeProvider wraps a FileVoiceProvider and copies each outgoing frame to a
+// capture channel, so file playback also feeds the mixer as a source.
+// Frames are sent non-blocking; full channel drops the copy silently.
+type TeeProvider struct {
+	*FileVoiceProvider
+	cap chan<- []byte
+}
+
+// NewTeeProvider returns a TeeProvider that sends frames to Discord and
+// concurrently writes a copy to cap.
+func NewTeeProvider(fp *FileVoiceProvider, cap chan<- []byte) *TeeProvider {
+	return &TeeProvider{FileVoiceProvider: fp, cap: cap}
+}
+
+func (t *TeeProvider) ProvideOpusFrame() ([]byte, error) {
+	frame, err := t.FileVoiceProvider.ProvideOpusFrame()
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case t.cap <- frame:
+	default:
+	}
+	return frame, nil
+}
+
 // readDCAFrame reads one int16-LE-prefixed Opus frame from f.
 func readDCAFrame(f *os.File) ([]byte, error) {
 	var frameSize int16

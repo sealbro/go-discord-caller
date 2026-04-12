@@ -11,7 +11,7 @@ COPY . .
 WORKDIR /src/cmd/bot
 
 RUN apt-get update \
-	&& apt-get install -y --no-install-recommends clang git ca-certificates bash pkg-config build-essential libusb-1.0-0-dev unzip cmake nasm zip \
+	&& apt-get install -y --no-install-recommends clang git ca-certificates bash pkg-config build-essential libusb-1.0-0-dev unzip cmake nasm zip libopus-dev libopusfile-dev \
 	&& git clone https://github.com/disgoorg/godave /tmp/godave \
 	&& chmod +x /tmp/godave/scripts/libdave_install.sh \
 	&& /bin/bash /tmp/godave/scripts/libdave_install.sh $LIBDAVE_VERSION

@@ -39,7 +39,7 @@ func onReady(m ManagerService) func(*events.Ready) {
 // It seeds speakers and ensures the guild has a persistent relay code.
 func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
-		go m.SeedGuild(e.GuildID)
+		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
 	}
 }
 

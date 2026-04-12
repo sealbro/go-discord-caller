@@ -23,7 +23,6 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/relay"
-	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
@@ -32,8 +31,8 @@ import (
 type ManagerService interface {
 	GetStatus(guildID snowflake.ID) domain.GuildStatus
 	HasActiveSession(guildID snowflake.ID) bool
-	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID, mode domain.RaidMode) (relay.RelayCode, error)
-	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code relay.RelayCode, guildID snowflake.ID, mode domain.RaidMode) error
+	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode, code relay.RelayCode) error
+	StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode) (relay.RelayCode, error)
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	BindCallerRole(guildID, roleID snowflake.ID)
 	BindManagerRole(guildID, roleID snowflake.ID)
@@ -49,7 +48,6 @@ type ManagerService interface {
 	NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool)
 	HasAvailableToken(guildID snowflake.ID) bool
 	SeedExistingSpeakers(guildIDs []snowflake.ID)
-	SeedGuild(guildID snowflake.ID)
 	TrySeedMember(guildID, newUserID snowflake.ID)
 	RemoveSpeaker(guildID, userID snowflake.ID)
 	Shutdown(ctx context.Context)
@@ -113,9 +111,10 @@ func New(cfg *config.Config) (*Bot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
 	}
+	ownerBotID, _ := domain.BotUserID(cfg.OwnerBotToken)
 	poolSvc := pool.NewService()
-	speakerSvc := speaker.NewService(poolSvc, cfg.Test)
-	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client, cfg.Test)
+	poolSvc.Register(ownerBotID, client)
+	managerSvc := manager.NewService(st, poolSvc, ownerBotID, cfg.Test)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)

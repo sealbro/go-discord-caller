@@ -30,7 +30,7 @@ var Commands = []discord.ApplicationCommandCreate{
 			},
 			discord.ApplicationCommandOptionString{
 				Name:        "mode",
-				Description: "One Caller: only owner channel captures. Many Callers: all channels capture and mix. (default: One Caller)",
+				Description: "One Caller: owner captures. Many Callers: all channels capture and mix. (default: One Caller)",
 				Required:    false,
 				Choices: []discord.ApplicationCommandOptionChoiceString{
 					{Name: "One Caller", Value: string(callerModeOne)},
@@ -367,7 +367,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 		}
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		go func() {
-			if err := h.manager.JoinSession(ctx, cancelFunc, code, guildID, mode); err != nil {
+			if err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code); err != nil {
 				cancelFunc()
 				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
 			}
@@ -382,7 +382,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	go func() {
-		relayCode, err := h.manager.StartVoiceRaid(ctx, cancelFunc, guildID, mode)
+		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))

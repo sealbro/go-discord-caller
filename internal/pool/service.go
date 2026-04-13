@@ -23,37 +23,22 @@ type PoolService interface {
 	GetIDs() []snowflake.ID
 	Reconnect(ctx context.Context, botUserID snowflake.ID) bool
 	Shutdown(ctx context.Context)
-	Register(ownerBotID snowflake.ID, client *bot.Client)
 	JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) (voice.Conn, error)
 	LeaveChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 }
 
-// Service manages the lifecycle of the pool of speaker gateways.
-// poolClients maps bot user ID → client for all bots (speakers + owner).
-// noReconnect tracks externally-registered clients (e.g. the owner bot)
-// that should be excluded from watchdog reconnect logic.
+// Service manages the lifecycle of the pool of speaker bot gateways.
+// poolClients maps bot user ID → client for speaker bots only.
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client
-	noReconnect map[snowflake.ID]struct{}
 }
 
 // NewService creates a new speaker Service.
 func NewService() *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
-		noReconnect: make(map[snowflake.ID]struct{}),
 	}
-}
-
-// Register adds an externally-managed client (e.g. the owner bot) to the pool
-// so that JoinChannel/LeaveChannel can route through a single code path.
-// Registered clients are excluded from watchdog reconnect — disgo manages them.
-func (s *Service) Register(botUserID snowflake.ID, client *bot.Client) {
-	s.mu.Lock()
-	s.poolClients[botUserID] = client
-	s.noReconnect[botUserID] = struct{}{}
-	s.mu.Unlock()
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
@@ -136,14 +121,12 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 // Reconnect attempts to open the gateway for a bot whose connection failed.
 // It reads the token from the stored client.Token field. If the bot already has
 // a connected gateway it is a no-op and returns true.
-// Externally registered clients (noReconnect) are skipped — disgo manages them.
 func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 	s.mu.RLock()
 	client, known := s.poolClients[botUserID]
-	_, isOwner := s.noReconnect[botUserID]
 	s.mu.RUnlock()
 
-	if !known || isOwner {
+	if !known {
 		return false
 	}
 
@@ -210,12 +193,7 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 	for _, botUserID := range ids {
 		s.mu.RLock()
 		client := s.poolClients[botUserID]
-		_, isOwner := s.noReconnect[botUserID]
 		s.mu.RUnlock()
-
-		if isOwner {
-			continue
-		}
 
 		if client == nil || client.Gateway == nil {
 			slog.Warn("pool: watchdog detected bot without gateway, attempting reconnect",
@@ -256,8 +234,7 @@ func (s *Service) GetClientByID(botUserID snowflake.ID) (*bot.Client, bool) {
 	return client, true
 }
 
-// GetClients returns all connected managed speaker clients sorted by bot user ID.
-// Excludes externally-registered clients (e.g. the owner bot).
+// GetClients returns all connected speaker clients sorted by bot user ID.
 func (s *Service) GetClients() []*bot.Client {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -270,8 +247,7 @@ func (s *Service) GetClients() []*bot.Client {
 	return clients
 }
 
-// GetIDs returns all managed speaker bot user IDs sorted by value.
-// Excludes externally-registered clients (e.g. the owner bot).
+// GetIDs returns all speaker bot user IDs sorted by value.
 // Includes speakers whose gateway failed to connect at startup.
 func (s *Service) GetIDs() []snowflake.ID {
 	s.mu.RLock()
@@ -279,14 +255,12 @@ func (s *Service) GetIDs() []snowflake.ID {
 	return s.sortedIDs()
 }
 
-// sortedIDs returns managed (non-external) pool client IDs sorted by snowflake value.
+// sortedIDs returns pool client IDs sorted by snowflake value.
 // Must be called with mu held (at least read-locked).
 func (s *Service) sortedIDs() []snowflake.ID {
 	ids := make([]snowflake.ID, 0, len(s.poolClients))
 	for id := range s.poolClients {
-		if _, external := s.noReconnect[id]; !external {
-			ids = append(ids, id)
-		}
+		ids = append(ids, id)
 	}
 	slices.Sort(ids)
 	return ids

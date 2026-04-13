@@ -26,30 +26,29 @@ type Service struct {
 	mu       sync.RWMutex
 	statuses map[snowflake.ID]*domain.GuildStatus // protected by mu
 
-	store      store.Store
-	poolSvc    pool.PoolService
-	ownerBotID snowflake.ID
-	test       config.TestConfig
-	sessions   *relay.Manager
+	store       store.Store
+	poolSvc     pool.PoolService
+	ownerClient *bot.Client
+	ownerBotID  snowflake.ID
+	test        config.TestConfig
+	sessions    *relay.Manager
 }
 
 // NewService creates a new manager Service.
-func NewService(st store.Store, poolSvc pool.PoolService, ownerID snowflake.ID, test config.TestConfig) *Service {
+func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig) *Service {
 	return &Service{
-		statuses:   make(map[snowflake.ID]*domain.GuildStatus),
-		store:      st,
-		poolSvc:    poolSvc,
-		ownerBotID: ownerID,
-		test:       test,
-		sessions:   relay.NewManager(),
+		statuses:    make(map[snowflake.ID]*domain.GuildStatus),
+		store:       st,
+		poolSvc:     poolSvc,
+		ownerClient: ownerClient,
+		ownerBotID:  ownerID,
+		test:        test,
+		sessions:    relay.NewManager(),
 	}
 }
 
-// getOwnerClient returns the owner bot client from the pool.
-// Returns nil if the owner gateway is not connected.
 func (m *Service) getOwnerClient() *bot.Client {
-	c, _ := m.poolSvc.GetClientByID(m.ownerBotID)
-	return c
+	return m.ownerClient
 }
 
 // JoinChannel makes the owner bot join the voice channel bound to userID in guildID.
@@ -59,12 +58,22 @@ func (m *Service) JoinChannel(ctx context.Context, guildID, userID snowflake.ID)
 	if !ok {
 		return nil, nil
 	}
-	return m.poolSvc.JoinChannel(ctx, guildID, m.ownerBotID, channelID)
+	conn := m.ownerClient.VoiceManager.CreateConn(guildID)
+	if err := conn.Open(ctx, channelID, false, false); err != nil {
+		return nil, fmt.Errorf("owner join channel %s: %w", channelID, err)
+	}
+	slog.Info("owner joined voice channel",
+		slog.String("channelID", channelID.String()),
+		slog.String("guildID", guildID.String()),
+	)
+	return conn, nil
 }
 
 // LeaveChannel makes the owner bot leave its current voice channel in a guild.
-func (m *Service) LeaveChannel(ctx context.Context, guildID, ownerUserID snowflake.ID) {
-	m.poolSvc.LeaveChannel(ctx, guildID, ownerUserID)
+func (m *Service) LeaveChannel(ctx context.Context, guildID snowflake.ID) {
+	if conn := m.ownerClient.VoiceManager.GetConn(guildID); conn != nil {
+		conn.Close(ctx)
+	}
 }
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {

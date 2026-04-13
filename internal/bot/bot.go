@@ -113,8 +113,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	}
 	ownerBotID, _ := domain.BotUserID(cfg.OwnerBotToken)
 	poolSvc := pool.NewService()
-	poolSvc.Register(ownerBotID, client)
-	managerSvc := manager.NewService(st, poolSvc, ownerBotID, cfg.Test)
+	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)

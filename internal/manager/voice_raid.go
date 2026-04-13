@@ -107,7 +107,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			}
 			if ownerCleanup != nil {
 				ownerCleanup()
-				m.LeaveChannel(context.Background(), guestGuildID, m.ownerBotID)
+				m.LeaveChannel(context.Background(), guestGuildID)
 			}
 			for _, out := range outs {
 				close(out)
@@ -141,7 +141,6 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		return fmt.Errorf("no active voice raid in this server")
 	}
 	session := status.Session
-	ownerUserID := status.OwnerUserID
 	status.Session = nil
 	m.mu.Unlock()
 
@@ -151,7 +150,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		m.poolSvc.LeaveChannel(ctx, guildID, sp.ID)
 	}
 	if !session.IsGuest {
-		m.LeaveChannel(ctx, guildID, ownerUserID)
+		m.LeaveChannel(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
 	}
 

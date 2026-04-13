@@ -11,10 +11,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/relay"
-	"github.com/sealbro/go-discord-caller/internal/store"
 )
-
-type closer interface{ Close() }
 
 // sourceEntry is one audio capture channel feeding the relay mixer graph.
 type sourceEntry struct {
@@ -45,6 +42,13 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return err
 	}
 
+	// TODO: Add owner speaker which dynamic, can capture or relay audio
+	// RaidModeOneCaller mode can only capture audio
+	// RaidModeGuildCaller mode can capture and relay audio
+	// RaidModeGuestOne mode can only relay
+	// RaidModeAllyCaller mode can capture and relay audio
+	// think about communicating in one guild without ally
+
 	joined := m.joinSpeakers(ctx, guestGuildID, speakers, mode.WithCapture())
 
 	// Collect per-speaker output channels; the owner's relay channel is appended below.
@@ -54,15 +58,16 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	}
 
 	// Join the owner bot as a relayer into its bound channel.
-	var ownerProvider *opus.VoiceProvider
-	if err := m.JoinChannel(ctx, guestGuildID, m.ownerBotID); err != nil {
+	var ownerCleanup func()
+	if conn, err := m.JoinChannel(ctx, guestGuildID, m.ownerBotID); err != nil {
 		slog.Warn("guest: failed to join owner channel", slog.Any("err", err))
-	} else if conn := m.getOwnerClient().VoiceManager.GetConn(guestGuildID); conn != nil {
-		chOut, provider, err := m.setupOwnerRelay(ctx, conn)
+	} else if conn != nil {
+		chOut := make(chan []byte, audioChanBuf)
+		_, cleanup, err := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider().Apply(ctx, conn, chOut)
 		if err != nil {
 			slog.Warn("guest: failed to setup owner relay", slog.Any("err", err))
 		} else {
-			ownerProvider = provider
+			ownerCleanup = cleanup
 			outs = append(outs, chOut)
 		}
 	}
@@ -90,7 +95,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		slog.String("mode", string(mode)),
 		slog.String("code", code),
 		slog.Int("activeSpeakers", len(joined)),
-		slog.Bool("ownerRelaying", ownerProvider != nil),
+		slog.Bool("ownerRelaying", ownerCleanup != nil),
 	)
 
 	go func() {
@@ -100,8 +105,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			for _, r := range joined {
 				m.poolSvc.LeaveChannel(context.Background(), guestGuildID, r.speaker.ID)
 			}
-			if ownerProvider != nil {
-				ownerProvider.Close()
+			if ownerCleanup != nil {
+				ownerCleanup()
 				m.LeaveChannel(context.Background(), guestGuildID, m.ownerBotID)
 			}
 			for _, out := range outs {
@@ -163,18 +168,27 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", err
 	}
 
-	if err := m.JoinChannel(ctx, guildID, m.ownerBotID); err != nil {
+	conn, err := m.JoinChannel(ctx, guildID, m.ownerBotID)
+	if err != nil {
 		return "", fmt.Errorf("failed to join owner channel: %w", err)
 	}
-	conn := m.getOwnerClient().VoiceManager.GetConn(guildID)
 	if conn == nil {
 		return "", fmt.Errorf("no voice connection to owner channel")
 	}
 
-	chIn, ownerReceiver, ownerProvider, err := m.setupOwnerCapture(ctx, conn, m.ownerBotID, guildID)
+	chIn, ownerCleanup, err := NewVoiceConnSetup(m.ownerBotID).
+		WithVoiceReceiver(m.buildAllowUser(ctx, conn, m.ownerBotID, guildID)).
+		Apply(ctx, conn, nil)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
+
+	// TODO: Add owner speaker which dynamic, can capture or relay audio
+	// RaidModeOneCaller mode can only capture audio
+	// RaidModeGuildCaller mode can capture and relay audio
+	// RaidModeGuestOne mode can only relay
+	// RaidModeAllyCaller mode can capture and relay audio
+	// think about communicating in one guild without ally
 
 	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture())
 
@@ -222,7 +236,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	)
 
 	startChannelMixers(ctx, destinations, channelMixers)
-	startRelayBroadcast(ctx, relayMixer, relaySession, ownerReceiver, ownerProvider, guildID)
+	startRelayBroadcast(ctx, relayMixer, relaySession, ownerCleanup, guildID)
 
 	return relayCode, nil
 }
@@ -250,16 +264,14 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 	for _, c := range candidates {
 		go func(sp *domain.Speaker, channelID snowflake.ID) {
 			defer wg.Done()
-			if err := m.poolSvc.JoinChannel(ctx, guildID, sp.ID, channelID); err != nil {
+			conn, err := m.poolSvc.JoinChannel(ctx, guildID, sp.ID, channelID)
+			if err != nil {
 				slog.Warn("speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				return
 			}
 			chOut := make(chan []byte, audioChanBuf)
-			var chCapture chan []byte
-			if withCapture {
-				chCapture = make(chan []byte, audioChanBuf)
-			}
-			if err := m.consumeSpeaker(ctx, sp.ID, guildID, chOut, chCapture); err != nil {
+			chCapture, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture)
+			if err != nil {
 				slog.Error("failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				m.poolSvc.LeaveChannel(ctx, guildID, sp.ID)
 				return
@@ -293,62 +305,35 @@ func (m *Service) commitSession(guildID snowflake.ID, session *domain.VoiceSessi
 }
 
 // consumeSpeaker sets up audio provider and receiver for a speaker's voice connection.
-// chOut is the provider channel (frames to play). chCapture, when non-nil,
-// receives frames captured from the speaker's channel; nil disables capture.
-func (m *Service) consumeSpeaker(ctx context.Context, speakerID, guildID snowflake.ID, chOut <-chan []byte, chCapture chan<- []byte) error {
-	client, ok := m.poolSvc.GetClientByID(speakerID)
-	if !ok {
-		return fmt.Errorf("speaker %s is not in the pool", speakerID)
-	}
-	conn := client.VoiceManager.GetConn(guildID)
-	if conn == nil {
-		return fmt.Errorf("speaker %s is not connected to a voice channel in guild %s", speakerID, guildID)
-	}
+// chOut is the provider channel (frames to play). When withCapture is true the
+// returned channel receives frames captured from the speaker's channel.
+func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool) (chan []byte, error) {
 
-	var provider voice.OpusFrameProvider
+	session := NewVoiceConnSetup(speakerID)
 	if m.test.IsTestBot(speakerID) {
-		fp, err := opus.NewFileVoiceProvider(m.test.FileDCA)
-		if err != nil {
-			return fmt.Errorf("open dca file: %w", err)
-		}
-		if chCapture != nil {
-			// Tee file audio into chCapture so it feeds the relay mixer.
-			provider = opus.NewTeeProvider(fp, chCapture)
-			chCapture = nil
+		if withCapture {
+			session.WithTeeFileProvider(m.test.FileDCA)
 		} else {
-			provider = fp
+			session.WithFileProvider(m.test.FileDCA)
 		}
-		go func() {
-			for range chOut {
-			}
-		}()
 	} else {
-		provider = opus.NewVoiceProvider(chOut)
+		session.WithVoiceProvider()
+		if withCapture {
+			session.WithVoiceReceiver(nil)
+		}
 	}
 
-	conn.SetOpusFrameProvider(provider)
-
-	var receiver closer
-	if chCapture != nil {
-		r := opus.NewVoiceReceiver(chCapture, speakerID, nil)
-		conn.SetOpusFrameReceiver(r)
-		receiver = r
-	} else {
-		r := opus.NewEmptyVoiceReceiver()
-		conn.SetOpusFrameReceiver(r)
-		receiver = r
+	capture, cleanup, err := session.Apply(ctx, conn, chOut)
+	if err != nil {
+		return nil, err
 	}
 
 	go func() {
 		<-ctx.Done()
-		provider.Close()
-		receiver.Close()
+		cleanup()
 	}()
 
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		return fmt.Errorf("set speaking flag: %w", err)
-	}
-	return nil
+	return capture, nil
 }
 
 // buildSources returns a deduplicated list of audio sources (one capture channel per voice
@@ -461,13 +446,12 @@ func startChannelMixers(ctx context.Context, dests []*destChannel, chanMixers ma
 }
 
 // startRelayBroadcast runs the relay mixer and broadcasts its output to all guest guilds.
-// Closes receiver and ownerProvider and logs when the context is cancelled.
-func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySession *relay.Session, ownerReceiver, ownerProvider closer, guildID snowflake.ID) {
+// Calls ownerCleanup and logs when the context is cancelled.
+func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySession *relay.Session, ownerCleanup func(), guildID snowflake.ID) {
 	go relayMixer.Run(ctx)
 	go func() {
 		defer func() {
-			ownerReceiver.Close()
-			ownerProvider.Close()
+			ownerCleanup()
 			slog.Info("voice raid ended", slog.String("guildID", guildID.String()))
 		}()
 		for {
@@ -490,85 +474,6 @@ type speakerResult struct {
 	chOut     chan []byte
 	chCapture chan []byte // nil when withCapture is false
 	channelID snowflake.ID
-}
-
-// setupOwnerCapture configures the owner connection for audio capture (host mode).
-// The owner listens for caller-role-filtered voice frames and writes them into chIn.
-// Returns chIn, receiver and provider so the caller can close them on teardown.
-func (m *Service) setupOwnerCapture(ctx context.Context, conn voice.Conn, ownerUserID, guildID snowflake.ID) (chan []byte, *opus.VoiceReceiver, *opus.EmptyVoiceProvider, error) {
-	caches := m.getOwnerClient().Caches
-
-	var allowUser func(snowflake.ID) bool
-	if roleID, ok := m.store.GetBoundRole(guildID, store.RoleTypeCaller); ok {
-		slog.Info("role filter active", slog.String("guildID", guildID.String()), slog.String("roleID", roleID.String()))
-
-		// Pre-fetch full member data for every user currently in the owner's voice
-		// channel via a single RequestMembers gateway op. Discord responds with
-		// GUILD_MEMBERS_CHUNK events that populate the cache with complete RoleIDs,
-		// replacing any partial entries written by earlier VOICE_STATE_UPDATE events.
-		if chID := conn.ChannelID(); chID != nil {
-			var userIDs []snowflake.ID
-			for vs := range caches.VoiceStates(guildID) {
-				if vs.ChannelID != nil && *vs.ChannelID == *chID && vs.UserID != ownerUserID {
-					userIDs = append(userIDs, vs.UserID)
-				}
-			}
-			if len(userIDs) > 0 {
-				if err := m.getOwnerClient().RequestMembers(ctx, guildID, false, "", userIDs...); err != nil {
-					slog.Warn("setupOwnerCapture: RequestMembers failed", slog.Any("err", err))
-				}
-			}
-		}
-
-		allowUser = func(userID snowflake.ID) bool {
-			member, ok := caches.Member(guildID, userID)
-			if !ok {
-				return false
-			}
-			if m.test.IsTestBot(userID) {
-				return true
-			}
-			if member.User.Bot {
-				return false
-			}
-			for _, rID := range member.RoleIDs {
-				if rID == roleID {
-					return true
-				}
-			}
-			return false
-		}
-	} else {
-		// No role filter — allow all non-bot users.
-		allowUser = func(userID snowflake.ID) bool {
-			member, ok := caches.Member(guildID, userID)
-			return ok && !member.User.Bot
-		}
-	}
-
-	chIn := make(chan []byte, audioChanBuf)
-	receiver := opus.NewVoiceReceiver(chIn, ownerUserID, allowUser)
-	provider := opus.NewEmptyVoiceProvider()
-	conn.SetOpusFrameReceiver(receiver)
-	conn.SetOpusFrameProvider(provider)
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		return nil, nil, nil, fmt.Errorf("set speaking flag: %w", err)
-	}
-	return chIn, receiver, provider, nil
-}
-
-// setupOwnerRelay configures the owner connection for audio relay (guest mode).
-// The owner plays frames from chOut and discards any incoming voice.
-// Returns chOut and provider so the caller can close them on teardown.
-func (m *Service) setupOwnerRelay(ctx context.Context, conn voice.Conn) (chan []byte, *opus.VoiceProvider, error) {
-	chOut := make(chan []byte, audioChanBuf)
-	provider := opus.NewVoiceProvider(chOut)
-	conn.SetOpusFrameProvider(provider)
-	conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		return nil, nil, fmt.Errorf("set owner speaking flag: %w", err)
-	}
-	return chOut, provider, nil
 }
 
 // snapshotSpeakers returns a deep copy of the guild's speakers as a slice.

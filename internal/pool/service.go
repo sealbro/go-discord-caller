@@ -24,7 +24,7 @@ type PoolService interface {
 	Reconnect(ctx context.Context, botUserID snowflake.ID) bool
 	Shutdown(ctx context.Context)
 	Register(ownerBotID snowflake.ID, client *bot.Client)
-	JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) error
+	JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) (voice.Conn, error)
 	LeaveChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 }
 
@@ -292,23 +292,23 @@ func (s *Service) sortedIDs() []snowflake.ID {
 	return ids
 }
 
-// JoinChannel makes the bot join the given voice channel.
-func (s *Service) JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) error {
+// JoinChannel makes the bot join the given voice channel and returns the connection.
+func (s *Service) JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) (voice.Conn, error) {
 	s.mu.RLock()
 	client := s.poolClients[botUserID]
 	s.mu.RUnlock()
 	if client == nil {
-		return fmt.Errorf("bot %s is not in the pool", botUserID)
+		return nil, fmt.Errorf("bot %s is not in the pool", botUserID)
 	}
 	conn := client.VoiceManager.CreateConn(guildID)
 	if err := conn.Open(ctx, channelID, false, false); err != nil {
-		return fmt.Errorf("bot %s join channel %s: %w", botUserID, channelID, err)
+		return nil, fmt.Errorf("bot %s join channel %s: %w", botUserID, channelID, err)
 	}
 	slog.Info("pool: bot joined voice channel",
 		slog.String("botUserID", botUserID.String()),
 		slog.String("channelID", channelID.String()),
 	)
-	return nil
+	return conn, nil
 }
 
 // LeaveChannel makes the bot leave its current voice channel in the guild.

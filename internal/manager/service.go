@@ -47,10 +47,6 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 	}
 }
 
-func (m *Service) getOwnerClient() *bot.Client {
-	return m.ownerClient
-}
-
 // JoinChannel makes the owner bot join the voice channel bound to userID in guildID.
 // Returns a nil conn (and nil error) when no channel is bound.
 func (m *Service) JoinChannel(ctx context.Context, guildID, userID snowflake.ID) (voice.Conn, error) {
@@ -142,7 +138,7 @@ func (m *Service) Shutdown(ctx context.Context) {
 }
 
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
-	_, err := m.getOwnerClient().Rest.GetMember(guildID, userID)
+	_, err := m.ownerClient.Rest.GetMember(guildID, userID)
 	return err == nil
 }
 
@@ -171,12 +167,14 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 		snap.BoundChannels[k] = v
 	}
 	// Deep-copy the session so the snapshot holds a fully independent copy.
+	// Nil out Cancel/Cleanup — snapshots are read-only display objects.
 	if st.Session != nil {
 		sessionCopy := *st.Session
+		sessionCopy.Cancel = nil
+		sessionCopy.Cleanup = nil
 		sessionCopy.Speakers = make([]*domain.Speaker, len(st.Session.Speakers))
 		for i, sp := range st.Session.Speakers {
-			cp := *sp
-			sessionCopy.Speakers[i] = &cp
+			sessionCopy.Speakers[i] = new(*sp)
 		}
 		snap.Session = &sessionCopy
 	}

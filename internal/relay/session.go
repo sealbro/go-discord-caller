@@ -20,7 +20,7 @@ type Session struct {
 	done chan struct{}
 
 	mu   sync.RWMutex
-	outs map[snowflake.ID][]chan []byte // guildID → speaker chOut channels
+	outs map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
 }
 
 func newSession(code RelayCode, hostGuildID snowflake.ID) *Session {
@@ -28,12 +28,12 @@ func newSession(code RelayCode, hostGuildID snowflake.ID) *Session {
 		Code:        code,
 		HostGuildID: hostGuildID,
 		done:        make(chan struct{}),
-		outs:        make(map[snowflake.ID][]chan []byte),
+		outs:        make(map[snowflake.ID][]chan<- []byte),
 	}
 }
 
 // AddGuild registers a guild's speaker output channels with this session.
-func (s *Session) AddGuild(guildID snowflake.ID, chs []chan []byte) {
+func (s *Session) AddGuild(guildID snowflake.ID, chs []chan<- []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.outs[guildID] = chs

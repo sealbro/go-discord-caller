@@ -14,7 +14,7 @@ import (
 // member data via RequestMembers (so RoleIDs are populated) and then filters by
 // that role; otherwise all non-bot users are allowed.
 func (m *Service) buildAllowUser(ctx context.Context, conn voice.Conn, ownerUserID, guildID snowflake.ID) func(snowflake.ID) bool {
-	caches := m.getOwnerClient().Caches
+	caches := m.ownerClient.Caches
 
 	roleID, hasRole := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
 	if !hasRole {
@@ -39,7 +39,7 @@ func (m *Service) buildAllowUser(ctx context.Context, conn voice.Conn, ownerUser
 			}
 		}
 		if len(userIDs) > 0 {
-			if err := m.getOwnerClient().RequestMembers(ctx, guildID, false, "", userIDs...); err != nil {
+			if err := m.ownerClient.RequestMembers(ctx, guildID, false, "", userIDs...); err != nil {
 				slog.Warn("buildAllowUser: RequestMembers failed", slog.Any("err", err))
 			}
 		}

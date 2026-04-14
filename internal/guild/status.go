@@ -19,7 +19,7 @@ type Status struct {
 	CallerRoleID    *snowflake.ID                 // caller role: members whose voice is captured
 	ManagerRoleID   *snowflake.ID                 // manager role: members who can setup/start/stop the bot
 	AllyCode        string                        // persistent relay code for this guild (always set after seeding)
-	Session         *Session                      // nil when no active session
+	Session         *Session                      // nil when no active session; in snapshots Cancel and Cleanup are always nil
 	HostGuildName   string                        // set when this guild is a guest in another guild's relay session
 	GuestGuildNames []string                      // set when this guild is the host: names of connected guest guilds
 }

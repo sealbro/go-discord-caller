@@ -70,6 +70,7 @@ func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 	type initSpeaker struct {
+		id      snowflake.ID
 		speaker *guild.Speaker
 		err     error
 	}
@@ -79,7 +80,7 @@ func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 			continue
 		}
 		newSpeaker, err := m.newSpeaker(botUserID)
-		speakers = append(speakers, initSpeaker{newSpeaker, err})
+		speakers = append(speakers, initSpeaker{botUserID, newSpeaker, err})
 	}
 
 	m.mu.Lock()
@@ -93,6 +94,7 @@ func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 	for _, init := range speakers {
 		if init.err != nil {
 			slog.Warn("seed: failed to register existing speaker bot",
+				slog.String("botUserID", init.id.String()),
 				slog.String("guildID", guildID.String()),
 				slog.Any("err", init.err),
 			)

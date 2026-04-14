@@ -116,6 +116,8 @@ func (s *YAMLStore) markDirty() {
 }
 
 // Close flushes any pending writes and stops the background goroutine.
+// After Close returns, no further write methods should be called; any markDirty
+// signals sent after the flush goroutine exits are silently discarded.
 func (s *YAMLStore) Close() {
 	select {
 	case <-s.done:

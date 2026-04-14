@@ -398,19 +398,27 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 }
 
 // handleStopVoiceRaid stops the active voice raid.
+// Uses a deferred response so the user gets real feedback on success/failure.
 // Authorization handled by withManager middleware.
 func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	if status := h.manager.GetStatus(guildID); !status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ There is no active voice raid in this server."))
 	}
 
+	if err := e.DeferCreateMessage(true); err != nil {
+		return err
+	}
+
 	go func() {
 		if err := h.manager.StopVoiceRaid(context.Background(), guildID); err != nil {
 			slog.Warn("failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
+			h.followUp(e, "❌ Failed to stop voice raid: "+err.Error())
+			return
 		}
+		h.followUp(e, "⚫ **Voice raid stopped.** All speakers have left their channels.")
 	}()
 
-	return e.CreateMessage(ephemeral("⚫ **Voice raid stopped.** All speakers have left their channels."))
+	return nil
 }
 
 // handleStatus responds with an ephemeral snapshot of the guild's configuration and

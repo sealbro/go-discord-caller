@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"log/slog"
+	"slices"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
@@ -13,6 +14,10 @@ import (
 // frames should be captured. When a caller role is bound it pre-fetches full
 // member data via RequestMembers (so RoleIDs are populated) and then filters by
 // that role; otherwise all non-bot users are allowed.
+//
+// NOTE: The roleID is captured at build time. If an admin changes the capture
+// role mid-raid, the running session continues using the original role until
+// the raid is restarted.
 func (m *Service) buildAllowUser(ctx context.Context, conn voice.Conn, ownerUserID, guildID snowflake.ID) func(snowflake.ID) bool {
 	caches := m.ownerClient.Caches
 
@@ -56,11 +61,6 @@ func (m *Service) buildAllowUser(ctx context.Context, conn voice.Conn, ownerUser
 		if member.User.Bot {
 			return false
 		}
-		for _, rID := range member.RoleIDs {
-			if rID == roleID {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(member.RoleIDs, roleID)
 	}
 }

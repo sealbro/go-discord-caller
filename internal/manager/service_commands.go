@@ -3,6 +3,7 @@ package manager
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
@@ -120,6 +121,9 @@ func (m *Service) TrySeedMember(guildID, newUserID snowflake.ID) {
 	)
 }
 
+// OwnerBotID returns the owner bot's user ID.
+func (m *Service) OwnerBotID() snowflake.ID { return m.ownerBotID }
+
 // BindChannel binds a voice channel to a user (speaker or owner) in a guild.
 func (m *Service) BindChannel(guildID, userID, channelID snowflake.ID) {
 	m.store.BindChannel(guildID, userID, channelID)
@@ -133,21 +137,6 @@ func (m *Service) UnbindChannel(guildID, userID snowflake.ID) {
 // GetBoundChannel returns the bound voice channel for a user in a guild.
 func (m *Service) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool) {
 	return m.store.GetBoundChannel(guildID, userID)
-}
-
-// BindOwnerChannel binds a voice channel to the owner bot for a guild.
-func (m *Service) BindOwnerChannel(guildID, channelID snowflake.ID) {
-	m.store.BindChannel(guildID, m.ownerBotID, channelID)
-}
-
-// UnbindOwnerChannel removes the owner bot's channel binding for a guild.
-func (m *Service) UnbindOwnerChannel(guildID snowflake.ID) {
-	m.store.UnbindChannel(guildID, m.ownerBotID)
-}
-
-// GetOwnerChannel returns the bound voice channel for the owner bot in a guild.
-func (m *Service) GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool) {
-	return m.store.GetBoundChannel(guildID, m.ownerBotID)
 }
 
 // BindCallerRole sets the Discord role whose members' voice will be captured in the guild.
@@ -175,12 +164,7 @@ func (m *Service) HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake
 	if !ok {
 		return false
 	}
-	for _, id := range memberRoleIDs {
-		if id == managerRoleID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(memberRoleIDs, managerRoleID)
 }
 
 // HasCallerRole reports whether any of the supplied role IDs matches the
@@ -191,12 +175,7 @@ func (m *Service) HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.
 	if !ok {
 		return true // no restriction configured
 	}
-	for _, id := range memberRoleIDs {
-		if id == callerRoleID {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(memberRoleIDs, callerRoleID)
 }
 
 // GetStatus returns a safe, enriched value snapshot of the guild status.
@@ -206,7 +185,14 @@ func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
 	snap := m.snapshotLocked(guildID)
 	m.mu.RUnlock()
 
-	// Enrich with live channel/role data (store has its own lock; no manager lock needed).
+	m.enrichBindings(&snap, guildID)
+	m.enrichRelayInfo(&snap, guildID)
+	return snap
+}
+
+// enrichBindings populates channel bindings, role bindings, and guild metadata
+// on the snapshot. Store has its own lock; no manager lock needed.
+func (m *Service) enrichBindings(snap *domain.GuildStatus, guildID snowflake.ID) {
 	for spID := range snap.Speakers {
 		if chID, ok := m.store.GetBoundChannel(guildID, spID); ok {
 			snap.BoundChannels[spID] = chID
@@ -228,25 +214,30 @@ func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
 	if guild, ok := m.ownerClient.Caches.Guild(guildID); ok {
 		snap.GuildName = guild.Name
 	}
-	if snap.Session != nil {
-		if relaySess, ok := m.sessions.GetByGuild(guildID); ok {
-			if snap.Session.IsGuest {
-				if hostGuild, ok := m.ownerClient.Caches.Guild(relaySess.HostGuildID); ok {
-					snap.HostGuildName = hostGuild.Name
-				}
-			} else {
-				for _, guestID := range relaySess.GuestGuildIDs() {
-					name := guestID.String()
-					if g, ok := m.ownerClient.Caches.Guild(guestID); ok {
-						name = g.Name
-					}
-					snap.GuestGuildNames = append(snap.GuestGuildNames, name)
-				}
+}
+
+// enrichRelayInfo populates relay session info (host/guest guild names) on the snapshot.
+func (m *Service) enrichRelayInfo(snap *domain.GuildStatus, guildID snowflake.ID) {
+	if snap.Session == nil {
+		return
+	}
+	relaySess, ok := m.sessions.GetByGuild(guildID)
+	if !ok {
+		return
+	}
+	if snap.Session.IsGuest {
+		if hostGuild, ok := m.ownerClient.Caches.Guild(relaySess.HostGuildID); ok {
+			snap.HostGuildName = hostGuild.Name
+		}
+	} else {
+		for _, guestID := range relaySess.GuestGuildIDs() {
+			name := guestID.String()
+			if g, ok := m.ownerClient.Caches.Guild(guestID); ok {
+				name = g.Name
 			}
+			snap.GuestGuildNames = append(snap.GuestGuildNames, name)
 		}
 	}
-
-	return snap
 }
 
 // HasActiveSession reports whether there is a running voice raid for the guild.

@@ -91,12 +91,12 @@ func NewCommandHandlers(m ManagerService) *CommandHandlers {
 
 // Register attaches all routes to the given router.
 func (h *CommandHandlers) Register(r handler.Router) {
-	r.SlashCommand("/setup", h.handleSetup)
-	r.SlashCommand("/start", h.handleStartVoiceRaid)
-	r.SlashCommand("/stop", h.handleStopVoiceRaid)
-	r.SlashCommand("/status", h.handleStatus)
-	r.SlashCommand("/bind-role", h.handleBindRole)
-	r.SlashCommand("/bind-manager-role", h.handleBindManagerRole)
+	r.SlashCommand("/setup", h.withAdmin(h.handleSetup))
+	r.SlashCommand("/start", h.withManager(h.handleStartVoiceRaid))
+	r.SlashCommand("/stop", h.withManager(h.handleStopVoiceRaid))
+	r.SlashCommand("/status", h.withGuild(h.handleStatus))
+	r.SlashCommand("/bind-role", h.withGuild(h.handleBindRole))
+	r.SlashCommand("/bind-manager-role", h.withGuild(h.handleBindManagerRole))
 
 	// Main setup menu components
 	r.SelectMenuComponent("/setup/bind-role", h.handleBindRoleMenu)
@@ -129,6 +129,42 @@ const (
 //   - row 5 = navigation buttons
 const speakersPerPage = 3
 
+// ── Middleware ────────────────────────────────────────────────────────────────
+
+// guildCommandHandler is a slash command handler that receives a validated guild ID.
+type guildCommandHandler func(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error
+
+// withGuild wraps a handler to validate the guild context.
+func (h *CommandHandlers) withGuild(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
+	return func(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+		guildID, errMsg := requireGuild(e.GuildID())
+		if errMsg != nil {
+			return e.CreateMessage(*errMsg)
+		}
+		return fn(guildID, data, e)
+	}
+}
+
+// withManager wraps a handler to require Manage Server permission or the manager role.
+func (h *CommandHandlers) withManager(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
+	return h.withGuild(func(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+		if !h.isManagerAuthorized(guildID, e.Member()) {
+			return e.CreateMessage(ephemeral("❌ You need the Manage Server permission or the server's manager role to use this command."))
+		}
+		return fn(guildID, data, e)
+	})
+}
+
+// withAdmin wraps a handler to require Administrator permission or the manager role.
+func (h *CommandHandlers) withAdmin(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
+	return h.withGuild(func(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+		if !h.isAdminAuthorized(guildID, e.Member()) {
+			return e.CreateMessage(ephemeral("❌ You need the Administrator permission or the server's manager role to use this command."))
+		}
+		return fn(guildID, data, e)
+	})
+}
+
 // ── Setup message builders ────────────────────────────────────────────────────
 
 // buildMainSetupMessage builds the main setup message.
@@ -138,12 +174,13 @@ const speakersPerPage = 3
 //   - Row 2: "🎭 Bind Roles", "⚙️ Bind Speakers" buttons; "➕ Add Speaker" appended when an uninvited pool bot is available
 func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
+	ownerBotID := h.manager.OwnerBotID()
 	var components []discord.LayoutComponent
 
 	// Row 1 — owner bot channel selector
 	ownerMenu := discord.NewChannelSelectMenu("/owner/bind-channel", "Bind caller bot to a voice channel…").
 		WithChannelTypes(discord.ChannelTypeGuildVoice)
-	if chID, ok := h.manager.GetOwnerChannel(guildID); ok {
+	if chID, ok := h.manager.GetBoundChannel(guildID, ownerBotID); ok {
 		ownerMenu = ownerMenu.AddDefaultValue(chID)
 	}
 	components = append(components, discord.NewActionRow(ownerMenu))
@@ -206,22 +243,11 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 	status := h.manager.GetStatus(guildID)
 	speakers := status.GetSortedSpeakers()
 
-	totalPages := (len(speakers) + speakersPerPage - 1) / speakersPerPage
-	if totalPages == 0 {
-		totalPages = 1
-	}
-	if page >= totalPages {
-		page = totalPages - 1
-	}
-	if page < 0 {
-		page = 0
-	}
+	totalPages := max((len(speakers)+speakersPerPage-1)/speakersPerPage, 1)
+	page = min(max(page, 0), totalPages-1)
 
 	start := page * speakersPerPage
-	end := start + speakersPerPage
-	if end > len(speakers) {
-		end = len(speakers)
-	}
+	end := min(start+speakersPerPage, len(speakers))
 	pageSpeakers := speakers[start:end]
 
 	var components []discord.LayoutComponent
@@ -255,8 +281,6 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 	}
 
 	// Row 5 — navigation: [🏠 Main Menu] + up to 4 page-range jump buttons.
-	// The current page's button is primary+disabled; others are secondary.
-	// When totalPages > 4 a sliding window of 4 is centered on the current page.
 	const maxPageBtns = 4
 	windowStart, windowEnd := 0, totalPages
 	if totalPages > maxPageBtns {
@@ -278,10 +302,7 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 	}
 	for p := windowStart; p < windowEnd; p++ {
 		rangeStart := p*speakersPerPage + 1
-		rangeEnd := (p + 1) * speakersPerPage
-		if rangeEnd > len(speakers) {
-			rangeEnd = len(speakers)
-		}
+		rangeEnd := min((p+1)*speakersPerPage, len(speakers))
 		label := fmt.Sprintf("%d-%d", rangeStart, rangeEnd)
 		customID := fmt.Sprintf("/speakers/page/%d", p)
 		if p == page {
@@ -304,18 +325,8 @@ func (h *CommandHandlers) buildSpeakersPageMessage(guildID snowflake.ID, page in
 // ── Slash command handlers ───────────────────────────────────────────────────
 
 // handleSetup opens the interactive setup panel as an ephemeral message.
-// Requires Administrator permission or the configured manager role.
-// Blocked while a voice raid is active.
-func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
-	if !h.isAdminAuthorized(guildID, e.Member()) {
-		return e.CreateMessage(ephemeral("❌ You need the Administrator permission or the server's manager role to use this command."))
-	}
-
+// Blocked while a voice raid is active. Authorization handled by withAdmin middleware.
+func (h *CommandHandlers) handleSetup(guildID snowflake.ID, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	if h.manager.HasActiveSession(guildID) {
 		return e.CreateMessage(ephemeral("⚠️ Setup is not available while a voice raid is active. Stop the raid first."))
 	}
@@ -329,26 +340,9 @@ func (h *CommandHandlers) handleSetup(_ discord.SlashCommandInteractionData, e *
 }
 
 // handleStartVoiceRaid starts a new voice raid or joins an existing one as a guest.
-//
-// Without code: calls StartVoiceRaid — owner bot joins its bound channel, all enabled
-// speakers join theirs, and the relay session begins. The relay code is visible in /status.
-//
-// With code: calls JoinSession — owner bot and speakers join as a guest of the host guild
-// identified by the relay code; session tears down when the host stops or this guild cancels.
-//
-// Both operations are async (goroutine); failures are logged only — the initial Discord
-// response is sent before the goroutine completes, so the user always sees the "started"
-// message regardless of whether the underlying operation succeeds.
-func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
-	if !h.isManagerAuthorized(guildID, e.Member()) {
-		return e.CreateMessage(ephemeral("❌ You need the Manage Server permission or the server's manager role to use this command."))
-	}
-
+// Uses deferred responses so the user gets real feedback on success/failure.
+// Authorization handled by withManager middleware.
+func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	status := h.manager.GetStatus(guildID)
 	if status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ A voice raid is already active in this server."))
@@ -358,6 +352,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 	manyCallers := false
 	if modeStr, ok := data.OptString("mode"); ok {
 		manyCallers = callerModeChoice(modeStr) == callerModeMany
+	}
+
+	if err := e.DeferCreateMessage(true); err != nil {
+		return err
 	}
 
 	if hasCode && code != "" {
@@ -370,9 +368,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 			if err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code); err != nil {
 				cancelFunc()
 				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
+				h.followUp(e, fmt.Sprintf("❌ Failed to join relay session `%s`: %s", code, err))
+				return
 			}
+			h.followUp(e, fmt.Sprintf("🔴 **Joined relay session** `%s`. Speakers are connecting to their bound channels.", code))
 		}()
-		return e.CreateMessage(ephemeral(fmt.Sprintf("🔴 **Joined relay session** `%s`. Speakers are connecting to their bound channels.", code)))
+		return nil
 	}
 
 	mode := domain.RaidModeOneCaller
@@ -386,27 +387,19 @@ func (h *CommandHandlers) handleStartVoiceRaid(data discord.SlashCommandInteract
 		if err != nil {
 			cancelFunc()
 			slog.Warn("failed to start voice raid", slog.Any("err", err))
-		} else {
-			slog.Info("voice raid started", slog.String("relayCode", relayCode))
+			h.followUp(e, "❌ Failed to start voice raid: "+err.Error())
+			return
 		}
+		slog.Info("voice raid started", slog.String("relayCode", relayCode))
+		h.followUp(e, fmt.Sprintf("🔴 **Voice raid started.** Relay code: `%s`. All enabled speakers have joined their bound channels.", relayCode))
 	}()
 
-	return e.CreateMessage(ephemeral("🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Use `/status` to see the relay code."))
+	return nil
 }
 
-// handleStopVoiceRaid stops the active voice raid: cancels the relay goroutine,
-// makes all speakers leave their channels, and disconnects the owner bot.
-// For a host guild this also closes the relay session, signalling all guests to tear down.
-func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
-	if !h.isManagerAuthorized(guildID, e.Member()) {
-		return e.CreateMessage(ephemeral("❌ You need the Manage Server permission or the server's manager role to use this command."))
-	}
-
+// handleStopVoiceRaid stops the active voice raid.
+// Authorization handled by withManager middleware.
+func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	if status := h.manager.GetStatus(guildID); !status.HasActiveSession() {
 		return e.CreateMessage(ephemeral("⚠️ There is no active voice raid in this server."))
 	}
@@ -421,13 +414,8 @@ func (h *CommandHandlers) handleStopVoiceRaid(_ discord.SlashCommandInteractionD
 }
 
 // handleStatus responds with an ephemeral snapshot of the guild's configuration and
-// session state: roles, channel bindings, relay code, active session, and guest guild names.
-func (h *CommandHandlers) handleStatus(_ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+// session state. Authorization handled by withGuild middleware.
+func (h *CommandHandlers) handleStatus(guildID snowflake.ID, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	status := h.manager.GetStatus(guildID)
 	return e.CreateMessage(discord.MessageCreate{
 		Content: status.String(),
@@ -436,12 +424,7 @@ func (h *CommandHandlers) handleStatus(_ discord.SlashCommandInteractionData, e 
 }
 
 // handleBindRole sets the capture role directly via the /bind-role slash command.
-func (h *CommandHandlers) handleBindRole(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleBindRole(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	roleID := data.Role("role").ID
 	h.manager.BindCallerRole(guildID, roleID)
 
@@ -452,12 +435,7 @@ func (h *CommandHandlers) handleBindRole(data discord.SlashCommandInteractionDat
 }
 
 // handleBindManagerRole sets the manager role directly via the /bind-manager-role slash command.
-func (h *CommandHandlers) handleBindManagerRole(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleBindManagerRole(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	roleID := data.Role("role").ID
 	h.manager.BindManagerRole(guildID, roleID)
 
@@ -676,11 +654,12 @@ func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteract
 		return e.CreateMessage(ephemeral("unexpected interaction data type"))
 	}
 
+	ownerBotID := h.manager.OwnerBotID()
 	channels := channelData.Channels()
 	if len(channels) == 0 {
-		h.manager.UnbindOwnerChannel(guildID)
+		h.manager.UnbindChannel(guildID, ownerBotID)
 	} else {
-		h.manager.BindOwnerChannel(guildID, channels[0].ID)
+		h.manager.BindChannel(guildID, ownerBotID, channels[0].ID)
 	}
 
 	msg, components := h.buildMainSetupMessage(guildID)
@@ -731,6 +710,13 @@ func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *disc
 		return true
 	}
 	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
+}
+
+// followUp sends an ephemeral follow-up message after a deferred response.
+func (h *CommandHandlers) followUp(e *handler.CommandEvent, content string) {
+	if _, err := e.CreateFollowupMessage(ephemeral(content)); err != nil {
+		slog.Warn("failed to send follow-up message", slog.Any("err", err))
+	}
 }
 
 func installOwnerURL(clientID snowflake.ID) string {

@@ -46,6 +46,9 @@ type Store interface {
 	GetOrCreateRelayCode(guildID snowflake.ID) string
 	// GetRelayCode returns the stored relay code for guildID without creating one.
 	GetRelayCode(guildID snowflake.ID) (string, bool)
+
+	// Close flushes any pending writes and releases resources.
+	Close()
 }
 
 // generateRelayCode creates a cryptographically random 8-character uppercase code.
@@ -141,3 +144,5 @@ func (s *InMemoryStore) GetRelayCode(guildID snowflake.ID) (string, bool) {
 	code, ok := s.relayCodes[guildID]
 	return code, ok
 }
+
+func (s *InMemoryStore) Close() {}

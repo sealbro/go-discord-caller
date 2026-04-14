@@ -27,6 +27,52 @@ type destChannel struct {
 	outs      []chan<- []byte
 }
 
+// speakerResult holds the outcome of a single successfully joined speaker.
+type speakerResult struct {
+	speaker   domain.Speaker
+	chOut     chan<- []byte
+	chCapture <-chan []byte // nil when withCapture is false
+	gv        pool.GuildVoice
+	cleanup   func() // closes provider/receiver; caller must invoke on teardown
+}
+
+// raidSetup captures the common setup result for both host and guest flows.
+type raidSetup struct {
+	joined         []speakerResult
+	speakers       []domain.Speaker
+	speakerCleanup func()
+	outs           []chan<- []byte
+}
+
+// setupSpeakers snapshots and joins all enabled, bound speakers for a guild.
+// Returns an error if the guild has no status, already has an active session,
+// or no speakers could join.
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode domain.RaidMode) (*raidSetup, error) {
+	speakers, err := m.snapshotSpeakers(guildID)
+	if err != nil {
+		return nil, err
+	}
+
+	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture())
+	if len(joined) == 0 {
+		return nil, fmt.Errorf("no speakers could join their voice channels")
+	}
+
+	outs := make([]chan<- []byte, 0, len(joined))
+	joinedSpeakers := make([]domain.Speaker, 0, len(joined))
+	for _, r := range joined {
+		outs = append(outs, r.chOut)
+		joinedSpeakers = append(joinedSpeakers, r.speaker)
+	}
+
+	return &raidSetup{
+		joined:         joined,
+		speakers:       joinedSpeakers,
+		speakerCleanup: buildSpeakerCleanup(guildID, joined),
+		outs:           outs,
+	}, nil
+}
+
 // JoinSession connects this guild as a guest to an existing relay session.
 // mode must be a guest mode: RaidModeGuestOne (listener only) or RaidModeAllyCaller
 // (speakers also capture from their channels for local mixing).
@@ -37,25 +83,10 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return err
 	}
 
-	speakers, err := m.snapshotSpeakers(guestGuildID)
+	setup, err := m.setupSpeakers(ctx, guestGuildID, mode)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
 		return err
-	}
-
-	// TODO: Add owner speaker which dynamic, can capture or relay audio
-	// RaidModeOneCaller mode can only capture audio
-	// RaidModeGuildCaller mode can capture and relay audio
-	// RaidModeGuestOne mode can only relay
-	// RaidModeAllyCaller mode can capture and relay audio
-	// think about communicating in one guild without ally
-
-	joined := m.joinSpeakers(ctx, guestGuildID, speakers, mode.WithCapture())
-
-	// Collect per-speaker output channels; the owner's relay channel is appended below.
-	outs := make([]chan<- []byte, 0, len(joined)+1)
-	for _, r := range joined {
-		outs = append(outs, r.chOut)
 	}
 
 	// Join the owner bot as a relayer into its bound channel.
@@ -70,27 +101,22 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			slog.Warn("guest: failed to setup owner relay", slog.Any("err", err))
 		} else {
 			ownerCleanup = cleanup
-			outs = append(outs, chOut)
+			setup.outs = append(setup.outs, chOut)
 		}
 	}
 
-	relaySession.AddGuild(guestGuildID, outs)
+	relaySession.AddGuild(guestGuildID, setup.outs)
 
-	joinedSpeakers := make([]domain.Speaker, len(joined))
-	for i, r := range joined {
-		joinedSpeakers[i] = r.speaker
-	}
-	speakerCleanup := buildSpeakerCleanup(guestGuildID, joined)
 	session := &domain.VoiceSession{
 		GuildID:   guestGuildID,
 		Cancel:    cancelFunc,
-		Cleanup:   speakerCleanup,
+		Cleanup:   setup.speakerCleanup,
 		RelayCode: code,
 		IsGuest:   true,
-		Speakers:  joinedSpeakers,
+		Speakers:  setup.speakers,
 	}
 	if err := m.commitSession(guestGuildID, session); err != nil {
-		speakerCleanup()
+		setup.speakerCleanup()
 		if ownerCleanup != nil {
 			ownerCleanup()
 			ownerVoice.Leave(ctx, guestGuildID)
@@ -103,20 +129,20 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		slog.String("guildID", guestGuildID.String()),
 		slog.String("mode", string(mode)),
 		slog.String("code", code),
-		slog.Int("activeSpeakers", len(joined)),
+		slog.Int("activeSpeakers", len(setup.joined)),
 		slog.Bool("ownerRelaying", ownerCleanup != nil),
 	)
 
 	go func() {
 		defer func() {
-			speakerCleanup()
+			setup.speakerCleanup()
 			if ownerCleanup != nil {
 				ownerCleanup()
 				ownerVoice.Leave(context.Background(), guestGuildID)
 			}
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
 			relaySession.RemoveGuild(guestGuildID)
-			for _, out := range outs {
+			for _, out := range setup.outs {
 				close(out)
 			}
 			m.sessions.RemoveGuest(guestGuildID)
@@ -167,7 +193,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode) (relay.RelayCode, error) {
-	speakers, err := m.snapshotSpeakers(guildID)
+	setup, err := m.setupSpeakers(ctx, guildID, mode)
 	if err != nil {
 		return "", err
 	}
@@ -175,9 +201,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	ov := m.ownerVoice(guildID)
 	conn, err := ov.Join(ctx, guildID)
 	if err != nil {
+		setup.speakerCleanup()
 		return "", fmt.Errorf("failed to join owner channel: %w", err)
 	}
 	if conn == nil {
+		setup.speakerCleanup()
 		return "", fmt.Errorf("no voice connection to owner channel")
 	}
 
@@ -185,25 +213,19 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		WithVoiceReceiver(m.buildAllowUser(ctx, conn, m.ownerBotID, guildID)).
 		Apply(ctx, conn, nil)
 	if err != nil {
+		setup.speakerCleanup()
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
 
-	// TODO: Add owner speaker which dynamic, can capture or relay audio
-	// RaidModeOneCaller mode can only capture audio
-	// RaidModeGuildCaller mode can capture and relay audio
-	// RaidModeGuestOne mode can only relay
-	// RaidModeAllyCaller mode can capture and relay audio
-	// think about communicating in one guild without ally
-
-	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture())
-
-	sources := buildSources(m.ownerBotID, ov.ChannelID(), chIn, joined)
-	destinations := buildDestinations(joined)
+	sources := buildSources(m.ownerBotID, ov.ChannelID(), chIn, setup.joined)
+	destinations := buildDestinations(setup.joined)
 
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
 		mx, err := opus.NewMixer()
 		if err != nil {
+			setup.speakerCleanup()
+			ownerCleanup()
 			return "", fmt.Errorf("create channel mixer: %w", err)
 		}
 		channelMixers[dest.channelID] = mx
@@ -211,6 +233,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 	relayMixer, err := opus.NewMixer()
 	if err != nil {
+		setup.speakerCleanup()
+		ownerCleanup()
 		return "", fmt.Errorf("create relay mixer: %w", err)
 	}
 	relayCode := m.store.GetOrCreateRelayCode(guildID)
@@ -218,20 +242,15 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
-	joinedSpeakers := make([]domain.Speaker, len(joined))
-	for i, r := range joined {
-		joinedSpeakers[i] = r.speaker
-	}
-	speakerCleanup := buildSpeakerCleanup(guildID, joined)
 	session := &domain.VoiceSession{
 		GuildID:   guildID,
 		Cancel:    cancelFunc,
-		Cleanup:   speakerCleanup,
+		Cleanup:   setup.speakerCleanup,
 		RelayCode: relayCode,
-		Speakers:  joinedSpeakers,
+		Speakers:  setup.speakers,
 	}
 	if err := m.commitSession(guildID, session); err != nil {
-		speakerCleanup()
+		setup.speakerCleanup()
 		ownerCleanup()
 		ov.Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
@@ -242,7 +261,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		slog.String("guildID", guildID.String()),
 		slog.String("mode", string(mode)),
 		slog.String("code", relayCode),
-		slog.Int("activeSpeakers", len(joined)),
+		slog.Int("activeSpeakers", len(setup.joined)),
 	)
 
 	startChannelMixers(ctx, destinations, channelMixers)
@@ -369,10 +388,12 @@ func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, jo
 func buildDestinations(joined []speakerResult) []*destChannel {
 	destMap := map[snowflake.ID]*destChannel{}
 	for _, r := range joined {
-		if _, ok := destMap[r.gv.ChannelID()]; !ok {
-			destMap[r.gv.ChannelID()] = &destChannel{channelID: r.gv.ChannelID()}
+		d, ok := destMap[r.gv.ChannelID()]
+		if !ok {
+			d = &destChannel{channelID: r.gv.ChannelID()}
+			destMap[r.gv.ChannelID()] = d
 		}
-		destMap[r.gv.ChannelID()].outs = append(destMap[r.gv.ChannelID()].outs, r.chOut)
+		d.outs = append(d.outs, r.chOut)
 	}
 	dests := make([]*destChannel, 0, len(destMap))
 	for _, d := range destMap {
@@ -488,15 +509,6 @@ func buildSpeakerCleanup(guildID snowflake.ID, joined []speakerResult) func() {
 			}
 		})
 	}
-}
-
-// speakerResult holds the outcome of a single successfully joined speaker.
-type speakerResult struct {
-	speaker   domain.Speaker
-	chOut     chan<- []byte
-	chCapture <-chan []byte // nil when withCapture is false
-	gv        pool.GuildVoice
-	cleanup   func() // closes provider/receiver; caller must invoke on teardown
 }
 
 // snapshotSpeakers returns a deep copy of the guild's speakers as a slice.

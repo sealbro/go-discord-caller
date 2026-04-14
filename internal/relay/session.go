@@ -91,7 +91,7 @@ func (s *Session) close() {
 
 // Manager is the global registry of active relay sessions.
 type Manager struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	sessions map[RelayCode]*Session    // code → session
 	byGuild  map[snowflake.ID]*Session // guildID (host or guest) → session
 }
@@ -134,8 +134,8 @@ func (m *Manager) Join(code RelayCode, guildID snowflake.ID) (*Session, error) {
 
 // GetByGuild returns the session the guild belongs to (as host or guest).
 func (m *Manager) GetByGuild(guildID snowflake.ID) (*Session, bool) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	s, ok := m.byGuild[guildID]
 	return s, ok
 }

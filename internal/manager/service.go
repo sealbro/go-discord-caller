@@ -4,9 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/domain"
@@ -131,7 +134,9 @@ func (m *Service) Shutdown(ctx context.Context) {
 }
 
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
-	_, err := m.ownerClient.Rest.GetMember(guildID, userID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := m.ownerClient.Rest.GetMember(guildID, userID, rest.WithCtx(ctx))
 	return err == nil
 }
 
@@ -156,9 +161,7 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 		snap.Speakers[k] = &cp
 	}
 	snap.BoundChannels = make(map[snowflake.ID]snowflake.ID, len(st.BoundChannels))
-	for k, v := range st.BoundChannels {
-		snap.BoundChannels[k] = v
-	}
+	maps.Copy(snap.BoundChannels, st.BoundChannels)
 	// Deep-copy the session so the snapshot holds a fully independent copy.
 	// Nil out Cancel/Cleanup — snapshots are read-only display objects.
 	if st.Session != nil {

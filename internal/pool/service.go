@@ -127,7 +127,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 		return false
 	}
 
-	if client != nil && client.Gateway != nil && client.Gateway.Status().IsConnected() {
+	if isConnected(client) {
 		return true // already connected; disgo's internal loop handles future drops
 	}
 
@@ -192,6 +192,10 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 		client := s.poolClients[botUserID]
 		s.mu.RUnlock()
 
+		if isConnected(client) {
+			continue // healthy
+		}
+
 		if client == nil || client.Gateway == nil {
 			slog.Warn("pool: watchdog detected bot without gateway, attempting reconnect",
 				slog.String("botUserID", botUserID.String()),
@@ -206,17 +210,18 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 			continue
 		}
 
-		status := client.Gateway.Status()
-		if status.IsConnected() {
-			continue // healthy
-		}
 		// Gateway exists but is not connected. Disgo's internal reconnect loop is
 		// already running with exponential backoff — log for visibility only.
 		slog.Warn("pool: watchdog detected disconnected gateway",
 			slog.String("botUserID", botUserID.String()),
-			slog.String("status", status.String()),
+			slog.String("status", client.Gateway.Status().String()),
 		)
 	}
+}
+
+// isConnected reports whether a client has a healthy gateway connection.
+func isConnected(c *bot.Client) bool {
+	return c != nil && c.Gateway != nil && c.Gateway.Status().IsConnected()
 }
 
 // GetClientByID returns the connected client for the given botUserID.
@@ -225,7 +230,7 @@ func (s *Service) GetClientByID(botUserID snowflake.ID) (*bot.Client, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	client, ok := s.poolClients[botUserID]
-	if !ok || client == nil || client.Gateway == nil || !client.Gateway.Status().IsConnected() {
+	if !ok || !isConnected(client) {
 		return nil, false
 	}
 	return client, true
@@ -237,7 +242,7 @@ func (s *Service) GetClients() []*bot.Client {
 	defer s.mu.RUnlock()
 	clients := make([]*bot.Client, 0, len(s.poolClients))
 	for _, id := range s.sortedIDs() {
-		if c := s.poolClients[id]; c != nil && c.Gateway != nil && c.Gateway.Status().IsConnected() {
+		if c := s.poolClients[id]; isConnected(c) {
 			clients = append(clients, c)
 		}
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"gopkg.in/yaml.v3"
@@ -36,14 +37,20 @@ type yamlData struct {
 
 // ── YAMLStore ─────────────────────────────────────────────────────────────────
 
+const saveDebounce = 500 * time.Millisecond
+
 // YAMLStore is a thread-safe, file-backed implementation of Store.
-// All bindings are persisted to a YAML file after every mutation.
+// Writes are debounced: mutations mark the store dirty and a background
+// goroutine flushes to disk after saveDebounce of inactivity.
 type YAMLStore struct {
 	mu         sync.RWMutex
 	path       string
 	channels   map[channelKey]snowflake.ID
 	roles      map[roleKey]snowflake.ID
 	relayCodes map[snowflake.ID]string
+
+	dirtyCh chan struct{} // signals the flush goroutine
+	done    chan struct{} // closed by Close to stop the flush goroutine
 }
 
 // NewYAMLStore opens (or creates) the YAML file at path and loads existing bindings.
@@ -53,6 +60,8 @@ func NewYAMLStore(path string) (*YAMLStore, error) {
 		channels:   make(map[channelKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
+		dirtyCh:    make(chan struct{}, 1),
+		done:       make(chan struct{}),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -61,7 +70,58 @@ func NewYAMLStore(path string) (*YAMLStore, error) {
 		slog.Int("channels", len(s.channels)),
 		slog.Int("roles", len(s.roles)),
 	)
+	go s.flushLoop()
 	return s, nil
+}
+
+// flushLoop runs in a background goroutine and coalesces rapid mutations
+// into a single file write after saveDebounce of quiet time.
+func (s *YAMLStore) flushLoop() {
+	timer := time.NewTimer(0)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-s.done:
+			// Final flush on shutdown.
+			s.mu.RLock()
+			err := s.save()
+			s.mu.RUnlock()
+			if err != nil {
+				slog.Error("yaml store: final flush failed", slog.Any("err", err))
+			}
+			return
+		case <-s.dirtyCh:
+			timer.Reset(saveDebounce)
+		case <-timer.C:
+			s.mu.RLock()
+			if err := s.save(); err != nil {
+				slog.Error("yaml store: debounced flush failed", slog.Any("err", err))
+			}
+			s.mu.RUnlock()
+		}
+	}
+}
+
+// markDirty signals the flush goroutine that the in-memory state has changed.
+// Must be called with mu write-locked (the caller already holds it).
+func (s *YAMLStore) markDirty() {
+	select {
+	case s.dirtyCh <- struct{}{}:
+	default:
+	}
+}
+
+// Close flushes any pending writes and stops the background goroutine.
+func (s *YAMLStore) Close() {
+	select {
+	case <-s.done:
+	default:
+		close(s.done)
+	}
 }
 
 // load reads the YAML file and populates the in-memory maps.
@@ -95,7 +155,7 @@ func (s *YAMLStore) load() error {
 }
 
 // save serialises the current state to the YAML file.
-// Must be called with mu write-locked.
+// Must be called with mu at least read-locked.
 func (s *YAMLStore) save() error {
 	// Collect all guild IDs present in either map.
 	guildSet := make(map[snowflake.ID]*yamlGuildEntry)
@@ -162,18 +222,14 @@ func (s *YAMLStore) BindChannel(guildID, userID, channelID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.channels[channelKey{userID, guildID}] = channelID
-	if err := s.save(); err != nil {
-		slog.Error("yaml store: failed to persist channel binding", slog.Any("err", err))
-	}
+	s.markDirty()
 }
 
 func (s *YAMLStore) UnbindChannel(guildID, userID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.channels, channelKey{userID, guildID})
-	if err := s.save(); err != nil {
-		slog.Error("yaml store: failed to persist channel unbinding", slog.Any("err", err))
-	}
+	s.markDirty()
 }
 
 func (s *YAMLStore) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool) {
@@ -187,18 +243,14 @@ func (s *YAMLStore) BindRole(guildID snowflake.ID, roleType RoleType, roleID sno
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.roles[roleKey{guildID, roleType}] = roleID
-	if err := s.save(); err != nil {
-		slog.Error("yaml store: failed to persist role binding", slog.Any("err", err))
-	}
+	s.markDirty()
 }
 
 func (s *YAMLStore) UnbindRole(guildID snowflake.ID, roleType RoleType) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.roles, roleKey{guildID, roleType})
-	if err := s.save(); err != nil {
-		slog.Error("yaml store: failed to persist role unbinding", slog.Any("err", err))
-	}
+	s.markDirty()
 }
 
 func (s *YAMLStore) GetBoundRole(guildID snowflake.ID, roleType RoleType) (snowflake.ID, bool) {
@@ -216,9 +268,7 @@ func (s *YAMLStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
 	}
 	code := uniqueRelayCode(s.relayCodes)
 	s.relayCodes[guildID] = code
-	if err := s.save(); err != nil {
-		slog.Error("yaml store: failed to persist relay code", slog.Any("err", err))
-	}
+	s.markDirty()
 	return code
 }
 

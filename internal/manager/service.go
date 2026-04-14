@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/domain"
@@ -47,28 +46,29 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 	}
 }
 
-// JoinChannel makes the owner bot join the voice channel bound to userID in guildID.
-// Returns a nil conn (and nil error) when no channel is bound.
-func (m *Service) JoinChannel(ctx context.Context, guildID, userID snowflake.ID) (voice.Conn, error) {
-	channelID, ok := m.store.GetBoundChannel(guildID, userID)
-	if !ok {
-		return nil, nil
-	}
-	conn := m.ownerClient.VoiceManager.CreateConn(guildID)
-	if err := conn.Open(ctx, channelID, false, false); err != nil {
-		return nil, fmt.Errorf("owner join channel %s: %w", channelID, err)
-	}
-	slog.Info("owner joined voice channel",
-		slog.String("channelID", channelID.String()),
-		slog.String("guildID", guildID.String()),
-	)
-	return conn, nil
+// ownerVoice returns a GuildVoice for the owner bot in guildID, bound to its
+// configured channel. Use Join/Leave on the result to manage the connection.
+func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
+	channelID, _ := m.store.GetBoundChannel(guildID, m.ownerBotID)
+	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID)
 }
 
-// LeaveChannel makes the owner bot leave its current voice channel in a guild.
-func (m *Service) LeaveChannel(ctx context.Context, guildID snowflake.ID) {
-	if conn := m.ownerClient.VoiceManager.GetConn(guildID); conn != nil {
-		conn.Close(ctx)
+// speakerVoice returns a GuildVoice for a speaker bot in guildID, bound to its
+// configured channel. Use Join/Leave on the result to manage the connection.
+// Returns false if the bot is not in the pool or its gateway is not connected.
+func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice, bool) {
+	client, ok := m.poolSvc.GetClientByID(botUserID)
+	if !ok {
+		return pool.GuildVoice{}, false
+	}
+	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
+	return pool.NewGuildVoice(client.VoiceManager, channelID), true
+}
+
+// leaveSpeaker makes the speaker bot leave its current voice channel in the guild.
+func (m *Service) leaveSpeaker(ctx context.Context, guildID, botUserID snowflake.ID) {
+	if gv, ok := m.speakerVoice(guildID, botUserID); ok {
+		gv.Leave(ctx, guildID)
 	}
 }
 
@@ -172,10 +172,8 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 		sessionCopy := *st.Session
 		sessionCopy.Cancel = nil
 		sessionCopy.Cleanup = nil
-		sessionCopy.Speakers = make([]*domain.Speaker, len(st.Session.Speakers))
-		for i, sp := range st.Session.Speakers {
-			sessionCopy.Speakers[i] = new(*sp)
-		}
+		sessionCopy.Speakers = make([]domain.Speaker, len(st.Session.Speakers))
+		copy(sessionCopy.Speakers, st.Session.Speakers)
 		snap.Session = &sessionCopy
 	}
 	return snap

@@ -2,7 +2,6 @@ package pool
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
@@ -23,8 +22,6 @@ type PoolService interface {
 	GetIDs() []snowflake.ID
 	Reconnect(ctx context.Context, botUserID snowflake.ID) bool
 	Shutdown(ctx context.Context)
-	JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) (voice.Conn, error)
-	LeaveChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 }
 
 // Service manages the lifecycle of the pool of speaker bot gateways.
@@ -264,42 +261,6 @@ func (s *Service) sortedIDs() []snowflake.ID {
 	}
 	slices.Sort(ids)
 	return ids
-}
-
-// JoinChannel makes the bot join the given voice channel and returns the connection.
-func (s *Service) JoinChannel(ctx context.Context, guildID, botUserID, channelID snowflake.ID) (voice.Conn, error) {
-	s.mu.RLock()
-	client := s.poolClients[botUserID]
-	s.mu.RUnlock()
-	if client == nil {
-		return nil, fmt.Errorf("bot %s is not in the pool", botUserID)
-	}
-	conn := client.VoiceManager.CreateConn(guildID)
-	if err := conn.Open(ctx, channelID, false, false); err != nil {
-		return nil, fmt.Errorf("bot %s join channel %s: %w", botUserID, channelID, err)
-	}
-	slog.Info("pool: bot joined voice channel",
-		slog.String("botUserID", botUserID.String()),
-		slog.String("channelID", channelID.String()),
-	)
-	return conn, nil
-}
-
-// LeaveChannel makes the bot leave its current voice channel in the guild.
-func (s *Service) LeaveChannel(ctx context.Context, guildID, botUserID snowflake.ID) {
-	s.mu.RLock()
-	client := s.poolClients[botUserID]
-	s.mu.RUnlock()
-	if client == nil {
-		return
-	}
-	if conn := client.VoiceManager.GetConn(guildID); conn != nil {
-		conn.Close(ctx)
-	}
-	slog.Info("pool: bot left voice channel",
-		slog.String("botUserID", botUserID.String()),
-		slog.String("guildID", guildID.String()),
-	)
 }
 
 // Shutdown closes all gateways.

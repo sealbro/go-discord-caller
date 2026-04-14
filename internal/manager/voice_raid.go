@@ -10,6 +10,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/domain"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/relay"
 )
 
@@ -58,8 +59,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	}
 
 	// Join the owner bot as a relayer into its bound channel.
+	ownerVoice := m.ownerVoice(guestGuildID)
 	var ownerCleanup func()
-	if conn, err := m.JoinChannel(ctx, guestGuildID, m.ownerBotID); err != nil {
+	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.Warn("guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
 		chOut := make(chan []byte, audioChanBuf)
@@ -74,7 +76,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 	relaySession.AddGuild(guestGuildID, outs)
 
-	joinedSpeakers := make([]*domain.Speaker, len(joined))
+	joinedSpeakers := make([]domain.Speaker, len(joined))
 	for i, r := range joined {
 		joinedSpeakers[i] = r.speaker
 	}
@@ -90,14 +92,14 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if err := m.commitSession(guestGuildID, session); err != nil {
 		speakerCleanup()
 		for _, r := range joined {
-			m.poolSvc.LeaveChannel(ctx, guestGuildID, r.speaker.ID)
+			r.gv.Leave(ctx, guestGuildID)
 		}
 		if ownerCleanup != nil {
 			ownerCleanup()
-			m.LeaveChannel(ctx, guestGuildID)
+			ownerVoice.Leave(ctx, guestGuildID)
 		}
 		m.sessions.RemoveGuest(guestGuildID)
-		return err
+		return fmt.Errorf("failed to commit session: %w", err)
 	}
 
 	slog.Info("guest joined relay session",
@@ -113,11 +115,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			// Close providers/receivers before leaving channels.
 			speakerCleanup()
 			for _, r := range joined {
-				m.poolSvc.LeaveChannel(context.Background(), guestGuildID, r.speaker.ID)
+				m.leaveSpeaker(context.Background(), guestGuildID, r.speaker.ID)
 			}
 			if ownerCleanup != nil {
 				ownerCleanup()
-				m.LeaveChannel(context.Background(), guestGuildID)
+				ownerVoice.Leave(context.Background(), guestGuildID)
 			}
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
 			relaySession.RemoveGuild(guestGuildID)
@@ -163,10 +165,10 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		session.Cleanup()
 	}
 	for _, sp := range session.Speakers {
-		m.poolSvc.LeaveChannel(ctx, guildID, sp.ID)
+		m.leaveSpeaker(ctx, guildID, sp.ID)
 	}
 	if !session.IsGuest {
-		m.LeaveChannel(ctx, guildID)
+		m.ownerVoice(guildID).Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
 	}
 
@@ -183,7 +185,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", err
 	}
 
-	conn, err := m.JoinChannel(ctx, guildID, m.ownerBotID)
+	ov := m.ownerVoice(guildID)
+	conn, err := ov.Join(ctx, guildID)
 	if err != nil {
 		return "", fmt.Errorf("failed to join owner channel: %w", err)
 	}
@@ -207,8 +210,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture())
 
-	ownerChannelID, _ := m.store.GetBoundChannel(guildID, m.ownerBotID)
-	sources := buildSources(m.ownerBotID, ownerChannelID, chIn, joined)
+	sources := buildSources(m.ownerBotID, ov.ChannelID(), chIn, joined)
 	destinations := buildDestinations(joined)
 
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
@@ -229,7 +231,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
-	joinedSpeakers := make([]*domain.Speaker, len(joined))
+	joinedSpeakers := make([]domain.Speaker, len(joined))
 	for i, r := range joined {
 		joinedSpeakers[i] = r.speaker
 	}
@@ -245,9 +247,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		speakerCleanup()
 		ownerCleanup()
 		for _, r := range joined {
-			m.poolSvc.LeaveChannel(ctx, guildID, r.speaker.ID)
+			r.gv.Leave(ctx, guildID)
 		}
-		m.LeaveChannel(ctx, guildID)
+		ov.Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
 		return "", err
 	}
@@ -267,28 +269,28 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 // joinSpeakers joins all enabled, bound speakers in parallel.
 // When withCapture is true each speaker also captures incoming frames.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []*domain.Speaker, withCapture bool) []speakerResult {
-	type candidate struct {
-		speaker   *domain.Speaker
-		channelID snowflake.ID
-	}
-	var candidates []candidate
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []domain.Speaker, withCapture bool) []speakerResult {
+	var candidates []domain.Speaker
 	for _, sp := range speakers {
-		if !sp.Enabled {
-			continue
-		}
-		if channelID, ok := m.store.GetBoundChannel(guildID, sp.ID); ok {
-			candidates = append(candidates, candidate{sp, channelID})
+		if sp.Enabled {
+			if _, ok := m.store.GetBoundChannel(guildID, sp.ID); ok {
+				candidates = append(candidates, sp)
+			}
 		}
 	}
 
 	resultCh := make(chan speakerResult, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
-	for _, c := range candidates {
-		go func(sp *domain.Speaker, channelID snowflake.ID) {
+	for _, sp := range candidates {
+		go func(sp domain.Speaker) {
 			defer wg.Done()
-			conn, err := m.poolSvc.JoinChannel(ctx, guildID, sp.ID, channelID)
+			gv, ok := m.speakerVoice(guildID, sp.ID)
+			if !ok {
+				slog.Warn("speaker not in pool", slog.String("speakerID", sp.ID.String()))
+				return
+			}
+			conn, err := gv.Join(ctx, guildID)
 			if err != nil {
 				slog.Warn("speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				return
@@ -297,11 +299,11 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 			chCapture, cleanup, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture)
 			if err != nil {
 				slog.Error("failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
-				m.poolSvc.LeaveChannel(ctx, guildID, sp.ID)
+				gv.Leave(ctx, guildID)
 				return
 			}
-			resultCh <- speakerResult{sp, chOut, chCapture, channelID, cleanup}
-		}(c.speaker, c.channelID)
+			resultCh <- speakerResult{sp, chOut, chCapture, gv, cleanup}
+		}(sp)
 	}
 	wg.Wait()
 	close(resultCh)
@@ -365,7 +367,7 @@ func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, jo
 		if r.chCapture == nil {
 			continue
 		}
-		if seenCapChannels[r.channelID] {
+		if seenCapChannels[r.gv.ChannelID()] {
 			// Second bot in same channel: drain and discard its capture to avoid doubling.
 			go func(ch <-chan []byte) {
 				for range ch {
@@ -373,8 +375,8 @@ func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, jo
 			}(r.chCapture)
 			continue
 		}
-		seenCapChannels[r.channelID] = true
-		sources = append(sources, sourceEntry{r.speaker.ID, r.channelID, r.chCapture})
+		seenCapChannels[r.gv.ChannelID()] = true
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
 	}
 	return sources
 }
@@ -383,10 +385,10 @@ func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, jo
 func buildDestinations(joined []speakerResult) []*destChannel {
 	destMap := map[snowflake.ID]*destChannel{}
 	for _, r := range joined {
-		if _, ok := destMap[r.channelID]; !ok {
-			destMap[r.channelID] = &destChannel{channelID: r.channelID}
+		if _, ok := destMap[r.gv.ChannelID()]; !ok {
+			destMap[r.gv.ChannelID()] = &destChannel{channelID: r.gv.ChannelID()}
 		}
-		destMap[r.channelID].outs = append(destMap[r.channelID].outs, r.chOut)
+		destMap[r.gv.ChannelID()].outs = append(destMap[r.gv.ChannelID()].outs, r.chOut)
 	}
 	dests := make([]*destChannel, 0, len(destMap))
 	for _, d := range destMap {
@@ -505,16 +507,16 @@ func buildSpeakerCleanup(joined []speakerResult) func() {
 
 // speakerResult holds the outcome of a single successfully joined speaker.
 type speakerResult struct {
-	speaker   *domain.Speaker
+	speaker   domain.Speaker
 	chOut     chan<- []byte
 	chCapture <-chan []byte // nil when withCapture is false
-	channelID snowflake.ID
+	gv        pool.GuildVoice
 	cleanup   func() // closes provider/receiver; caller must invoke on teardown
 }
 
 // snapshotSpeakers returns a deep copy of the guild's speakers as a slice.
 // Returns an error if the guild has no status or already has an active session.
-func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]*domain.Speaker, error) {
+func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]domain.Speaker, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	st := m.statuses[guildID]
@@ -524,9 +526,9 @@ func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]*domain.Speaker, err
 	if st.Session != nil {
 		return nil, fmt.Errorf("a voice raid is already active in this server")
 	}
-	speakers := make([]*domain.Speaker, 0, len(st.Speakers))
+	speakers := make([]domain.Speaker, 0, len(st.Speakers))
 	for _, v := range st.Speakers {
-		speakers = append(speakers, new(*v))
+		speakers = append(speakers, *v)
 	}
 	return speakers, nil
 }

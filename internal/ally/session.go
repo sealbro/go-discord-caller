@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
 // Code is the unique 8-character code that identifies an ally session.
@@ -13,9 +14,13 @@ type Code = string
 // Session is an active cross-guild audio relay owned by one host guild.
 // Guest guilds attach their speaker output channels via AddGuild; the host's
 // relay goroutine calls Broadcast on every incoming packet.
+// In AllyCaller mode guest guilds can also relay captured audio to all OTHER
+// guilds via BroadcastFromGuild — their own guild is excluded to prevent
+// speakers playing back audio to the users who originally produced it.
 type Session struct {
 	Code        Code
 	HostGuildID snowflake.ID
+	HostMode    guild.RaidMode
 
 	done chan struct{}
 
@@ -23,13 +28,48 @@ type Session struct {
 	outs map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
 }
 
-func newSession(code Code, hostGuildID snowflake.ID) *Session {
+func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Session {
 	return &Session{
 		Code:        code,
 		HostGuildID: hostGuildID,
+		HostMode:    mode,
 		done:        make(chan struct{}),
 		outs:        make(map[snowflake.ID][]chan<- []byte),
 	}
+}
+
+// broadcast sends pkt to every guild except excludeGuildID.
+// Pass 0 to send to all guilds. Must be called with s.mu held for reading.
+func (s *Session) broadcast(pkt []byte, excludeGuildID snowflake.ID) {
+	for guildID, chs := range s.outs {
+		if guildID == excludeGuildID {
+			continue
+		}
+		for _, ch := range chs {
+			select {
+			case ch <- pkt:
+			default:
+			}
+		}
+	}
+}
+
+// Broadcast fans a packet out to every registered guild's speaker channels.
+// Non-blocking: full channels drop the frame.
+func (s *Session) Broadcast(pkt []byte) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.broadcast(pkt, 0)
+}
+
+// BroadcastFromGuild fans a packet out to every guild except srcGuildID.
+// Used by AllyCaller guests to relay captured audio without echoing it back
+// to the guild that produced it.
+// Non-blocking: full channels drop the frame.
+func (s *Session) BroadcastFromGuild(srcGuildID snowflake.ID, pkt []byte) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	s.broadcast(pkt, srcGuildID)
 }
 
 // AddGuild registers a guild's speaker output channels with this session.
@@ -45,21 +85,6 @@ func (s *Session) RemoveGuild(guildID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.outs, guildID)
-}
-
-// Broadcast fans a packet out to every registered guild's speaker channels.
-// Non-blocking: full channels drop the frame.
-func (s *Session) Broadcast(pkt []byte) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, chs := range s.outs {
-		for _, ch := range chs {
-			select {
-			case ch <- pkt:
-			default:
-			}
-		}
-	}
 }
 
 // GuestGuildIDs returns the IDs of all guilds attached to this session except the host.
@@ -105,10 +130,10 @@ func NewManager() *Manager {
 
 // Create registers a new session for hostGuildID using the supplied code and returns it.
 // The caller is responsible for providing a stable, unique code (e.g. from the store).
-func (m *Manager) Create(code Code, hostGuildID snowflake.ID) *Session {
+func (m *Manager) Create(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Session {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	s := newSession(code, hostGuildID)
+	s := newSession(code, hostGuildID, mode)
 	m.sessions[s.Code] = s
 	m.byGuild[hostGuildID] = s
 	return s

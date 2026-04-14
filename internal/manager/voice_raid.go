@@ -74,19 +74,38 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 }
 
 // JoinSession connects this guild as a guest to an existing relay session.
-// mode must be a guest mode: RaidModeGuestOne (listener only) or RaidModeAllyCaller
-// (speakers also capture from their channels for local mixing).
+// guestMode is the caller-mode chosen by the guest (RaidModeAllyListener or
+// RaidModeAllyCaller). When the host does not allow guest capture the mode
+// is silently downgraded to RaidModeAllyListener.
+//
 // The session ends automatically when the host ends or ctx is cancelled.
-func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) error {
+func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) error {
 	relaySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
 		return err
 	}
 
-	setup, err := m.setupSpeakers(ctx, guestGuildID, mode)
+	// Downgrade to listen-only when the host doesn't allow guest capture.
+	if guestMode.WithCapture() && !relaySession.HostMode.AllowGuestCapture() {
+		guestMode = guild.RaidModeAllyListener
+	}
+
+	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
 		return err
+	}
+
+	// In AllyCaller mode relay guest captures to all OTHER guilds (never back to
+	// the originating guild — that would echo audio to the users who spoke).
+	if guestMode.WithCapture() {
+		iterDeduplicatedCaptures(setup.joined, func(r speakerResult) {
+			go func(ch <-chan []byte) {
+				for pkt := range ch {
+					relaySession.BroadcastFromGuild(guestGuildID, pkt)
+				}
+			}(r.chCapture)
+		})
 	}
 
 	// Join the owner bot as a relayer into its bound channel.
@@ -127,7 +146,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 	slog.Info("guest joined relay session",
 		slog.String("guildID", guestGuildID.String()),
-		slog.String("mode", string(mode)),
+		slog.String("hostMode", string(relaySession.HostMode)),
+		slog.String("guestMode", string(guestMode)),
 		slog.String("code", code),
 		slog.Int("activeSpeakers", len(setup.joined)),
 		slog.Bool("ownerRelaying", ownerCleanup != nil),
@@ -209,9 +229,18 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", fmt.Errorf("no voice connection to owner channel")
 	}
 
-	chIn, ownerCleanup, err := NewVoiceConnSetup(m.ownerBotID).
-		WithVoiceReceiver(m.buildAllowUser(ctx, conn, m.ownerBotID, guildID)).
-		Apply(ctx, conn, nil)
+	ownerSetup := NewVoiceConnSetup(m.ownerBotID).
+		WithVoiceReceiver(m.buildAllowUser(ctx, conn, m.ownerBotID, guildID))
+
+	// In multi-channel capture modes the owner bot must also play back the
+	// mixed audio from other channels into its own channel (mix-minus).
+	var chOwnerOut chan []byte
+	if mode.WithCapture() {
+		chOwnerOut = make(chan []byte, audioChanBuf)
+		ownerSetup.WithVoiceProvider()
+	}
+
+	chIn, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
 	if err != nil {
 		setup.speakerCleanup()
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
@@ -219,6 +248,15 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 	sources := buildSources(m.ownerBotID, ov.ChannelID(), chIn, setup.joined)
 	destinations := buildDestinations(setup.joined)
+
+	// Add the owner's channel as a playback destination so its mix-minus mixer
+	// output reaches the owner bot's voice provider.
+	if chOwnerOut != nil {
+		destinations = append(destinations, &destChannel{
+			channelID: ov.ChannelID(),
+			outs:      []chan<- []byte{chOwnerOut},
+		})
+	}
 
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
@@ -237,8 +275,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		ownerCleanup()
 		return "", fmt.Errorf("create relay mixer: %w", err)
 	}
+
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
-	relaySession := m.sessions.Create(allyCode, guildID)
+	relaySession := m.sessions.Create(allyCode, guildID, mode)
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
@@ -361,26 +400,34 @@ func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, co
 	return capture, cleanup, nil
 }
 
-// buildSources returns a deduplicated list of audio sources (one capture channel per voice
-// channel). When two speaker bots share a channel the second capture is drained and discarded.
-func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, joined []speakerResult) []sourceEntry {
-	sources := []sourceEntry{{ownerUserID, ownerChannelID, chIn}}
-	seenCapChannels := map[snowflake.ID]bool{}
+// iterDeduplicatedCaptures calls fn for the first capture channel per voice
+// channel across joined. Any subsequent capture from the same channel is drained
+// in a background goroutine to prevent the VoiceReceiver from blocking.
+func iterDeduplicatedCaptures(joined []speakerResult, fn func(speakerResult)) {
+	seen := map[snowflake.ID]bool{}
 	for _, r := range joined {
 		if r.chCapture == nil {
 			continue
 		}
-		if seenCapChannels[r.gv.ChannelID()] {
-			// Second bot in same channel: drain and discard its capture to avoid doubling.
+		if seen[r.gv.ChannelID()] {
 			go func(ch <-chan []byte) {
 				for range ch {
 				}
 			}(r.chCapture)
 			continue
 		}
-		seenCapChannels[r.gv.ChannelID()] = true
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
+		seen[r.gv.ChannelID()] = true
+		fn(r)
 	}
+}
+
+// buildSources returns a deduplicated list of audio sources (one capture channel per voice
+// channel). When two speaker bots share a channel the second capture is drained and discarded.
+func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, joined []speakerResult) []sourceEntry {
+	sources := []sourceEntry{{ownerUserID, ownerChannelID, chIn}}
+	iterDeduplicatedCaptures(joined, func(r speakerResult) {
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
+	})
 	return sources
 }
 

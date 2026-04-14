@@ -115,6 +115,9 @@ func (h *CommandHandlers) Register(r handler.Router) {
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 // callerModeChoice is the value of the "mode" slash command option.
+// It maps to different RaidModes depending on whether a relay code is supplied:
+//   - no code (host): callerModeOne → RaidModeOneCaller, callerModeMany → RaidModeGuildCaller
+//   - with code (guest): callerModeOne → RaidModeAllyListener, callerModeMany → RaidModeAllyCaller
 type callerModeChoice string
 
 const (
@@ -349,17 +352,21 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 	}
 
 	code, hasCode := data.OptString("code")
-	manyCallers := false
-	if modeStr, ok := data.OptString("mode"); ok {
-		manyCallers = callerModeChoice(modeStr) == callerModeMany
-	}
 
 	if err := e.DeferCreateMessage(true); err != nil {
 		return err
 	}
 
+	manyCallers := false
+	if modeStr, ok := data.OptString("mode"); ok {
+		manyCallers = callerModeChoice(modeStr) == callerModeMany
+	}
+
 	if hasCode && code != "" {
-		mode := guild.RaidModeGuestOne
+		// Joining an existing relay session as a guest.
+		// callerModeOne → RaidModeAllyListener (listeners only)
+		// callerModeMany → RaidModeAllyCaller (active capture; only effective when host also uses many-callers)
+		mode := guild.RaidModeAllyListener
 		if manyCallers {
 			mode = guild.RaidModeAllyCaller
 		}
@@ -371,11 +378,14 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 				h.followUp(e, fmt.Sprintf("❌ Failed to join relay session `%s`: %s", code, err))
 				return
 			}
-			h.followUp(e, fmt.Sprintf("🔴 **Joined relay session** `%s`. Speakers are connecting to their bound channels.", code))
+			h.followUp(e, fmt.Sprintf("🔴 **Joined relay session** `%s` as %s. Speakers are connecting to their bound channels.", code, mode))
 		}()
 		return nil
 	}
 
+	// Starting a new host raid. A relay code is always generated.
+	// callerModeOne → RaidModeOneCaller  (guests are listeners only)
+	// callerModeMany → RaidModeGuildCaller (guests may capture if they use Many Callers)
 	mode := guild.RaidModeOneCaller
 	if manyCallers {
 		mode = guild.RaidModeGuildCaller
@@ -390,8 +400,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 			h.followUp(e, "❌ Failed to start voice raid: "+err.Error())
 			return
 		}
+		msg := "🔴 **Voice raid started.** All enabled speakers have joined their bound channels."
+		if relayCode != "" {
+			msg += fmt.Sprintf(" Relay code: `%s`", relayCode)
+		}
 		slog.Info("voice raid started", slog.String("relayCode", relayCode))
-		h.followUp(e, fmt.Sprintf("🔴 **Voice raid started.** Relay code: `%s`. All enabled speakers have joined their bound channels.", relayCode))
+		h.followUp(e, msg)
 	}()
 
 	return nil

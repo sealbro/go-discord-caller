@@ -11,10 +11,10 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/pool"
-	"github.com/sealbro/go-discord-caller/internal/relay"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
@@ -26,26 +26,26 @@ const audioChanBuf = 15
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.
 type Service struct {
 	mu       sync.RWMutex
-	statuses map[snowflake.ID]*domain.GuildStatus // protected by mu
+	statuses map[snowflake.ID]*guild.Status // protected by mu
 
 	store       store.Store
 	poolSvc     pool.PoolService
 	ownerClient *bot.Client
 	ownerBotID  snowflake.ID
 	test        config.TestConfig
-	sessions    *relay.Manager
+	sessions    *ally.Manager
 }
 
 // NewService creates a new manager Service.
 func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig) *Service {
 	return &Service{
-		statuses:    make(map[snowflake.ID]*domain.GuildStatus),
+		statuses:    make(map[snowflake.ID]*guild.Status),
 		store:       st,
 		poolSvc:     poolSvc,
 		ownerClient: ownerClient,
 		ownerBotID:  ownerID,
 		test:        test,
-		sessions:    relay.NewManager(),
+		sessions:    ally.NewManager(),
 	}
 }
 
@@ -70,7 +70,7 @@ func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 	type initSpeaker struct {
-		speaker *domain.Speaker
+		speaker *guild.Speaker
 		err     error
 	}
 	var speakers []initSpeaker
@@ -87,7 +87,7 @@ func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 
 	st, ok := m.statuses[guildID]
 	if !ok {
-		st = domain.NewGuildStatus(guildID, ownerID)
+		st = guild.NewStatus(guildID, ownerID)
 		m.statuses[guildID] = st
 	}
 	for _, init := range speakers {
@@ -142,20 +142,20 @@ func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
 
 // snapshotLocked returns a deep copy of st enriched with live channel/role data.
 // Must be called with mu read-locked (store calls are safe; store has its own lock).
-func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
+func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 	st, ok := m.statuses[guildID]
 	if !ok {
-		return domain.GuildStatus{
+		return guild.Status{
 			GuildID:       guildID,
 			OwnerUserID:   m.ownerBotID,
-			Speakers:      make(map[snowflake.ID]*domain.Speaker),
+			Speakers:      make(map[snowflake.ID]*guild.Speaker),
 			BoundChannels: make(map[snowflake.ID]snowflake.ID),
 		}
 	}
 
 	// Deep-copy the struct so callers cannot race with future mutations.
 	snap := *st
-	snap.Speakers = make(map[snowflake.ID]*domain.Speaker, len(st.Speakers))
+	snap.Speakers = make(map[snowflake.ID]*guild.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
 		cp := *v
 		snap.Speakers[k] = &cp
@@ -168,14 +168,14 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) domain.GuildStatus {
 		sessionCopy := *st.Session
 		sessionCopy.Cancel = nil
 		sessionCopy.Cleanup = nil
-		sessionCopy.Speakers = make([]domain.Speaker, len(st.Session.Speakers))
+		sessionCopy.Speakers = make([]guild.Speaker, len(st.Session.Speakers))
 		copy(sessionCopy.Speakers, st.Session.Speakers)
 		snap.Session = &sessionCopy
 	}
 	return snap
 }
 
-func (m *Service) newSpeaker(botUserID snowflake.ID) (*domain.Speaker, error) {
+func (m *Service) newSpeaker(botUserID snowflake.ID) (*guild.Speaker, error) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok {
 		return nil, fmt.Errorf("cannot find client for bot user ID %s", botUserID)
@@ -185,7 +185,7 @@ func (m *Service) newSpeaker(botUserID snowflake.ID) (*domain.Speaker, error) {
 		return nil, fmt.Errorf("cannot find self user for bot user ID %s", botUserID)
 	}
 	user := selfUser.User
-	return &domain.Speaker{
+	return &guild.Speaker{
 		ID:       user.ID,
 		Username: user.Username,
 		Enabled:  true,

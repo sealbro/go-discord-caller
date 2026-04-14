@@ -25,10 +25,10 @@ type yamlRoleEntry struct {
 }
 
 type yamlGuildEntry struct {
-	GuildID   uint64             `yaml:"guild_id"`
-	RelayCode string             `yaml:"relay_code,omitempty"`
-	Channels  []yamlChannelEntry `yaml:"channels,omitempty"`
-	Roles     []yamlRoleEntry    `yaml:"roles,omitempty"`
+	GuildID  uint64             `yaml:"guild_id"`
+	AllyCode string             `yaml:"ally_code,omitempty"`
+	Channels []yamlChannelEntry `yaml:"channels,omitempty"`
+	Roles    []yamlRoleEntry    `yaml:"roles,omitempty"`
 }
 
 type yamlData struct {
@@ -147,8 +147,8 @@ func (s *YAMLStore) load() error {
 		for _, r := range g.Roles {
 			s.roles[roleKey{guildID, r.RoleType}] = snowflake.ID(r.RoleID)
 		}
-		if g.RelayCode != "" {
-			s.relayCodes[guildID] = g.RelayCode
+		if g.AllyCode != "" {
+			s.relayCodes[guildID] = g.AllyCode
 		}
 	}
 	return nil
@@ -184,7 +184,7 @@ func (s *YAMLStore) save() error {
 	}
 	for guildID, code := range s.relayCodes {
 		g := ensureGuild(guildID)
-		g.RelayCode = code
+		g.AllyCode = code
 	}
 
 	// Sort by guild ID for deterministic output.
@@ -260,19 +260,19 @@ func (s *YAMLStore) GetBoundRole(guildID snowflake.ID, roleType RoleType) (snowf
 	return roleID, ok
 }
 
-func (s *YAMLStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
+func (s *YAMLStore) GetOrCreateAllyCode(guildID snowflake.ID) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if code, ok := s.relayCodes[guildID]; ok {
 		return code
 	}
-	code := uniqueRelayCode(s.relayCodes)
+	code := uniqueAllyCode(s.relayCodes)
 	s.relayCodes[guildID] = code
 	s.markDirty()
 	return code
 }
 
-func (s *YAMLStore) GetRelayCode(guildID snowflake.ID) (string, bool) {
+func (s *YAMLStore) GetAllyCode(guildID snowflake.ID) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	code, ok := s.relayCodes[guildID]

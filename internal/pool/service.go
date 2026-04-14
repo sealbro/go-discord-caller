@@ -13,7 +13,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
 // PoolService is the interface for speaker pool operations used by dependent packages.
@@ -70,7 +70,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 			defer wg.Done()
 			index := i + 1
 
-			botUserID, ok := domain.BotUserID(token)
+			botUserID, ok := guild.BotUserID(token)
 			if !ok {
 				slog.Warn("pool: invalid pool token", slog.Int("index", index))
 				return

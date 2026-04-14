@@ -10,7 +10,7 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -359,9 +359,9 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 	}
 
 	if hasCode && code != "" {
-		mode := domain.RaidModeGuestOne
+		mode := guild.RaidModeGuestOne
 		if manyCallers {
-			mode = domain.RaidModeAllyCaller
+			mode = guild.RaidModeAllyCaller
 		}
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		go func() {
@@ -376,9 +376,9 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		return nil
 	}
 
-	mode := domain.RaidModeOneCaller
+	mode := guild.RaidModeOneCaller
 	if manyCallers {
-		mode = domain.RaidModeGuildCaller
+		mode = guild.RaidModeGuildCaller
 	}
 
 	ctx, cancelFunc := context.WithCancel(context.Background())

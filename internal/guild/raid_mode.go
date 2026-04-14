@@ -1,4 +1,4 @@
-package domain
+package guild
 
 // RaidMode defines how a voice raid captures and relays audio.
 type RaidMode string

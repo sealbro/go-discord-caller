@@ -18,19 +18,19 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
-	"github.com/sealbro/go-discord-caller/internal/relay"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
 // SessionManager handles voice raid session lifecycle.
 type SessionManager interface {
-	StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode) (relay.RelayCode, error)
+	StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error)
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
-	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode, code relay.RelayCode) error
+	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) error
 	HasActiveSession(guildID snowflake.ID) bool
 }
 
@@ -53,7 +53,7 @@ type SpeakerManager interface {
 
 // StatusProvider provides read-only status and authorization queries.
 type StatusProvider interface {
-	GetStatus(guildID snowflake.ID) domain.GuildStatus
+	GetStatus(guildID snowflake.ID) guild.Status
 	HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
 	HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
 }
@@ -118,11 +118,15 @@ func New(cfg *config.Config) (*Bot, error) {
 	}))
 
 	// Infrastructure
+	ownerBotID, ok := guild.BotUserID(cfg.OwnerBotToken)
+	if !ok {
+		return nil, fmt.Errorf("failed to get owner bot ID from token")
+	}
 	st, err := store.NewYAMLStore(cfg.StorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
 	}
-	ownerBotID, _ := domain.BotUserID(cfg.OwnerBotToken)
+
 	poolSvc := pool.NewService()
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test)
 

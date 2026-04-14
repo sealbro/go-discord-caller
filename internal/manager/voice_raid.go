@@ -8,10 +8,10 @@ import (
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/ally"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
-	"github.com/sealbro/go-discord-caller/internal/relay"
 )
 
 // sourceEntry is one audio capture channel feeding the relay mixer graph.
@@ -29,7 +29,7 @@ type destChannel struct {
 
 // speakerResult holds the outcome of a single successfully joined speaker.
 type speakerResult struct {
-	speaker   domain.Speaker
+	speaker   guild.Speaker
 	chOut     chan<- []byte
 	chCapture <-chan []byte // nil when withCapture is false
 	gv        pool.GuildVoice
@@ -39,7 +39,7 @@ type speakerResult struct {
 // raidSetup captures the common setup result for both host and guest flows.
 type raidSetup struct {
 	joined         []speakerResult
-	speakers       []domain.Speaker
+	speakers       []guild.Speaker
 	speakerCleanup func()
 	outs           []chan<- []byte
 }
@@ -47,7 +47,7 @@ type raidSetup struct {
 // setupSpeakers snapshots and joins all enabled, bound speakers for a guild.
 // Returns an error if the guild has no status, already has an active session,
 // or no speakers could join.
-func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode domain.RaidMode) (*raidSetup, error) {
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode) (*raidSetup, error) {
 	speakers, err := m.snapshotSpeakers(guildID)
 	if err != nil {
 		return nil, err
@@ -59,7 +59,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	}
 
 	outs := make([]chan<- []byte, 0, len(joined))
-	joinedSpeakers := make([]domain.Speaker, 0, len(joined))
+	joinedSpeakers := make([]guild.Speaker, 0, len(joined))
 	for _, r := range joined {
 		outs = append(outs, r.chOut)
 		joinedSpeakers = append(joinedSpeakers, r.speaker)
@@ -77,7 +77,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 // mode must be a guest mode: RaidModeGuestOne (listener only) or RaidModeAllyCaller
 // (speakers also capture from their channels for local mixing).
 // The session ends automatically when the host ends or ctx is cancelled.
-func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode, code relay.RelayCode) error {
+func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) error {
 	relaySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
 		return err
@@ -107,13 +107,13 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 	relaySession.AddGuild(guestGuildID, setup.outs)
 
-	session := &domain.VoiceSession{
-		GuildID:   guestGuildID,
-		Cancel:    cancelFunc,
-		Cleanup:   setup.speakerCleanup,
-		RelayCode: code,
-		IsGuest:   true,
-		Speakers:  setup.speakers,
+	session := &guild.Session{
+		GuildID:  guestGuildID,
+		Cancel:   cancelFunc,
+		Cleanup:  setup.speakerCleanup,
+		AllyCode: code,
+		IsGuest:  true,
+		Speakers: setup.speakers,
 	}
 	if err := m.commitSession(guestGuildID, session); err != nil {
 		setup.speakerCleanup()
@@ -192,7 +192,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 // StartVoiceRaid makes all enabled, bound speakers join their voice channels.
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
-func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode domain.RaidMode) (relay.RelayCode, error) {
+func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error) {
 	setup, err := m.setupSpeakers(ctx, guildID, mode)
 	if err != nil {
 		return "", err
@@ -237,17 +237,17 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		ownerCleanup()
 		return "", fmt.Errorf("create relay mixer: %w", err)
 	}
-	relayCode := m.store.GetOrCreateRelayCode(guildID)
-	relaySession := m.sessions.Create(relayCode, guildID)
+	allyCode := m.store.GetOrCreateAllyCode(guildID)
+	relaySession := m.sessions.Create(allyCode, guildID)
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
-	session := &domain.VoiceSession{
-		GuildID:   guildID,
-		Cancel:    cancelFunc,
-		Cleanup:   setup.speakerCleanup,
-		RelayCode: relayCode,
-		Speakers:  setup.speakers,
+	session := &guild.Session{
+		GuildID:  guildID,
+		Cancel:   cancelFunc,
+		Cleanup:  setup.speakerCleanup,
+		AllyCode: allyCode,
+		Speakers: setup.speakers,
 	}
 	if err := m.commitSession(guildID, session); err != nil {
 		setup.speakerCleanup()
@@ -260,20 +260,20 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
 		slog.String("mode", string(mode)),
-		slog.String("code", relayCode),
+		slog.String("code", allyCode),
 		slog.Int("activeSpeakers", len(setup.joined)),
 	)
 
 	startChannelMixers(ctx, destinations, channelMixers)
 	startRelayBroadcast(ctx, relayMixer, relaySession, ownerCleanup, guildID)
 
-	return relayCode, nil
+	return allyCode, nil
 }
 
 // joinSpeakers joins all enabled, bound speakers in parallel.
 // When withCapture is true each speaker also captures incoming frames.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []domain.Speaker, withCapture bool) []speakerResult {
-	var candidates []domain.Speaker
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []guild.Speaker, withCapture bool) []speakerResult {
+	var candidates []guild.Speaker
 	for _, sp := range speakers {
 		if sp.Enabled {
 			if _, ok := m.store.GetBoundChannel(guildID, sp.ID); ok {
@@ -286,7 +286,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
 	for _, sp := range candidates {
-		go func(sp domain.Speaker) {
+		go func(sp guild.Speaker) {
 			defer wg.Done()
 			gv, ok := m.speakerVoice(guildID, sp.ID)
 			if !ok {
@@ -319,7 +319,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 }
 
 // commitSession stores session under write lock, re-checking for conflicts.
-func (m *Service) commitSession(guildID snowflake.ID, session *domain.VoiceSession) error {
+func (m *Service) commitSession(guildID snowflake.ID, session *guild.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	st := m.statuses[guildID]
@@ -474,7 +474,7 @@ func startChannelMixers(ctx context.Context, dests []*destChannel, chanMixers ma
 
 // startRelayBroadcast runs the relay mixer and broadcasts its output to all guest guilds.
 // Calls ownerCleanup and logs when the context is cancelled.
-func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySession *relay.Session, ownerCleanup func(), guildID snowflake.ID) {
+func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func(), guildID snowflake.ID) {
 	go relayMixer.Run(ctx)
 	go func() {
 		defer func() {
@@ -513,7 +513,7 @@ func buildSpeakerCleanup(guildID snowflake.ID, joined []speakerResult) func() {
 
 // snapshotSpeakers returns a deep copy of the guild's speakers as a slice.
 // Returns an error if the guild has no status or already has an active session.
-func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]domain.Speaker, error) {
+func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]guild.Speaker, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	st := m.statuses[guildID]
@@ -523,7 +523,7 @@ func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]domain.Speaker, erro
 	if st.Session != nil {
 		return nil, fmt.Errorf("a voice raid is already active in this server")
 	}
-	speakers := make([]domain.Speaker, 0, len(st.Speakers))
+	speakers := make([]guild.Speaker, 0, len(st.Speakers))
 	for _, v := range st.Speakers {
 		speakers = append(speakers, *v)
 	}

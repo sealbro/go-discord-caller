@@ -6,7 +6,7 @@ import (
 	"slices"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
@@ -16,11 +16,6 @@ import (
 func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 	for _, guildID := range guildIDs {
 		m.seedGuildSpeakers(guildID, m.ownerBotID)
-		code := m.store.GetOrCreateRelayCode(guildID)
-		slog.Info("guild relay code ready",
-			slog.String("guildID", guildID.String()),
-			slog.String("code", code),
-		)
 	}
 }
 
@@ -180,7 +175,7 @@ func (m *Service) HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.
 
 // GetStatus returns a safe, enriched value snapshot of the guild status.
 // The returned value is fully owned by the caller; no locking required after return.
-func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
+func (m *Service) GetStatus(guildID snowflake.ID) guild.Status {
 	m.mu.RLock()
 	snap := m.snapshotLocked(guildID)
 	m.mu.RUnlock()
@@ -192,7 +187,7 @@ func (m *Service) GetStatus(guildID snowflake.ID) domain.GuildStatus {
 
 // enrichBindings populates channel bindings, role bindings, and guild metadata
 // on the snapshot. Store has its own lock; no manager lock needed.
-func (m *Service) enrichBindings(snap *domain.GuildStatus, guildID snowflake.ID) {
+func (m *Service) enrichBindings(snap *guild.Status, guildID snowflake.ID) {
 	for spID := range snap.Speakers {
 		if chID, ok := m.store.GetBoundChannel(guildID, spID); ok {
 			snap.BoundChannels[spID] = chID
@@ -208,8 +203,8 @@ func (m *Service) enrichBindings(snap *domain.GuildStatus, guildID snowflake.ID)
 	if chID, ok := m.store.GetBoundChannel(guildID, m.ownerBotID); ok {
 		snap.BoundChannels[m.ownerBotID] = chID
 	}
-	if code, ok := m.store.GetRelayCode(guildID); ok {
-		snap.RelayCode = code
+	if code, ok := m.store.GetAllyCode(guildID); ok {
+		snap.AllyCode = code
 	}
 	if guild, ok := m.ownerClient.Caches.Guild(guildID); ok {
 		snap.GuildName = guild.Name
@@ -217,7 +212,7 @@ func (m *Service) enrichBindings(snap *domain.GuildStatus, guildID snowflake.ID)
 }
 
 // enrichRelayInfo populates relay session info (host/guest guild names) on the snapshot.
-func (m *Service) enrichRelayInfo(snap *domain.GuildStatus, guildID snowflake.ID) {
+func (m *Service) enrichRelayInfo(snap *guild.Status, guildID snowflake.ID) {
 	if snap.Session == nil {
 		return
 	}

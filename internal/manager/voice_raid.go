@@ -80,7 +80,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	for i, r := range joined {
 		joinedSpeakers[i] = r.speaker
 	}
-	speakerCleanup := buildSpeakerCleanup(joined)
+	speakerCleanup := buildSpeakerCleanup(guestGuildID, joined)
 	session := &domain.VoiceSession{
 		GuildID:   guestGuildID,
 		Cancel:    cancelFunc,
@@ -91,9 +91,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	}
 	if err := m.commitSession(guestGuildID, session); err != nil {
 		speakerCleanup()
-		for _, r := range joined {
-			r.gv.Leave(ctx, guestGuildID)
-		}
 		if ownerCleanup != nil {
 			ownerCleanup()
 			ownerVoice.Leave(ctx, guestGuildID)
@@ -112,11 +109,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 	go func() {
 		defer func() {
-			// Close providers/receivers before leaving channels.
 			speakerCleanup()
-			for _, r := range joined {
-				m.leaveSpeaker(context.Background(), guestGuildID, r.speaker.ID)
-			}
 			if ownerCleanup != nil {
 				ownerCleanup()
 				ownerVoice.Leave(context.Background(), guestGuildID)
@@ -157,15 +150,9 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	status.Session = nil
 	m.mu.Unlock()
 
-	// Cancel first to stop the relay broadcast goroutine before closing channels.
 	session.Cancel()
-	// Close providers/receivers before leaving channels to avoid racing with
-	// the voice connection teardown.
 	if session.Cleanup != nil {
 		session.Cleanup()
-	}
-	for _, sp := range session.Speakers {
-		m.leaveSpeaker(ctx, guildID, sp.ID)
 	}
 	if !session.IsGuest {
 		m.ownerVoice(guildID).Leave(ctx, guildID)
@@ -235,7 +222,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	for i, r := range joined {
 		joinedSpeakers[i] = r.speaker
 	}
-	speakerCleanup := buildSpeakerCleanup(joined)
+	speakerCleanup := buildSpeakerCleanup(guildID, joined)
 	session := &domain.VoiceSession{
 		GuildID:   guildID,
 		Cancel:    cancelFunc,
@@ -246,9 +233,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err := m.commitSession(guildID, session); err != nil {
 		speakerCleanup()
 		ownerCleanup()
-		for _, r := range joined {
-			r.gv.Leave(ctx, guildID)
-		}
 		ov.Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
 		return "", err
@@ -490,9 +474,9 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 	}()
 }
 
-// buildSpeakerCleanup returns a function that calls every speaker's cleanup
-// exactly once, regardless of how many times the returned function is invoked.
-func buildSpeakerCleanup(joined []speakerResult) func() {
+// buildSpeakerCleanup returns a function that closes every speaker's
+// provider/receiver and leaves its voice channel, exactly once.
+func buildSpeakerCleanup(guildID snowflake.ID, joined []speakerResult) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
@@ -500,6 +484,7 @@ func buildSpeakerCleanup(joined []speakerResult) func() {
 				if r.cleanup != nil {
 					r.cleanup()
 				}
+				r.gv.Leave(context.Background(), guildID)
 			}
 		})
 	}

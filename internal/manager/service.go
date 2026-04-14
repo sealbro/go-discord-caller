@@ -65,13 +65,6 @@ func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice
 	return pool.NewGuildVoice(client.VoiceManager, channelID), true
 }
 
-// leaveSpeaker makes the speaker bot leave its current voice channel in the guild.
-func (m *Service) leaveSpeaker(ctx context.Context, guildID, botUserID snowflake.ID) {
-	if gv, ok := m.speakerVoice(guildID, botUserID); ok {
-		gv.Leave(ctx, guildID)
-	}
-}
-
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 	type initSpeaker struct {
 		speaker *domain.Speaker

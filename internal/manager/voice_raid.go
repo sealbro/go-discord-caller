@@ -76,13 +76,14 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 // JoinSession connects this guild as a guest to an existing relay session.
 // guestMode is the caller-mode chosen by the guest (RaidModeAllyListener or
 // RaidModeAllyCaller). When the host does not allow guest capture the mode
-// is silently downgraded to RaidModeAllyListener.
+// is downgraded to RaidModeAllyListener.
 //
+// Returns the effective RaidMode (which may differ from the requested mode).
 // The session ends automatically when the host ends or ctx is cancelled.
-func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) error {
+func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (guild.RaidMode, error) {
 	allySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
-		return err
+		return guestMode, err
 	}
 
 	// Downgrade to listen-only when the host doesn't allow guest capture.
@@ -94,7 +95,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
-		return err
+		return guestMode, err
 	}
 
 	// In AllyCaller mode relay guest captures to all OTHER guilds (never back to
@@ -142,7 +143,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerVoice.Leave(ctx, guestGuildID)
 		}
 		m.sessions.RemoveGuest(guestGuildID)
-		return fmt.Errorf("failed to commit session: %w", err)
+		return guestMode, fmt.Errorf("failed to commit session: %w", err)
 	}
 
 	slog.Info("guest joined relay session",
@@ -181,7 +182,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		}
 	}()
 
-	return nil
+	return guestMode, nil
 }
 
 // StopVoiceRaid makes all active speakers leave their voice channels.

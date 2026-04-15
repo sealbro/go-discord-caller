@@ -399,13 +399,14 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		}
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		go func() {
-			if err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code); err != nil {
+			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
+			if err != nil {
 				cancelFunc()
 				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
 				h.followUp(e, fmt.Sprintf("❌ Failed to join relay session `%s`: %s", code, err))
 				return
 			}
-			h.followUp(e, fmt.Sprintf("🔴 **Joined relay session** `%s` as %s. Speakers are connecting to their bound channels.", code, mode))
+			h.followUp(e, fmt.Sprintf("🔴 **Joined relay session** `%s` as %s. Speakers are connecting to their bound channels.", code, effectiveMode.Pretty()))
 		}()
 		return nil
 	}

@@ -30,7 +30,7 @@ import (
 type SessionManager interface {
 	StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error)
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
-	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) error
+	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
 	HasActiveSession(guildID snowflake.ID) bool
 }
 

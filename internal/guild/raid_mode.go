@@ -70,3 +70,19 @@ func (m RaidMode) WithCapture() bool {
 func (m RaidMode) AllowGuestCapture() bool {
 	return m == RaidModeGuildCaller
 }
+
+// Pretty returns a human-readable label for use in Discord messages.
+func (m RaidMode) Pretty() string {
+	switch m {
+	case RaidModeOneCaller:
+		return "One Caller (host)"
+	case RaidModeGuildCaller:
+		return "Many Callers (host)"
+	case RaidModeAllyListener:
+		return "Listener (guest)"
+	case RaidModeAllyCaller:
+		return "Caller (guest)"
+	default:
+		return string(m)
+	}
+}

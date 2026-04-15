@@ -86,10 +86,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, err
 	}
 
-	// Downgrade to listen-only when the host doesn't allow guest capture.
-	if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
-		guestMode = guild.RaidModeAllyListener
-	}
+	guestMode = guild.RaidModeAllyListener
+	// Temporarily set guild.RaidModeAllyListener for all guests until fix bug with many to many relay and capture role sync.
+	//// Downgrade to listen-only when the host doesn't allow guest capture.
+	//if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
+	//	guestMode = guild.RaidModeAllyListener
+	//}
 
 	allowUser := m.buildAllowUserFilter(guestGuildID)
 	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)

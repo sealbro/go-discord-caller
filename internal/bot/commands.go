@@ -11,6 +11,7 @@ import (
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -99,17 +100,17 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	r.SlashCommand("/bind-manager-role", h.withGuild(h.handleBindManagerRole))
 
 	// Main setup menu components
-	r.SelectMenuComponent("/setup/bind-role", h.handleBindRoleMenu)
-	r.SelectMenuComponent("/setup/bind-manager-role", h.handleBindManagerRoleMenu)
-	r.SelectMenuComponent("/owner/bind-channel", h.handleBindOwnerChannel)
-	r.ButtonComponent("/roles/menu", h.handleRolesMenu)
-	r.ButtonComponent("/speakers/page/{page}", h.handleSpeakersPage)
-	r.ButtonComponent("/speakers/menu", h.handleMainMenu)
+	r.SelectMenuComponent("/setup/bind-role", h.withGuildSelectMenu(h.handleBindRoleMenu))
+	r.SelectMenuComponent("/setup/bind-manager-role", h.withGuildSelectMenu(h.handleBindManagerRoleMenu))
+	r.SelectMenuComponent("/owner/bind-channel", h.withGuildSelectMenu(h.handleBindOwnerChannel))
+	r.ButtonComponent("/roles/menu", h.withGuildButton(h.handleRolesMenu))
+	r.ButtonComponent("/speakers/page/{page}", h.withGuildButton(h.handleSpeakersPage))
+	r.ButtonComponent("/speakers/menu", h.withGuildButton(h.handleMainMenu))
 
 	// Speaker page components (page number is embedded in the custom ID)
-	r.ButtonComponent("/speakers/toggle/{speakerID}/{page}", h.handleToggleSpeaker)
-	r.ButtonComponent("/speakers/add", h.handleAddSpeakerButton)
-	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}/{page}", h.handleBindChannel)
+	r.ButtonComponent("/speakers/toggle/{speakerID}/{page}", h.withGuildButton(h.handleToggleSpeaker))
+	r.ButtonComponent("/speakers/add", h.withGuildButton(h.handleAddSpeakerButton))
+	r.SelectMenuComponent("/speakers/bind-channel/{speakerID}/{page}", h.withGuildSelectMenu(h.handleBindChannel))
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -118,11 +119,9 @@ func (h *CommandHandlers) Register(r handler.Router) {
 // It maps to different RaidModes depending on whether a relay code is supplied:
 //   - no code (host): callerModeOne → RaidModeOneCaller, callerModeMany → RaidModeGuildCaller
 //   - with code (guest): callerModeOne → RaidModeAllyListener, callerModeMany → RaidModeAllyCaller
-type callerModeChoice string
-
 const (
-	callerModeOne  callerModeChoice = "one"
-	callerModeMany callerModeChoice = "many"
+	callerModeOne  string = "one"
+	callerModeMany string = "many"
 )
 
 // speakersPerPage is the maximum number of speakers shown per page in the
@@ -166,6 +165,34 @@ func (h *CommandHandlers) withAdmin(fn guildCommandHandler) func(discord.SlashCo
 		}
 		return fn(guildID, data, e)
 	})
+}
+
+// guildButtonHandler is a button component handler that receives a validated guild ID.
+type guildButtonHandler func(guildID snowflake.ID, data discord.ButtonInteractionData, e *handler.ComponentEvent) error
+
+// withGuildButton wraps a button component handler to validate the guild context.
+func (h *CommandHandlers) withGuildButton(fn guildButtonHandler) func(discord.ButtonInteractionData, *handler.ComponentEvent) error {
+	return func(data discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+		guildID, errMsg := requireGuild(e.GuildID())
+		if errMsg != nil {
+			return e.CreateMessage(*errMsg)
+		}
+		return fn(guildID, data, e)
+	}
+}
+
+// guildSelectMenuHandler is a select menu component handler that receives a validated guild ID.
+type guildSelectMenuHandler func(guildID snowflake.ID, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error
+
+// withGuildSelectMenu wraps a select menu component handler to validate the guild context.
+func (h *CommandHandlers) withGuildSelectMenu(fn guildSelectMenuHandler) func(discord.SelectMenuInteractionData, *handler.ComponentEvent) error {
+	return func(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+		guildID, errMsg := requireGuild(e.GuildID())
+		if errMsg != nil {
+			return e.CreateMessage(*errMsg)
+		}
+		return fn(guildID, data, e)
+	}
 }
 
 // ── Setup message builders ────────────────────────────────────────────────────
@@ -359,7 +386,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 
 	manyCallers := false
 	if modeStr, ok := data.OptString("mode"); ok {
-		manyCallers = callerModeChoice(modeStr) == callerModeMany
+		manyCallers = modeStr == callerModeMany
 	}
 
 	if hasCode && code != "" {
@@ -448,7 +475,7 @@ func (h *CommandHandlers) handleStatus(guildID snowflake.ID, _ discord.SlashComm
 // handleBindRole sets the capture role directly via the /bind-role slash command.
 func (h *CommandHandlers) handleBindRole(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	roleID := data.Role("role").ID
-	h.manager.BindCallerRole(guildID, roleID)
+	h.manager.BindRole(guildID, store.RoleTypeCaller, roleID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("✅ Capture role set to <@&%s>. Only members with this role will be relayed.", roleID),
@@ -459,7 +486,7 @@ func (h *CommandHandlers) handleBindRole(guildID snowflake.ID, data discord.Slas
 // handleBindManagerRole sets the manager role directly via the /bind-manager-role slash command.
 func (h *CommandHandlers) handleBindManagerRole(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	roleID := data.Role("role").ID
-	h.manager.BindManagerRole(guildID, roleID)
+	h.manager.BindRole(guildID, store.RoleTypeManager, roleID)
 
 	return e.CreateMessage(discord.MessageCreate{
 		Content: fmt.Sprintf("✅ Manager role set to <@&%s>. Members with this role can setup, start and stop the bot.", roleID),
@@ -470,12 +497,7 @@ func (h *CommandHandlers) handleBindManagerRole(guildID snowflake.ID, data disco
 // ── Component handlers ───────────────────────────────────────────────────────
 
 // handleSpeakersPage opens (or navigates to) a speaker bind page.
-func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleSpeakersPage(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
 		slog.Warn("handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
@@ -489,12 +511,7 @@ func (h *CommandHandlers) handleSpeakersPage(_ discord.ButtonInteractionData, e 
 }
 
 // handleRolesMenu opens the roles bind page.
-func (h *CommandHandlers) handleRolesMenu(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleRolesMenu(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	msg, components := h.buildRolesPageMessage(guildID)
 	return e.UpdateMessage(discord.NewMessageUpdate().
 		WithContent(msg).
@@ -502,50 +519,31 @@ func (h *CommandHandlers) handleRolesMenu(_ discord.ButtonInteractionData, e *ha
 }
 
 // handleMainMenu returns the user to the main setup message.
-func (h *CommandHandlers) handleMainMenu(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleMainMenu(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	msg, components := h.buildMainSetupMessage(guildID)
 	return e.UpdateMessage(discord.NewMessageUpdate().
 		WithContent(msg).
 		WithComponents(components...))
 }
 
-// handleBindRoleMenu handles capture role selection from the setup message and refreshes it.
-func (h *CommandHandlers) handleBindRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
-	roleData, ok := data.(discord.RoleSelectMenuInteractionData)
-	if !ok {
-		return e.CreateMessage(ephemeral("unexpected interaction data type"))
-	}
-
-	roles := roleData.Roles()
-	if len(roles) == 0 {
-		return e.CreateMessage(ephemeral("❌ No role selected."))
-	}
-
-	h.manager.BindCallerRole(guildID, roles[0].ID)
-
-	msg, components := h.buildRolesPageMessage(guildID)
-	return e.UpdateMessage(discord.NewMessageUpdate().
-		WithContent(msg).
-		WithComponents(components...))
+// handleBindRoleMenu handles capture role selection from the roles page and refreshes it.
+func (h *CommandHandlers) handleBindRoleMenu(guildID snowflake.ID, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	return h.applyRoleMenuBinding(guildID, store.RoleTypeCaller, data, e)
 }
 
 // handleBindManagerRoleMenu handles manager role selection from the roles page and refreshes it.
-func (h *CommandHandlers) handleBindManagerRoleMenu(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
+func (h *CommandHandlers) handleBindManagerRoleMenu(guildID snowflake.ID, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	return h.applyRoleMenuBinding(guildID, store.RoleTypeManager, data, e)
+}
 
+// applyRoleMenuBinding handles the shared logic for role select menus: type-asserts the data,
+// calls bind or unbind depending on whether a role was selected, then refreshes the roles page.
+func (h *CommandHandlers) applyRoleMenuBinding(
+	guildID snowflake.ID,
+	roleType store.RoleType,
+	data discord.SelectMenuInteractionData,
+	e *handler.ComponentEvent,
+) error {
 	roleData, ok := data.(discord.RoleSelectMenuInteractionData)
 	if !ok {
 		return e.CreateMessage(ephemeral("unexpected interaction data type"))
@@ -553,10 +551,10 @@ func (h *CommandHandlers) handleBindManagerRoleMenu(data discord.SelectMenuInter
 
 	roles := roleData.Roles()
 	if len(roles) == 0 {
-		return e.CreateMessage(ephemeral("❌ No role selected."))
+		h.manager.UnbindRole(guildID, roleType)
+	} else {
+		h.manager.BindRole(guildID, roleType, roles[0].ID)
 	}
-
-	h.manager.BindManagerRole(guildID, roles[0].ID)
 
 	msg, components := h.buildRolesPageMessage(guildID)
 	return e.UpdateMessage(discord.NewMessageUpdate().
@@ -565,7 +563,7 @@ func (h *CommandHandlers) handleBindManagerRoleMenu(data discord.SelectMenuInter
 }
 
 // handleToggleSpeaker enables or disables a speaker and refreshes the speaker page.
-func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+func (h *CommandHandlers) handleToggleSpeaker(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	speakerID, err := snowflake.Parse(e.Vars["speakerID"])
 	if err != nil {
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
@@ -575,11 +573,6 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 	if err != nil {
 		slog.Warn("handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
-	}
-
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
 	}
 
 	status := h.manager.GetStatus(guildID)
@@ -602,12 +595,7 @@ func (h *CommandHandlers) handleToggleSpeaker(_ discord.ButtonInteractionData, e
 // It resolves the next uninvited pool bot, builds a Discord OAuth2 invite URL
 // pre-targeted at this guild, and shows a link button alongside a "🏠 Main Menu" return.
 // The bot is registered automatically via the GuildMemberJoin event once it accepts the invite.
-func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleAddSpeakerButton(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	botUserID, ok := h.manager.NextSpeakerID(guildID)
 	if !ok {
 		return e.CreateMessage(ephemeral("❌ All speaker tokens from the pool have already been added."))
@@ -629,7 +617,7 @@ func (h *CommandHandlers) handleAddSpeakerButton(_ discord.ButtonInteractionData
 }
 
 // handleBindChannel updates the voice channel bound to a speaker and refreshes the speaker page.
-func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
 	speakerID, err := snowflake.Parse(e.Vars["speakerID"])
 	if err != nil {
 		return e.CreateMessage(ephemeral("invalid speaker ID"))
@@ -639,11 +627,6 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 	if err != nil {
 		slog.Warn("handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
-	}
-
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
 	}
 
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
@@ -665,12 +648,7 @@ func (h *CommandHandlers) handleBindChannel(data discord.SelectMenuInteractionDa
 }
 
 // handleBindOwnerChannel updates the owner bot's voice channel and refreshes the main setup message.
-func (h *CommandHandlers) handleBindOwnerChannel(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	guildID, errMsg := requireGuild(e.GuildID())
-	if errMsg != nil {
-		return e.CreateMessage(*errMsg)
-	}
-
+func (h *CommandHandlers) handleBindOwnerChannel(guildID snowflake.ID, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
 	if !ok {
 		return e.CreateMessage(ephemeral("unexpected interaction data type"))

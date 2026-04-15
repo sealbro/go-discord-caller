@@ -134,21 +134,22 @@ func (m *Service) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, b
 	return m.store.GetBoundChannel(guildID, userID)
 }
 
-// BindCallerRole sets the Discord role whose members' voice will be captured in the guild.
-func (m *Service) BindCallerRole(guildID, roleID snowflake.ID) {
-	m.store.BindRole(guildID, store.RoleTypeCaller, roleID)
-	slog.Info("caller role bound",
+// BindRole sets a Discord role binding of the given type for the guild.
+func (m *Service) BindRole(guildID snowflake.ID, roleType store.RoleType, roleID snowflake.ID) {
+	m.store.BindRole(guildID, roleType, roleID)
+	slog.Info("role bound",
+		slog.String("type", string(roleType)),
 		slog.String("guildID", guildID.String()),
 		slog.String("roleID", roleID.String()),
 	)
 }
 
-// BindManagerRole sets the Discord role whose members are allowed to setup, start and stop the bot.
-func (m *Service) BindManagerRole(guildID, roleID snowflake.ID) {
-	m.store.BindRole(guildID, store.RoleTypeManager, roleID)
-	slog.Info("manager role bound",
+// UnbindRole removes a role binding of the given type for the guild.
+func (m *Service) UnbindRole(guildID snowflake.ID, roleType store.RoleType) {
+	m.store.UnbindRole(guildID, roleType)
+	slog.Info("role unbound",
+		slog.String("type", string(roleType)),
 		slog.String("guildID", guildID.String()),
-		slog.String("roleID", roleID.String()),
 	)
 }
 

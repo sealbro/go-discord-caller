@@ -36,8 +36,8 @@ type SessionManager interface {
 
 // BindingManager handles channel and role bindings.
 type BindingManager interface {
-	BindCallerRole(guildID, roleID snowflake.ID)
-	BindManagerRole(guildID, roleID snowflake.ID)
+	BindRole(guildID snowflake.ID, roleType store.RoleType, roleID snowflake.ID)
+	UnbindRole(guildID snowflake.ID, roleType store.RoleType)
 	BindChannel(guildID, userID, channelID snowflake.ID)
 	UnbindChannel(guildID, userID snowflake.ID)
 	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)

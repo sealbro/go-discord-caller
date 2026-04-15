@@ -47,13 +47,13 @@ type raidSetup struct {
 // setupSpeakers snapshots and joins all enabled, bound speakers for a guild.
 // Returns an error if the guild has no status, already has an active session,
 // or no speakers could join.
-func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode) (*raidSetup, error) {
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool) (*raidSetup, error) {
 	speakers, err := m.snapshotSpeakers(guildID)
 	if err != nil {
 		return nil, err
 	}
 
-	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture())
+	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture(), allowUser)
 	if len(joined) == 0 {
 		return nil, fmt.Errorf("no speakers could join their voice channels")
 	}
@@ -80,17 +80,18 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 //
 // The session ends automatically when the host ends or ctx is cancelled.
 func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) error {
-	relaySession, err := m.sessions.Join(code, guestGuildID)
+	allySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
 		return err
 	}
 
 	// Downgrade to listen-only when the host doesn't allow guest capture.
-	if guestMode.WithCapture() && !relaySession.HostMode.AllowGuestCapture() {
+	if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
 		guestMode = guild.RaidModeAllyListener
 	}
 
-	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode)
+	allowUser := m.buildAllowUserFilter(guestGuildID)
+	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
 		return err
@@ -102,7 +103,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		iterDeduplicatedCaptures(setup.joined, func(r speakerResult) {
 			go func(ch <-chan []byte) {
 				for pkt := range ch {
-					relaySession.BroadcastFromGuild(guestGuildID, pkt)
+					allySession.BroadcastFromGuild(guestGuildID, pkt)
 				}
 			}(r.chCapture)
 		})
@@ -124,7 +125,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		}
 	}
 
-	relaySession.AddGuild(guestGuildID, setup.outs)
+	allySession.AddGuild(guestGuildID, setup.outs)
 
 	session := &guild.Session{
 		GuildID:  guestGuildID,
@@ -134,7 +135,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		IsGuest:  true,
 		Speakers: setup.speakers,
 	}
-	if err := m.commitSession(guestGuildID, session); err != nil {
+	if err := m.commitSession(session); err != nil {
 		setup.speakerCleanup()
 		if ownerCleanup != nil {
 			ownerCleanup()
@@ -146,7 +147,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 	slog.Info("guest joined relay session",
 		slog.String("guildID", guestGuildID.String()),
-		slog.String("hostMode", string(relaySession.HostMode)),
+		slog.String("hostMode", string(allySession.HostMode)),
 		slog.String("guestMode", string(guestMode)),
 		slog.String("code", code),
 		slog.Int("activeSpeakers", len(setup.joined)),
@@ -161,7 +162,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				ownerVoice.Leave(context.Background(), guestGuildID)
 			}
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
-			relaySession.RemoveGuild(guestGuildID)
+			allySession.RemoveGuild(guestGuildID)
 			for _, out := range setup.outs {
 				close(out)
 			}
@@ -175,7 +176,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		}()
 		select {
 		case <-ctx.Done():
-		case <-relaySession.Done():
+		case <-allySession.Done():
 			cancelFunc()
 		}
 	}()
@@ -213,7 +214,8 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error) {
-	setup, err := m.setupSpeakers(ctx, guildID, mode)
+	allowUser := m.buildAllowUserFilter(guildID)
+	setup, err := m.setupSpeakers(ctx, guildID, mode, allowUser)
 	if err != nil {
 		return "", err
 	}
@@ -229,8 +231,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", fmt.Errorf("no voice connection to owner channel")
 	}
 
+	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
 	ownerSetup := NewVoiceConnSetup(m.ownerBotID).
-		WithVoiceReceiver(m.buildAllowUser(ctx, conn, m.ownerBotID, guildID))
+		WithVoiceReceiver(allowUser)
 
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
@@ -277,7 +280,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
-	relaySession := m.sessions.Create(allyCode, guildID, mode)
+	allySession := m.sessions.Create(allyCode, guildID, mode)
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
@@ -288,7 +291,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		AllyCode: allyCode,
 		Speakers: setup.speakers,
 	}
-	if err := m.commitSession(guildID, session); err != nil {
+	if err := m.commitSession(session); err != nil {
 		setup.speakerCleanup()
 		ownerCleanup()
 		ov.Leave(ctx, guildID)
@@ -304,14 +307,14 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	)
 
 	startChannelMixers(ctx, destinations, channelMixers)
-	startRelayBroadcast(ctx, relayMixer, relaySession, ownerCleanup, guildID)
+	startRelayBroadcast(ctx, relayMixer, allySession, ownerCleanup, guildID)
 
 	return allyCode, nil
 }
 
 // joinSpeakers joins all enabled, bound speakers in parallel.
-// When withCapture is true each speaker also captures incoming frames.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []guild.Speaker, withCapture bool) []speakerResult {
+// When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool) []speakerResult {
 	var candidates []guild.Speaker
 	for _, sp := range speakers {
 		if sp.Enabled {
@@ -337,8 +340,11 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				slog.Warn("speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				return
 			}
+			if withCapture {
+				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
+			}
 			chOut := make(chan []byte, audioChanBuf)
-			chCapture, cleanup, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture)
+			chCapture, cleanup, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.Error("failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
@@ -358,10 +364,10 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 }
 
 // commitSession stores session under write lock, re-checking for conflicts.
-func (m *Service) commitSession(guildID snowflake.ID, session *guild.Session) error {
+func (m *Service) commitSession(session *guild.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	st := m.statuses[guildID]
+	st := m.statuses[session.GuildID]
 	if st == nil {
 		return fmt.Errorf("guild status disappeared before session could be stored")
 	}
@@ -374,22 +380,20 @@ func (m *Service) commitSession(guildID snowflake.ID, session *guild.Session) er
 
 // consumeSpeaker sets up audio provider and receiver for a speaker's voice connection.
 // chOut is the provider channel (frames to play). When withCapture is true the
-// returned channel receives frames captured from the speaker's channel.
+// returned channel receives frames captured from the speaker's channel, filtered
+// by allowUser (shared filter built once at session start).
 // The caller is responsible for calling the returned cleanup function.
-func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool) (chan []byte, func(), error) {
+func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
 
 	session := NewVoiceConnSetup(speakerID)
 	if m.test.IsTestBot(speakerID) {
-		if withCapture {
-			session.WithTeeFileProvider(m.test.FileDCA)
-		} else {
-			session.WithFileProvider(m.test.FileDCA)
-		}
+		session.WithFileProvider(m.test.FileDCA)
 	} else {
 		session.WithVoiceProvider()
-		if withCapture {
-			session.WithVoiceReceiver(nil)
-		}
+	}
+
+	if withCapture {
+		session.WithVoiceReceiver(allowUser)
 	}
 
 	capture, cleanup, err := session.Apply(ctx, conn, chOut)

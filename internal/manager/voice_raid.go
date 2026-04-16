@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
@@ -13,6 +14,11 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
+
+// voiceLeaveTimeout is the maximum time to wait for a voice Leave call.
+// Using context.Background() without a deadline risks hanging forever if Discord
+// is unresponsive during session teardown.
+const voiceLeaveTimeout = 5 * time.Second
 
 // sourceEntry is one audio capture channel feeding the relay mixer graph.
 type sourceEntry struct {
@@ -55,7 +61,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 
 	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture(), allowUser)
 	if len(joined) == 0 {
-		return nil, fmt.Errorf("no speakers could join their voice channels")
+		return nil, fmt.Errorf("no speakers joined: verify speaker channels are bound and bots are online in this guild")
 	}
 
 	outs := make([]chan<- []byte, 0, len(joined))
@@ -86,12 +92,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, err
 	}
 
+	// WORKAROUND: force all guests to listen-only mode until the many-to-many relay bug is resolved.
 	guestMode = guild.RaidModeAllyListener
-	// Temporarily set guild.RaidModeAllyListener for all guests until fix bug with many to many relay and capture role sync.
-	//// Downgrade to listen-only when the host doesn't allow guest capture.
-	//if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
-	//	guestMode = guild.RaidModeAllyListener
-	//}
+	// if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
+	// 	guestMode = guild.RaidModeAllyListener
+	// }
 
 	allowUser := m.buildAllowUserFilter(guestGuildID)
 	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)
@@ -162,7 +167,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			setup.speakerCleanup()
 			if ownerCleanup != nil {
 				ownerCleanup()
-				ownerVoice.Leave(context.Background(), guestGuildID)
+				leaveCtx, leaveCancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
+				defer leaveCancel()
+				ownerVoice.Leave(leaveCtx, guestGuildID)
 			}
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
 			allySession.RemoveGuild(guestGuildID)
@@ -285,8 +292,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 
-	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
-
 	session := &guild.Session{
 		GuildID:  guildID,
 		Cancel:   cancelFunc,
@@ -301,6 +306,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		m.sessions.RemoveHost(guildID)
 		return "", err
 	}
+
+	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
@@ -456,18 +463,29 @@ func buildDestinations(joined []speakerResult) []*destChannel {
 	return dests
 }
 
+// mixerRef pairs a mixer with the source ID registered in it, so the fanout
+// goroutine can call RemoveInput when the source channel is exhausted.
+type mixerRef struct {
+	mx *opus.Mixer
+	id snowflake.ID
+}
+
 // wireFanout starts a goroutine per source that copies each incoming packet to all
 // relevant mixer inputs. The relay mixer receives every source; per-channel mixers
 // skip the source from their own channel (mix-minus).
+// Each goroutine calls RemoveInput on every mixer it registered when it exits,
+// so dead decoders are not retained for the lifetime of the session.
 func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer) {
 	for _, src := range sources {
 		var fanTargets []chan []byte
+		var removals []mixerRef
 
 		relayCh := make(chan []byte, audioChanBuf)
 		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
 			slog.Warn("relay mixer: failed to add input", slog.Any("err", err))
 		} else {
 			fanTargets = append(fanTargets, relayCh)
+			removals = append(removals, mixerRef{relayMixer, src.id})
 		}
 
 		for _, dest := range dests {
@@ -479,10 +497,16 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 				slog.Warn("channel mixer: failed to add input", slog.Any("err", err))
 			} else {
 				fanTargets = append(fanTargets, mixCh)
+				removals = append(removals, mixerRef{chanMixers[dest.channelID], src.id})
 			}
 		}
 
-		go func(in <-chan []byte, targets []chan []byte) {
+		go func(in <-chan []byte, targets []chan []byte, removals []mixerRef) {
+			defer func() {
+				for _, r := range removals {
+					r.mx.RemoveInput(r.id)
+				}
+			}()
 			for {
 				select {
 				case <-ctx.Done():
@@ -499,7 +523,7 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 					}
 				}
 			}
-		}(src.ch, fanTargets)
+		}(src.ch, fanTargets, removals)
 	}
 }
 
@@ -527,24 +551,19 @@ func startChannelMixers(ctx context.Context, dests []*destChannel, chanMixers ma
 }
 
 // startRelayBroadcast runs the relay mixer and broadcasts its output to all guest guilds.
-// Calls ownerCleanup and logs when the context is cancelled.
+// Calls ownerCleanup only after the mixer has fully stopped and its output channel is closed,
+// ensuring no in-flight frames are lost and cleanup is ordered after the last broadcast.
 func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func(), guildID snowflake.ID) {
-	go relayMixer.Run(ctx)
 	go func() {
 		defer func() {
 			ownerCleanup()
 			slog.Info("voice raid ended", slog.String("guildID", guildID.String()))
 		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case pkt, ok := <-relayMixer.Output():
-				if !ok {
-					return
-				}
-				relaySession.Broadcast(pkt)
-			}
+		go relayMixer.Run(ctx)
+		// Range blocks until the mixer closes its output channel (on ctx cancel),
+		// guaranteeing all queued frames are broadcast before cleanup runs.
+		for pkt := range relayMixer.Output() {
+			relaySession.Broadcast(pkt)
 		}
 	}()
 }
@@ -555,11 +574,13 @@ func buildSpeakerCleanup(guildID snowflake.ID, joined []speakerResult) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			ctx, cancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
+			defer cancel()
 			for _, r := range joined {
 				if r.cleanup != nil {
 					r.cleanup()
 				}
-				r.gv.Leave(context.Background(), guildID)
+				r.gv.Leave(ctx, guildID)
 			}
 		})
 	}

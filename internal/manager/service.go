@@ -20,7 +20,7 @@ import (
 
 // audioChanBuf is the buffer size for Opus frame channels between the voice
 // receiver/provider and the relay fan-out goroutines.
-const audioChanBuf = 15
+const audioChanBuf = 30
 
 // Service orchestrates speaker bots and voice raid sessions.
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.

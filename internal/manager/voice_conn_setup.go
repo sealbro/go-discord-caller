@@ -16,7 +16,6 @@ type VoiceConnSetup struct {
 	userID     snowflake.ID
 	providerFn func(chIn <-chan []byte) (voice.OpusFrameProvider, error)
 	receiverFn func() (chan []byte, voice.OpusFrameReceiver, error)
-	captureCh  chan []byte // set by WithTeeFileProvider
 }
 
 // NewVoiceConnSetup creates a new voice session builder.
@@ -34,27 +33,6 @@ func (v *VoiceConnSetup) WithFileProvider(path string) *VoiceConnSetup {
 			}()
 		}
 		return opus.NewFileVoiceProvider(path)
-	}
-	return v
-}
-
-// WithTeeFileProvider plays audio from a DCA file, drains chIn, and tees
-// the file frames into a capture channel returned by Apply.
-func (v *VoiceConnSetup) WithTeeFileProvider(path string) *VoiceConnSetup {
-	v.captureCh = make(chan []byte, audioChanBuf)
-	tee := v.captureCh
-	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		if chIn != nil {
-			go func() {
-				for range chIn {
-				}
-			}()
-		}
-		fp, err := opus.NewFileVoiceProvider(path)
-		if err != nil {
-			return nil, err
-		}
-		return opus.NewTeeProvider(fp, tee), nil
 	}
 	return v
 }
@@ -79,6 +57,9 @@ func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool) *V
 // Apply configures the voice connection with the session's provider and receiver,
 // sets the speaking flag, and returns the capture output channel (nil when no
 // capture is configured) together with a cleanup function.
+//
+// ctx must carry a deadline or timeout: SetSpeaking sends a gateway op and will
+// block until Discord acknowledges or the context is cancelled.
 func (v *VoiceConnSetup) Apply(ctx context.Context, conn voice.Conn, chIn <-chan []byte) (chan []byte, func(), error) {
 	var provider voice.OpusFrameProvider
 	if v.providerFn == nil {
@@ -95,28 +76,31 @@ func (v *VoiceConnSetup) Apply(ctx context.Context, conn voice.Conn, chIn <-chan
 	var receiver voice.OpusFrameReceiver
 	if v.receiverFn == nil {
 		receiver = opus.NewEmptyVoiceReceiver()
-		capture = v.captureCh
 	} else {
 		ch, r, err := v.receiverFn()
 		if err != nil {
+			provider.Close()
 			return nil, nil, fmt.Errorf("create voice receiver: %w", err)
 		}
 		receiver = r
 		capture = ch
 	}
 
-	conn.SetOpusFrameProvider(provider)
-	conn.SetOpusFrameReceiver(receiver)
-
-	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
-		return nil, nil, fmt.Errorf("set speaking flag: %w", err)
-	}
-
-	return capture, func() {
+	cleanup := func() {
 		provider.Close()
 		receiver.Close()
 		if capture != nil {
 			close(capture)
 		}
-	}, nil
+	}
+
+	conn.SetOpusFrameProvider(provider)
+	conn.SetOpusFrameReceiver(receiver)
+
+	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("set speaking flag: %w", err)
+	}
+
+	return capture, cleanup, nil
 }

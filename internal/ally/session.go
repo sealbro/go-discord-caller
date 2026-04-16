@@ -183,9 +183,13 @@ func (m *Manager) RemoveHost(hostGuildID snowflake.ID) {
 	s.close()
 	delete(m.sessions, s.Code)
 	delete(m.byGuild, hostGuildID)
+	var guestIDs []snowflake.ID
 	for guildID, sess := range m.byGuild {
 		if sess == s {
-			delete(m.byGuild, guildID)
+			guestIDs = append(guestIDs, guildID)
 		}
+	}
+	for _, guildID := range guestIDs {
+		delete(m.byGuild, guildID)
 	}
 }

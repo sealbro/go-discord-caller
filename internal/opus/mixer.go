@@ -18,7 +18,10 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
-	mixerOutputBuf  = 15
+	// mixerOutputBuf is the output channel buffer depth (30 frames × 20 ms = 600 ms).
+	// Frames are dropped silently when the consumer falls more than 600 ms behind.
+	// Increase this if guest guilds experience frequent audio gaps under load.
+	mixerOutputBuf = 30
 )
 
 type inputEntry struct {
@@ -112,11 +115,11 @@ func (m *Mixer) tick() error {
 		var pkt []byte
 		select {
 		case pkt = <-e.ch:
+			if len(pkt) > 0 {
+				hasAudio = true
+			}
 		default:
-			continue // no frame available; treat as silence
-		}
-		if len(pkt) == 0 {
-			continue
+			// no frame available; pkt stays nil → decoder applies PLC
 		}
 		n, err := e.dec.Decode(pkt, pcm)
 		if err != nil {
@@ -126,7 +129,6 @@ func (m *Mixer) tick() error {
 		for i := 0; i < n*mixerChannels; i++ {
 			mixed[i] += int32(pcm[i])
 		}
-		hasAudio = true
 	}
 
 	if !hasAudio {

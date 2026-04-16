@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-04-16
+
+### Added
+- **`/start mode:` option**: `/start` now accepts an optional `mode` parameter with two choices:
+  - `one` *(default)* — only the designated caller is captured; all speakers play back in listen-only mode
+  - `many` — every bound speaker channel becomes a two-way participant; users in each channel hear the mixed audio of all other channels (mix-minus)
+- **Multi-source voice mixing (mix-minus)**: When using `mode:many`, multiple users can speak simultaneously across different channels and all hear each other without echo — each channel only receives audio from *other* channels, never its own audio reflected back
+- **Guild Caller mode (`/start mode:many`)**: Speaker bots in every bound channel both capture and play back audio, turning the whole speaker pool into a multi-channel conference relay
+- **Guest listener mode by default**: A guest guild that joins with `/start code:XXXXXX` (no `mode` option) is in **listener-only** mode — it receives all host audio but its own users are not captured; add `mode:many` to enable capture on the guest side (only effective when the host also uses `mode:many`)
+- **Relay mixer for inter-guild audio**: All audio sources are continuously mixed into a single relay stream broadcast to guest guilds, so guests hear the full conversation regardless of how many callers are active on the host
+- **Voice Flow documentation**: New [VOICE_FLOW.md](VOICE_FLOW.md) with detailed signal flow diagrams for each raid mode
+
+
 ## [0.4.1] - 2026-04-10
 
 ### Fixed

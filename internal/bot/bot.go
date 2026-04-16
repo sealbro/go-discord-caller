@@ -18,48 +18,74 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
-	"github.com/sealbro/go-discord-caller/internal/relay"
-	"github.com/sealbro/go-discord-caller/internal/speaker"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
-// ManagerService is the interface consumed by the bot layer (commands, handlers).
-// Defining it here keeps the bot package decoupled from the concrete manager.Service.
-type ManagerService interface {
-	GetStatus(guildID snowflake.ID) domain.GuildStatus
-	HasActiveSession(guildID snowflake.ID) bool
-	StartVoiceRaid(ctx context.Context, cancelFunc context.CancelFunc, guildID snowflake.ID) (relay.RelayCode, error)
-	JoinSession(ctx context.Context, cancelFunc context.CancelFunc, code relay.RelayCode, guildID snowflake.ID) error
+// SessionManager handles voice raid session lifecycle.
+type SessionManager interface {
+	StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error)
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
-	BindCallerRole(guildID, roleID snowflake.ID)
-	BindManagerRole(guildID, roleID snowflake.ID)
+	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
+	HasActiveSession(guildID snowflake.ID) bool
+}
+
+// BindingManager handles channel and role bindings.
+type BindingManager interface {
+	BindRole(guildID snowflake.ID, roleType store.RoleType, roleID snowflake.ID)
+	UnbindRole(guildID snowflake.ID, roleType store.RoleType)
 	BindChannel(guildID, userID, channelID snowflake.ID)
 	UnbindChannel(guildID, userID snowflake.ID)
 	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
-	BindOwnerChannel(guildID, channelID snowflake.ID)
-	UnbindOwnerChannel(guildID snowflake.ID)
-	GetOwnerChannel(guildID snowflake.ID) (snowflake.ID, bool)
-	HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
-	HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
+	OwnerBotID() snowflake.ID
+}
+
+// SpeakerManager handles speaker registration and configuration.
+type SpeakerManager interface {
 	ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) error
 	NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool)
 	HasAvailableToken(guildID snowflake.ID) bool
+}
+
+// StatusProvider provides read-only status and authorization queries.
+type StatusProvider interface {
+	GetStatus(guildID snowflake.ID) guild.Status
+	HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
+	HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
+}
+
+// SeedManager handles speaker bot registration on startup and guild events.
+type SeedManager interface {
 	SeedExistingSpeakers(guildIDs []snowflake.ID)
-	SeedGuild(guildID snowflake.ID)
 	TrySeedMember(guildID, newUserID snowflake.ID)
 	RemoveSpeaker(guildID, userID snowflake.ID)
+}
+
+// LifecycleManager handles graceful shutdown.
+type LifecycleManager interface {
 	Shutdown(ctx context.Context)
+}
+
+// ManagerService is the full interface consumed by the bot layer.
+// It composes focused sub-interfaces for better separation of concerns.
+type ManagerService interface {
+	SessionManager
+	BindingManager
+	SpeakerManager
+	StatusProvider
+	SeedManager
+	LifecycleManager
 }
 
 // Bot wraps the disgo client and all application services.
 type Bot struct {
 	client       *bot.Client
 	manager      ManagerService
-	cfg          *config.Config
+	store        store.Store
 	guildReadyCh chan []snowflake.ID
 }
 
@@ -74,24 +100,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	guildReadyCh := make(chan []snowflake.ID, 1)
 
 	// Manager (owner) bot client
-	client, err := disgo.New(cfg.OwnerBotToken,
-		bot.WithGatewayConfigOpts(
-			gateway.WithIntents(
-				gateway.IntentGuilds,
-				gateway.IntentGuildMembers,
-				gateway.IntentGuildVoiceStates,
-				gateway.IntentGuildMessages,
-			),
-		),
-		bot.WithEventListeners(r),
-		bot.WithCacheConfigOpts(
-			cache.WithCaches(cache.FlagsAll),
-		),
-		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			voice.WithLogger(slog.New(slog.DiscardHandler)),
-		),
-	)
+	client, err := newOwnerClient(cfg.OwnerBotToken, r)
 	if err != nil {
 		return nil, err
 	}
@@ -109,25 +118,23 @@ func New(cfg *config.Config) (*Bot, error) {
 	}))
 
 	// Infrastructure
+	ownerBotID, ok := guild.BotUserID(cfg.OwnerBotToken)
+	if !ok {
+		return nil, fmt.Errorf("failed to get owner bot ID from token")
+	}
 	st, err := store.NewYAMLStore(cfg.StorePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
 	}
+
 	poolSvc := pool.NewService()
-	speakerSvc := speaker.NewService(poolSvc, cfg.Test)
-	managerSvc := manager.NewService(st, speakerSvc, poolSvc, client, cfg.Test)
+	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test)
 
 	// Open one dedicated gateway per speaker token immediately at startup.
-	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
-	poolSvc.ConnectPool(poolCtx, cfg.SpeakerTokens)
-	poolCancel()
-
-	total := len(poolSvc.GetIDs())
-	connected := len(poolSvc.GetClients())
-	if connected < total {
-		return nil, fmt.Errorf("speaker pool: only %d/%d speaker gateways connected at startup", connected, total)
+	if err := connectPool(ctx, poolSvc, cfg.SpeakerTokens); err != nil {
+		st.Close()
+		return nil, err
 	}
-	slog.Info("speaker pool ready", slog.Int("total", total))
 
 	// Start watchdog to monitor gateway health and reconnect bots that failed at startup.
 	poolSvc.StartWatchdog(ctx, 30*time.Second)
@@ -141,7 +148,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	return &Bot{
 		client:       client,
 		manager:      managerSvc,
-		cfg:          cfg,
+		store:        st,
 		guildReadyCh: guildReadyCh,
 	}, nil
 }
@@ -156,6 +163,7 @@ func (b *Bot) Run() error {
 	defer func() {
 		// Graceful shutdown: stop all raids, close all speaker gateways, then the owner gateway.
 		b.manager.Shutdown(ctx)
+		b.store.Close()
 		b.client.Close(ctx)
 	}()
 
@@ -186,5 +194,42 @@ func (b *Bot) Run() error {
 
 	slog.Info("shutting down...")
 
+	return nil
+}
+
+// newOwnerClient builds the disgo client for the owner (manager) bot.
+func newOwnerClient(token string, r handler.Router) (*bot.Client, error) {
+	return disgo.New(token,
+		bot.WithGatewayConfigOpts(
+			gateway.WithIntents(
+				gateway.IntentGuilds,
+				gateway.IntentGuildMembers,
+				gateway.IntentGuildVoiceStates,
+				gateway.IntentGuildMessages,
+			),
+		),
+		bot.WithEventListeners(r),
+		bot.WithCacheConfigOpts(
+			cache.WithCaches(cache.FlagsAll),
+		),
+		bot.WithVoiceManagerConfigOpts(
+			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			voice.WithLogger(slog.New(slog.DiscardHandler)),
+		),
+	)
+}
+
+// connectPool opens one gateway per speaker token and fails if any are not connected.
+func connectPool(ctx context.Context, poolSvc *pool.Service, tokens []string) error {
+	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
+	poolSvc.ConnectPool(poolCtx, tokens)
+	poolCancel()
+
+	total := len(poolSvc.GetIDs())
+	connected := len(poolSvc.GetClients())
+	if connected < total {
+		return fmt.Errorf("speaker pool: only %d/%d speaker gateways connected at startup", connected, total)
+	}
+	slog.Info("speaker pool ready", slog.Int("total", total))
 	return nil
 }

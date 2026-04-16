@@ -1,7 +1,6 @@
-package domain
+package guild
 
 import (
-	"context"
 	"encoding/base64"
 	"strings"
 
@@ -13,15 +12,6 @@ type Speaker struct {
 	ID       snowflake.ID
 	Username string
 	Enabled  bool
-}
-
-// VoiceSession represents an active voice raid session inside a guild.
-type VoiceSession struct {
-	GuildID   snowflake.ID
-	Speakers  []*Speaker
-	Cancel    context.CancelFunc
-	RelayCode string // set for host sessions; empty for standalone raids
-	IsGuest   bool   // true when this guild joined another guild's session
 }
 
 // BotUserID extracts the Discord ApplicationID (= bot user ID) from a raw bot token.

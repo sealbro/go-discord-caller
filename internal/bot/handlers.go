@@ -16,7 +16,7 @@ func eventListeners(managerSvc ManagerService) []bot.EventListener {
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
-		bot.NewListenerFunc(onVoiceLeave()),
+		bot.NewListenerFunc(onVoiceLeave),
 	}
 }
 
@@ -39,7 +39,7 @@ func onReady(m ManagerService) func(*events.Ready) {
 // It seeds speakers and ensures the guild has a persistent relay code.
 func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
-		go m.SeedGuild(e.GuildID)
+		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
 	}
 }
 
@@ -48,6 +48,10 @@ func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
 // registered, mirroring the startup seeding logic in SeedExistingSpeakers.
 func onGuildMemberAdd(m ManagerService) func(*events.GuildMemberJoin) {
 	return func(e *events.GuildMemberJoin) {
+		if !e.Member.User.Bot {
+			return
+		}
+
 		go m.TrySeedMember(e.GuildID, e.Member.User.ID)
 	}
 }
@@ -56,6 +60,10 @@ func onGuildMemberAdd(m ManagerService) func(*events.GuildMemberJoin) {
 // If the leaving member is a registered speaker bot it is removed from the guild status.
 func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 	return func(e *events.GuildMemberLeave) {
+		if !e.User.Bot {
+			return
+		}
+
 		go m.RemoveSpeaker(e.GuildID, e.User.ID)
 	}
 }
@@ -66,8 +74,7 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 // we overwrite whatever disgo stored with the authoritative data from this event).
 func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
-		// Ignore the bot's own voice state changes.
-		if e.Member.User.ID == e.Client().ID() {
+		if e.Member.User.Bot {
 			return
 		}
 
@@ -86,16 +93,13 @@ func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 }
 
 // onVoiceLeave is called whenever a user leaves a voice channel.
-func onVoiceLeave() func(*events.GuildVoiceLeave) {
-	return func(e *events.GuildVoiceLeave) {
-		// Ignore the bot's own voice state changes.
-		if e.Member.User.ID == e.Client().ID() {
-			return
-		}
-
-		slog.Info("user left voice channel",
-			slog.String("userID", e.Member.User.ID.String()),
-			slog.String("guildID", e.VoiceState.GuildID.String()),
-		)
+func onVoiceLeave(e *events.GuildVoiceLeave) {
+	if e.Member.User.Bot {
+		return
 	}
+
+	slog.Info("user left voice channel",
+		slog.String("userID", e.Member.User.ID.String()),
+		slog.String("guildID", e.VoiceState.GuildID.String()),
+	)
 }

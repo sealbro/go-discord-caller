@@ -1,12 +1,13 @@
 module github.com/sealbro/go-discord-caller
 
-go 1.26.1
+go 1.26.2
 
 require (
 	github.com/disgoorg/disgo v0.19.3
 	github.com/disgoorg/godave/golibdave v0.1.0
 	github.com/disgoorg/omit v1.0.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
+	github.com/hraban/opus v0.0.0-20251117090126-c76ea7e21bf3
 	github.com/joho/godotenv v1.5.1
 	gopkg.in/yaml.v3 v3.0.1
 )

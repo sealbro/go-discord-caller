@@ -41,29 +41,32 @@ type Store interface {
 	UnbindRole(guildID snowflake.ID, roleType RoleType)
 	GetBoundRole(guildID snowflake.ID, roleType RoleType) (snowflake.ID, bool)
 
-	// GetOrCreateRelayCode returns the persistent relay code for guildID.
+	// GetOrCreateAllyCode returns the persistent ally code for guildID.
 	// If none exists it generates, persists, and returns a new one.
-	GetOrCreateRelayCode(guildID snowflake.ID) string
-	// GetRelayCode returns the stored relay code for guildID without creating one.
-	GetRelayCode(guildID snowflake.ID) (string, bool)
+	GetOrCreateAllyCode(guildID snowflake.ID) string
+	// GetAllyCode returns the stored ally code for guildID without creating one.
+	GetAllyCode(guildID snowflake.ID) (string, bool)
+
+	// Close flushes any pending writes and releases resources.
+	Close()
 }
 
-// generateRelayCode creates a cryptographically random 8-character uppercase code.
-func generateRelayCode() string {
+// generateAllyCode creates a cryptographically random 8-character uppercase code.
+func generateAllyCode() string {
 	b := make([]byte, 5)
 	_, _ = rand.Read(b)
 	return strings.ToUpper(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(b))[:8]
 }
 
-// uniqueRelayCode generates a relay code that does not already appear as a
+// uniqueAllyCode generates an ally code that does not already appear as a
 // value in existing. Must be called with the store's write lock held.
-func uniqueRelayCode(existing map[snowflake.ID]string) string {
+func uniqueAllyCode(existing map[snowflake.ID]string) string {
 	used := make(map[string]struct{}, len(existing))
 	for _, c := range existing {
 		used[c] = struct{}{}
 	}
 	for {
-		code := generateRelayCode()
+		code := generateAllyCode()
 		if _, collision := used[code]; !collision {
 			return code
 		}
@@ -124,20 +127,22 @@ func (s *InMemoryStore) GetBoundRole(guildID snowflake.ID, roleType RoleType) (s
 	return roleID, ok
 }
 
-func (s *InMemoryStore) GetOrCreateRelayCode(guildID snowflake.ID) string {
+func (s *InMemoryStore) GetOrCreateAllyCode(guildID snowflake.ID) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if code, ok := s.relayCodes[guildID]; ok {
 		return code
 	}
-	code := uniqueRelayCode(s.relayCodes)
+	code := uniqueAllyCode(s.relayCodes)
 	s.relayCodes[guildID] = code
 	return code
 }
 
-func (s *InMemoryStore) GetRelayCode(guildID snowflake.ID) (string, bool) {
+func (s *InMemoryStore) GetAllyCode(guildID snowflake.ID) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	code, ok := s.relayCodes[guildID]
 	return code, ok
 }
+
+func (s *InMemoryStore) Close() {}

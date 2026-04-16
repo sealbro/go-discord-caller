@@ -13,7 +13,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/domain"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
 // PoolService is the interface for speaker pool operations used by dependent packages.
@@ -24,10 +24,8 @@ type PoolService interface {
 	Shutdown(ctx context.Context)
 }
 
-// Service manages the lifecycle of the pool of speaker gateways.
-// poolClients is the single source of truth: it maps bot user ID → client.
-// A client is always built from the token (so client.Token is always set),
-// even when OpenGateway failed — allowing Reconnect to retry without extra state.
+// Service manages the lifecycle of the pool of speaker bot gateways.
+// poolClients maps bot user ID → client for speaker bots only.
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client
@@ -35,7 +33,9 @@ type Service struct {
 
 // NewService creates a new speaker Service.
 func NewService() *Service {
-	return &Service{poolClients: make(map[snowflake.ID]*bot.Client)}
+	return &Service{
+		poolClients: make(map[snowflake.ID]*bot.Client),
+	}
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
@@ -70,7 +70,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 			defer wg.Done()
 			index := i + 1
 
-			botUserID, ok := domain.BotUserID(token)
+			botUserID, ok := guild.BotUserID(token)
 			if !ok {
 				slog.Warn("pool: invalid pool token", slog.Int("index", index))
 				return
@@ -124,10 +124,10 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 	s.mu.RUnlock()
 
 	if !known {
-		return false // unknown bot
+		return false
 	}
 
-	if client != nil && client.Gateway != nil && client.Gateway.Status().IsConnected() {
+	if isConnected(client) {
 		return true // already connected; disgo's internal loop handles future drops
 	}
 
@@ -192,6 +192,10 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 		client := s.poolClients[botUserID]
 		s.mu.RUnlock()
 
+		if isConnected(client) {
+			continue // healthy
+		}
+
 		if client == nil || client.Gateway == nil {
 			slog.Warn("pool: watchdog detected bot without gateway, attempting reconnect",
 				slog.String("botUserID", botUserID.String()),
@@ -206,17 +210,18 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 			continue
 		}
 
-		status := client.Gateway.Status()
-		if status.IsConnected() {
-			continue // healthy
-		}
 		// Gateway exists but is not connected. Disgo's internal reconnect loop is
 		// already running with exponential backoff — log for visibility only.
 		slog.Warn("pool: watchdog detected disconnected gateway",
 			slog.String("botUserID", botUserID.String()),
-			slog.String("status", status.String()),
+			slog.String("status", client.Gateway.Status().String()),
 		)
 	}
+}
+
+// isConnected reports whether a client has a healthy gateway connection.
+func isConnected(c *bot.Client) bool {
+	return c != nil && c.Gateway != nil && c.Gateway.Status().IsConnected()
 }
 
 // GetClientByID returns the connected client for the given botUserID.
@@ -225,34 +230,34 @@ func (s *Service) GetClientByID(botUserID snowflake.ID) (*bot.Client, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	client, ok := s.poolClients[botUserID]
-	if !ok || client == nil || client.Gateway == nil || !client.Gateway.Status().IsConnected() {
+	if !ok || !isConnected(client) {
 		return nil, false
 	}
 	return client, true
 }
 
-// GetClients returns all connected clients sorted by bot user ID.
+// GetClients returns all connected speaker clients sorted by bot user ID.
 func (s *Service) GetClients() []*bot.Client {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	clients := make([]*bot.Client, 0, len(s.poolClients))
 	for _, id := range s.sortedIDs() {
-		if c := s.poolClients[id]; c != nil && c.Gateway != nil && c.Gateway.Status().IsConnected() {
+		if c := s.poolClients[id]; isConnected(c) {
 			clients = append(clients, c)
 		}
 	}
 	return clients
 }
 
-// GetIDs returns all bot user IDs sorted by value.
-// Includes bots whose gateway failed to connect at startup.
+// GetIDs returns all speaker bot user IDs sorted by value.
+// Includes speakers whose gateway failed to connect at startup.
 func (s *Service) GetIDs() []snowflake.ID {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.sortedIDs()
 }
 
-// sortedIDs returns map keys sorted by snowflake ID value.
+// sortedIDs returns pool client IDs sorted by snowflake value.
 // Must be called with mu held (at least read-locked).
 func (s *Service) sortedIDs() []snowflake.ID {
 	ids := make([]snowflake.ID, 0, len(s.poolClients))

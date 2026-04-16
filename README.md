@@ -1,10 +1,12 @@
 # go-discord-caller
 
-A Go Discord bot that captures voice audio from a user with a specific role and relays it live to every bound speaker bot — across one or multiple Discord servers simultaneously.
+A Go Discord bot that captures voice audio and relays it live to every bound speaker bot — across one or multiple Discord servers simultaneously. Supports single-caller broadcast and full multi-channel conference modes with mix-minus audio mixing.
 
 [![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
 
 ## How it works
+
+[Voice Flow](VOICE_FLOW.md) – detailed signal flow and component interaction diagrams
 
 ```mermaid
 graph TB
@@ -36,19 +38,20 @@ graph TB
     SP3 -- "▶️ plays back" --> SCH3
 ```
 
-The system uses **two types of Discord bots**:
+The diagram above shows the default **one-caller** mode. The system uses **two types of Discord bots**:
 
-| Role                   | Description                                                                                                                                               |
-|------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Owner / Caller bot** | The main bot. It listens in a voice channel, captures audio from users that have the configured capture role, and fans the audio out to all speaker bots. |
-| **Speaker bots**       | A pool of secondary bots. Each speaker joins its own bound voice channel and plays back the audio relayed by the owner bot.                               |
+| Role                   | Description                                                                                                                                                                                                             |
+|------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Owner / Caller bot** | The main bot. It listens in a voice channel, captures audio from users with the configured capture role, and fans it out to all speaker bots.                                                                           |
+| **Speaker bots**       | A pool of secondary bots. In default mode each speaker joins its bound channel and plays back relayed audio. In **many-callers** mode (`/start mode:many`) speakers also capture audio, enabling full conference relay. |
 
 All speaker gateways are pre-connected at startup. When a voice raid is started, the owner bot joins its channel, every enabled speaker joins theirs, and audio is streamed in real time via [disgo](https://github.com/disgoorg/disgo) + [godave / libdave](https://github.com/disgoorg/godave) (Discord's DAVE E2EE audio protocol).
 
 ## Features
 
 - **Multi-speaker relay** – unlimited speaker bots, each bound to a different voice channel
-- **Inter-guild relay** – guest guilds can join a host guild's active session using a relay code; audio fans out across all participating servers
+- **Two caller modes** – default one-caller broadcast (`/start`) or full multi-channel conference (`/start mode:many`) where every bound channel captures and plays back audio with mix-minus echo prevention
+- **Inter-guild relay** – guest guilds join a host session via relay code; guests are listener-only by default, or active participants with `mode:many`
 - **Persistent relay codes** – each guild has a unique 8-character code stored in YAML; shared via `/status` so other servers can join
 - **Per-guild configuration** – capture role, manager role, owner channel, and per-speaker bindings are stored per guild and survive restarts
 - **Interactive setup UI** – paginated slash-command menus with dropdowns, toggle buttons, and quick page-range navigation; no manual config file needed
@@ -60,22 +63,24 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 
 > Manager role is configured via `/setup`. `/status` is available to everyone.
 
-| Command              | Required role | Description                                                                                                 |
-|----------------------|---------------|-------------------------------------------------------------------------------------------------------------|
-| `/setup`             | Manager       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)         |
-| `/start`             | Manager       | Make all enabled speakers join their bound voice channels and begin the voice raid                          |
-| `/start code:XXXXXX` | Manager       | Join an existing voice raid on another server as a guest using its relay code                               |
-| `/stop`              | Manager       | Stop the active voice raid and make all speakers leave their channels                                       |
-| `/status`            | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state |
+| Command                            | Required role | Description                                                                                                                          |
+|------------------------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `/setup`                           | Manager       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)                                  |
+| `/start`                           | Manager       | Start a voice raid in **one-caller** mode — only the designated caller is captured; speakers play back in listen-only                |
+| `/start mode:many`                 | Manager       | Start a voice raid in **many-callers** mode — every bound channel captures and plays back audio with mix-minus echo prevention       |
+| `/start code:XXXXXX`               | Manager       | Join an existing relay session as a **listener** — receives host audio but does not capture locally                                  |
+| `/start code:XXXXXX mode:many`     | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when host uses `mode:many`)  |
+| `/stop`                            | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                |
+| `/status`                          | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                          |
 
 ## Inter-guild relay
 
 Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown in `/status`.
 
 **To start a cross-guild relay:**
-1. Guild A runs `/start` — its session becomes active; the relay code is visible in `/status`.
-2. Guild B runs `/start code:A3BX7KQP` — its owner bot and speakers connect as a guest.
-3. Audio captured in Guild A is broadcast to all speakers in both guilds in real time.
+1. Guild A runs `/start` (or `/start mode:many`) — its session becomes active; the relay code is visible in `/status`.
+2. Guild B runs `/start code:A3BX7KQP` — its speakers connect in **listener-only** mode and receive all audio from Guild A.
+3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` and Guild B must join with `/start code:A3BX7KQP mode:many`.
 4. When Guild A runs `/stop`, all guest sessions are torn down automatically.
 
 ## Configuration
@@ -183,3 +188,7 @@ The multi-stage build installs `libdave`, compiles the binary with CGO, then cop
 ## Articles
 
 - [Building a Discord Caller (Voice Relay) Bot in Go](https://dev.to/sealbro/building-a-discord-caller-voice-relay-bot-in-go-5b9h)
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full release history.

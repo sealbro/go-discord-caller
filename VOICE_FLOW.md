@@ -230,21 +230,14 @@ flowchart TD
 
 ---
 
-## RaidModeGuildCaller + RaidModeAllyCaller — bi-directional inter-guild relay (PLANNED)
+## RaidModeGuildCaller + RaidModeAllyCaller — bi-directional inter-guild relay
 
-> **Not yet implemented.** Two blockers prevent this mode from working:
->
-> 1. **Workaround in `JoinSession`** (line 95–99): all guests are force-downgraded to
->    `RaidModeAllyListener`, so no guest capture or `BroadcastFromGuild` ever runs.
-> 2. **Host never registers with `ally.Session`**: `StartVoiceRaid` never calls
->    `allySession.AddGuild(hostGuildID, ...)`, so `BroadcastFromGuild` has no host
->    targets to deliver to even if the workaround were removed.
->
-> Until both are fixed, the actual behaviour matches section 2: host relays to guests,
-> guests are listeners only — regardless of the mode selected by the guest.
+Both guilds have a full mix-minus graph. Both use `BroadcastFromGuild` so neither
+hears its own audio echoed back. `registerRelayInputs` wires relay inputs into each
+guild's `ChannelMixer`s so incoming relay audio is mixed alongside local sources.
 
-The diagram below shows the **intended** design once both blockers are resolved.
-Dashed lines mark the two currently-missing wiring paths.
+- **Host → Guest**: `RelayMixer` → `BroadcastFromGuild(hostID)` → guest `relayIn` channels → guest `ChannelMixer`s
+- **Guest → Host**: guest `RelayMixer` → `BroadcastFromGuild(guestID)` → host `relayIn` channels → host `ChannelMixer`s
 
 ```mermaid
 flowchart TD
@@ -260,13 +253,15 @@ flowchart TD
 
         HchIn["chIn"]
         HchCap["chCapture"]
-        HFanA["Fanout A (goroutine)"]
-        HFanB["Fanout B (goroutine)"]
+        HFanA["Fanout A"]
+        HFanB["Fanout B"]
         HMixA["ChannelMixer A (mix-minus)"]
         HMixB["ChannelMixer B (mix-minus)"]
         HRelayMix["RelayMixer"]
         HchOwnerOut["chOwnerOut"]
         HchOut["chOut (spk)"]
+        HRelayInA["relayIn A"]
+        HRelayInB["relayIn B"]
 
         HOwnerVR --> HchIn  --> HFanA
         HSpkVR   --> HchCap --> HFanB
@@ -276,108 +271,138 @@ flowchart TD
         HFanB -- "mixCh_A"   --> HMixA
         HFanB -- "relayCh_B" --> HRelayMix
 
+        HRelayInA --> HMixA
+        HRelayInB --> HMixB
+
         HMixA -- "Output()" --> HchOwnerOut --> HOwnerVP
         HMixB -- "Output()" --> HchOut      --> HSpkVP
     end
 
-    subgraph SESSION["ally.Session (relay hub)"]
-        Broadcast["Broadcast()"]
-        BroadcastFrom["BroadcastFromGuild()"]
+    subgraph SESSION["ally.Session"]
+        BFGHost["BroadcastFromGuild(hostID)"]
+        BFGGuest["BroadcastFromGuild(guestID)"]
     end
 
-    HRelayMix -- "Output()" --> Broadcast
+    HRelayMix -- "Output()" --> BFGHost
 
     subgraph GUEST["Guest Guild — RaidModeAllyCaller"]
+        subgraph GChA["Channel A (owner)"]
+            GOwnerVP["Owner VoiceProvider"]
+        end
         subgraph GChB["Channel B"]
-            GSpkVR["Speaker VoiceReceiver ⚠ blocked by workaround"]
+            GSpkVR["Speaker VoiceReceiver"]
             GSpkVP["Speaker VoiceProvider"]
         end
-        GOwnerVP["Guest Owner VoiceProvider"]
 
         GchCap["chCapture"]
-        GDedup["iterDeduplicatedCaptures"]
+        GFanB["Fanout B"]
+        GMixA["ChannelMixer A (mix-minus)"]
+        GMixB["ChannelMixer B (mix-minus)"]
+        GRelayMix["RelayMixer"]
+        GchOwnerOut["chOwnerOut"]
         GchOut["chOut (spk)"]
-        GchOwnerOut["chOut (owner)"]
+        GRelayInA["relayIn A"]
+        GRelayInB["relayIn B"]
 
-        GSpkVR -. "workaround: capture disabled" .-> GchCap
-        GchCap --> GDedup
-        GchOut      --> GSpkVP
-        GchOwnerOut --> GOwnerVP
+        GSpkVR --> GchCap --> GFanB
+
+        GFanB -- "mixCh_A"   --> GMixA
+        GFanB -- "relayCh_B" --> GRelayMix
+
+        GRelayInA --> GMixA
+        GRelayInB --> GMixB
+
+        GMixA -- "Output()" --> GchOwnerOut --> GOwnerVP
+        GMixB -- "Output()" --> GchOut      --> GSpkVP
     end
 
-    GDedup        -. "blocked: no guest capture" .-> BroadcastFrom
-    Broadcast     -- "to guest spk outs"  --> GchOut
-    Broadcast     -- "to guest owner out" --> GchOwnerOut
-    BroadcastFrom -. "blocked: host not in AddGuild" .-> HchOut
-    BroadcastFrom -. "blocked: host not in AddGuild" .-> HchOwnerOut
+    GRelayMix -- "Output()" --> BFGGuest
+
+    BFGHost  -- "relayIn A" --> GRelayInA
+    BFGHost  -- "relayIn B" --> GRelayInB
+    BFGGuest -- "relayIn A" --> HRelayInA
+    BFGGuest -- "relayIn B" --> HRelayInB
 
     %% link indices:
     %%  0  : HOwnerVR → HchIn
     %%  1  : HchIn → HFanA
-    %%  2  : HSpkVR → HchCap         (dashed — workaround)
+    %%  2  : HSpkVR → HchCap
     %%  3  : HchCap → HFanB
     %%  4  : HFanA → HMixB
     %%  5  : HFanA → HRelayMix
     %%  6  : HFanB → HMixA
     %%  7  : HFanB → HRelayMix
-    %%  8  : HMixA → HchOwnerOut
-    %%  9  : HchOwnerOut → HOwnerVP
-    %%  10 : HMixB → HchOut
-    %%  11 : HchOut → HSpkVP
-    %%  12 : HRelayMix → Broadcast
-    %%  13 : GSpkVR → GchCap         (dashed — workaround)
-    %%  14 : GchCap → GDedup
-    %%  15 : GchOut → GSpkVP
-    %%  16 : GchOwnerOut → GOwnerVP
-    %%  17 : GDedup → BroadcastFrom  (dashed — blocked)
-    %%  18 : Broadcast → GchOut
-    %%  19 : Broadcast → GchOwnerOut
-    %%  20 : BroadcastFrom → HchOut  (dashed — blocked)
-    %%  21 : BroadcastFrom → HchOwnerOut (dashed — blocked)
+    %%  8  : HRelayInA → HMixA
+    %%  9  : HRelayInB → HMixB
+    %%  10 : HMixA → HchOwnerOut
+    %%  11 : HchOwnerOut → HOwnerVP
+    %%  12 : HMixB → HchOut
+    %%  13 : HchOut → HSpkVP
+    %%  14 : HRelayMix → BFGHost
+    %%  15 : GSpkVR → GchCap
+    %%  16 : GchCap → GFanB
+    %%  17 : GFanB → GMixA
+    %%  18 : GFanB → GRelayMix
+    %%  19 : GRelayInA → GMixA
+    %%  20 : GRelayInB → GMixB
+    %%  21 : GMixA → GchOwnerOut
+    %%  22 : GchOwnerOut → GOwnerVP
+    %%  23 : GMixB → GchOut
+    %%  24 : GchOut → GSpkVP
+    %%  25 : GRelayMix → BFGGuest
+    %%  26 : BFGHost → GRelayInA
+    %%  27 : BFGHost → GRelayInB
+    %%  28 : BFGGuest → HRelayInA
+    %%  29 : BFGGuest → HRelayInB
 
     %% Host Ch A (owner) — blue shades, dark→light
     linkStyle 0  stroke:#0d47a1,stroke-width:2px
     linkStyle 1  stroke:#1565c0,stroke-width:2px
     linkStyle 6  stroke:#1976d2,stroke-width:2px
-    linkStyle 8  stroke:#42a5f5,stroke-width:2px
-    linkStyle 9  stroke:#90caf9,stroke-width:2px
+    linkStyle 8  stroke:#1e88e5,stroke-width:2px
+    linkStyle 10 stroke:#42a5f5,stroke-width:2px
+    linkStyle 11 stroke:#90caf9,stroke-width:2px
 
     %% Host Ch B (speaker) — green shades, dark→light
+    linkStyle 2  stroke:#1b5e20,stroke-width:2px
     linkStyle 3  stroke:#2e7d32,stroke-width:2px
     linkStyle 4  stroke:#388e3c,stroke-width:2px
-    linkStyle 10 stroke:#66bb6a,stroke-width:2px
-    linkStyle 11 stroke:#a5d6a7,stroke-width:2px
+    linkStyle 9  stroke:#43a047,stroke-width:2px
+    linkStyle 12 stroke:#66bb6a,stroke-width:2px
+    linkStyle 13 stroke:#a5d6a7,stroke-width:2px
 
-    %% Host relay path — purple shades
+    %% Host relay — purple shades
     linkStyle 5  stroke:#4a148c,stroke-width:2px
     linkStyle 7  stroke:#6a1b9a,stroke-width:2px
-    linkStyle 12 stroke:#ba68c8,stroke-width:2px
+    linkStyle 14 stroke:#ba68c8,stroke-width:2px
 
-    %% Guest capture path (blocked) — grey dashed
-    linkStyle 2  stroke:#999,stroke-width:1px,stroke-dasharray:4
-    linkStyle 13 stroke:#999,stroke-width:1px,stroke-dasharray:4
-    linkStyle 14 stroke:#ef6c00,stroke-width:2px
-    linkStyle 17 stroke:#999,stroke-width:1px,stroke-dasharray:4
+    %% Guest Ch B (speaker) capture — orange shades, dark→light
+    linkStyle 15 stroke:#e65100,stroke-width:2px
+    linkStyle 16 stroke:#ef6c00,stroke-width:2px
+    linkStyle 17 stroke:#f57c00,stroke-width:2px
+    linkStyle 18 stroke:#ffa726,stroke-width:2px
 
-    %% Host → Guest broadcast — teal shades
-    linkStyle 18 stroke:#00695c,stroke-width:2px
-    linkStyle 19 stroke:#26a69a,stroke-width:2px
+    %% Guest Ch A (owner) output — red shades
+    linkStyle 19 stroke:#b71c1c,stroke-width:2px
+    linkStyle 21 stroke:#e53935,stroke-width:2px
+    linkStyle 22 stroke:#e57373,stroke-width:2px
 
-    %% Guest → Host broadcast (blocked) — grey dashed
-    linkStyle 20 stroke:#999,stroke-width:1px,stroke-dasharray:4
-    linkStyle 21 stroke:#999,stroke-width:1px,stroke-dasharray:4
+    %% Guest Ch B output — pink shades
+    linkStyle 20 stroke:#880e4f,stroke-width:2px
+    linkStyle 23 stroke:#c2185b,stroke-width:2px
+    linkStyle 24 stroke:#f06292,stroke-width:2px
 
-    %% Guest provider outputs — red shades
-    linkStyle 15 stroke:#b71c1c,stroke-width:2px
-    linkStyle 16 stroke:#e57373,stroke-width:2px
+    %% Guest relay — purple shades (lighter than host)
+    linkStyle 25 stroke:#ce93d8,stroke-width:2px
+
+    %% Host → Guest relay delivery — teal shades
+    linkStyle 26 stroke:#00695c,stroke-width:2px
+    linkStyle 27 stroke:#26a69a,stroke-width:2px
+
+    %% Guest → Host relay delivery — gold shades
+    linkStyle 28 stroke:#f57f17,stroke-width:2px
+    linkStyle 29 stroke:#ffca28,stroke-width:2px
 ```
-
-### What needs to be wired to enable AllyCaller
-
-| Fix | Location | What to do |
-|-----|----------|------------|
-| Remove guest listener workaround | `JoinSession` line 95–99 | Uncomment original downgrade logic; remove forced `RaidModeAllyListener` |
-| Register host outputs with session | `StartVoiceRaid` | After `wireFanout`, call `allySession.AddGuild(guildID, allHostOuts)` so `BroadcastFromGuild` can deliver to host speakers |
 
 ---
 
@@ -394,5 +419,4 @@ This prevents echo: users in channel X would otherwise hear their own audio play
 | Fanout           | goroutine per source                   | Copies each packet to all registered mixer input channels                     |
 | Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; output drives speaker `VoiceProvider`s in channel X|
 | Relay mix        | `RelayMixer`                           | Mixes all sources; output is broadcast to every attached guest guild          |
-| Host → Guest     | `ally.Session.Broadcast`               | Sends relay packets to ALL registered guest speaker + owner output channels   |
-| Guest → others   | `ally.Session.BroadcastFromGuild`      | (Planned) Sends guest-captured audio to all guilds except the originating one |
+| Guest delivery   | `ally.Session.Broadcast`               | Sends relay packets to guest speaker and owner output channels                |

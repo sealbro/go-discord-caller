@@ -20,6 +20,11 @@ import (
 // is unresponsive during session teardown.
 const voiceLeaveTimeout = 5 * time.Second
 
+// relayInputID is the synthetic source ID used when adding a guest relay feed
+// as an input to a host-side ChannelMixer. Discord snowflakes are epoch-based
+// (minimum value ~4 billion) so 1 never collides with a real user/bot ID.
+const relayInputID snowflake.ID = 1
+
 // sourceEntry is one audio capture channel feeding the relay mixer graph.
 type sourceEntry struct {
 	id        snowflake.ID
@@ -92,11 +97,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, err
 	}
 
-	// WORKAROUND: force all guests to listen-only mode until the many-to-many relay bug is resolved.
-	guestMode = guild.RaidModeAllyListener
-	// if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
-	// 	guestMode = guild.RaidModeAllyListener
-	// }
+	if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
+		guestMode = guild.RaidModeAllyListener
+	}
 
 	allowUser := m.buildAllowUserFilter(guestGuildID)
 	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)
@@ -105,35 +108,74 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, err
 	}
 
-	// In AllyCaller mode relay guest captures to all OTHER guilds (never back to
-	// the originating guild — that would echo audio to the users who spoke).
-	if guestMode.WithCapture() {
-		iterDeduplicatedCaptures(setup.joined, func(r speakerResult) {
-			go func(ch <-chan []byte) {
-				for pkt := range ch {
-					allySession.BroadcastFromGuild(guestGuildID, pkt)
-				}
-			}(r.chCapture)
-		})
-	}
-
-	// Join the owner bot as a relayer into its bound channel.
+	// Join the owner bot as a relay receiver into its bound channel.
 	ownerVoice := m.ownerVoice(guestGuildID)
 	var ownerCleanup func()
+	var ownerChOut chan []byte
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.Warn("guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
-		chOut := make(chan []byte, audioChanBuf)
-		_, cleanup, err := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider().Apply(ctx, conn, chOut)
+		ownerChOut = make(chan []byte, audioChanBuf)
+		_, cleanup, err := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider().Apply(ctx, conn, ownerChOut)
 		if err != nil {
 			slog.Warn("guest: failed to setup owner relay", slog.Any("err", err))
+			ownerChOut = nil
 		} else {
 			ownerCleanup = cleanup
-			setup.outs = append(setup.outs, chOut)
 		}
 	}
 
-	allySession.AddGuild(guestGuildID, setup.outs)
+	// guestCleanupOwner consolidates owner teardown used in both error paths and deferred teardown.
+	guestCleanupOwner := func() {
+		if ownerCleanup != nil {
+			ownerCleanup()
+			leaveCtx, leaveCancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
+			defer leaveCancel()
+			ownerVoice.Leave(leaveCtx, guestGuildID)
+		}
+	}
+
+	// In AllyCaller mode build a full mix-minus graph identical to the host:
+	// one ChannelMixer per destination channel (mix-minus), a relay mixer whose
+	// output is broadcast to other guilds, and per-channel relay inputs so the
+	// host relay reaches guest speakers through the mixers.
+	//
+	// In AllyListener mode register raw chOut channels directly — no local mixing.
+	var (
+		guestChannelMixers map[snowflake.ID]*opus.Mixer
+		guestRelayMixer    *opus.Mixer
+		destinations       []*destChannel
+	)
+
+	if guestMode.WithCapture() {
+		destinations = buildDestinations(setup.joined)
+		if ownerChOut != nil {
+			destinations = append(destinations, &destChannel{
+				channelID: ownerVoice.ChannelID(),
+				outs:      []chan<- []byte{ownerChOut},
+			})
+		}
+
+		guestChannelMixers = make(map[snowflake.ID]*opus.Mixer, len(destinations))
+		for _, dest := range destinations {
+			mx, err := opus.NewMixer()
+			if err != nil {
+				setup.speakerCleanup()
+				guestCleanupOwner()
+				m.sessions.RemoveGuest(guestGuildID)
+				return guestMode, fmt.Errorf("guest: create channel mixer: %w", err)
+			}
+			guestChannelMixers[dest.channelID] = mx
+		}
+
+		guestRelayMixer, err = opus.NewMixer()
+		if err != nil {
+			setup.speakerCleanup()
+			guestCleanupOwner()
+			m.sessions.RemoveGuest(guestGuildID)
+			return guestMode, fmt.Errorf("guest: create relay mixer: %w", err)
+		}
+	}
 
 	session := &guild.Session{
 		GuildID:  guestGuildID,
@@ -145,12 +187,30 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	}
 	if err := m.commitSession(session); err != nil {
 		setup.speakerCleanup()
-		if ownerCleanup != nil {
-			ownerCleanup()
-			ownerVoice.Leave(ctx, guestGuildID)
-		}
+		guestCleanupOwner()
 		m.sessions.RemoveGuest(guestGuildID)
 		return guestMode, fmt.Errorf("failed to commit session: %w", err)
+	}
+
+	// toClose holds channels closed on teardown. In caller mode these are the
+	// relay input channels (speaker chOuts are closed by channel mixer goroutines).
+	// In listener mode these are the raw speaker/owner chOut channels.
+	var toClose []chan<- []byte
+
+	if guestMode.WithCapture() && guestRelayMixer != nil {
+		sources := buildGuestSources(setup.joined)
+		wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
+		toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
+		startChannelMixers(ctx, destinations, guestChannelMixers)
+		startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
+	} else {
+		outs := make([]chan<- []byte, len(setup.outs))
+		copy(outs, setup.outs)
+		if ownerChOut != nil {
+			outs = append(outs, ownerChOut)
+		}
+		allySession.AddGuild(guestGuildID, outs)
+		toClose = outs
 	}
 
 	slog.Info("guest joined relay session",
@@ -165,16 +225,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	go func() {
 		defer func() {
 			setup.speakerCleanup()
-			if ownerCleanup != nil {
-				ownerCleanup()
-				leaveCtx, leaveCancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
-				defer leaveCancel()
-				ownerVoice.Leave(leaveCtx, guestGuildID)
-			}
+			guestCleanupOwner()
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
 			allySession.RemoveGuild(guestGuildID)
-			for _, out := range setup.outs {
-				close(out)
+			for _, ch := range toClose {
+				close(ch)
 			}
 			m.sessions.RemoveGuest(guestGuildID)
 			m.mu.Lock()
@@ -308,6 +363,12 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
+
+	// When the host allows guest capture, register host channel mixers as relay
+	// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
+	if mode.AllowGuestCapture() {
+		registerRelayInputs(guildID, allySession, destinations, channelMixers)
+	}
 
 	slog.Info("voice raid started",
 		slog.String("guildID", guildID.String()),
@@ -563,7 +624,52 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 		// Range blocks until the mixer closes its output channel (on ctx cancel),
 		// guaranteeing all queued frames are broadcast before cleanup runs.
 		for pkt := range relayMixer.Output() {
-			relaySession.Broadcast(pkt)
+			relaySession.BroadcastFromGuild(guildID, pkt)
+		}
+	}()
+}
+
+// registerRelayInputs wires a guild as a relay receiver in the ally session.
+// For each destination channel it creates a dedicated relay input channel, adds
+// it to that channel's Mixer (using relayInputID as the source), and registers
+// the full set with the session via AddGuild. Returns the relay input channels
+// so the caller can close them on teardown.
+func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
+	relayIns := make([]chan<- []byte, 0, len(dests))
+	for _, dest := range dests {
+		relayIn := make(chan []byte, audioChanBuf)
+		if err := chanMixers[dest.channelID].AddInput(relayInputID, relayIn); err != nil {
+			slog.Warn("relay: failed to add input to channel mixer",
+				slog.String("channelID", dest.channelID.String()),
+				slog.Any("err", err))
+			continue
+		}
+		relayIns = append(relayIns, relayIn)
+	}
+	if len(relayIns) > 0 {
+		session.AddGuild(guildID, relayIns)
+	}
+	return relayIns
+}
+
+// buildGuestSources returns deduplicated capture sources from speaker joins.
+// Unlike the host's buildSources, the guest owner bot is provider-only so
+// it contributes no capture channel.
+func buildGuestSources(joined []speakerResult) []sourceEntry {
+	var sources []sourceEntry
+	iterDeduplicatedCaptures(joined, func(r speakerResult) {
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
+	})
+	return sources
+}
+
+// startGuestRelayBroadcast runs the guest relay mixer and broadcasts its output
+// to all OTHER guilds via BroadcastFromGuild, excluding the guest itself.
+func startGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, session *ally.Session, guestGuildID snowflake.ID) {
+	go relayMixer.Run(ctx)
+	go func() {
+		for pkt := range relayMixer.Output() {
+			session.BroadcastFromGuild(guestGuildID, pkt)
 		}
 	}()
 }

@@ -15,6 +15,7 @@ func eventListeners(managerSvc ManagerService) []bot.EventListener {
 		bot.NewListenerFunc(onGuildJoin(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
+		bot.NewListenerFunc(onGuildMemberUpdate),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
 		bot.NewListenerFunc(onVoiceLeave),
 	}
@@ -66,6 +67,17 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 
 		go m.RemoveSpeaker(e.GuildID, e.User.ID)
 	}
+}
+
+// onGuildMemberUpdate is called whenever a guild member is updated (e.g. role change).
+// It overwrites the cache entry so that the allowUser role filter picks up the new
+// RoleIDs on the very next audio frame — without requiring a session restart.
+func onGuildMemberUpdate(e *events.GuildMemberUpdate) {
+	if e.Member.User.Bot {
+		return
+	}
+
+	e.Client().Caches.MemberCache().Put(e.GuildID, e.Member.User.ID, e.Member)
 }
 
 // onVoiceJoin is called whenever a user joins a voice channel.

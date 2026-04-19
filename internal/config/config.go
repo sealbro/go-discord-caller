@@ -39,6 +39,8 @@ type Config struct {
 	StorePath string
 	// OtelEndpoint is the OTLP gRPC endpoint (e.g. "alloy:4317"); empty disables telemetry
 	OtelEndpoint string
+	// LogLevel is the minimum log level (default: info); controlled by LOG_LEVEL env var
+	LogLevel slog.Level
 	// Test holds optional test/debug audio overrides
 	Test TestConfig
 }
@@ -78,6 +80,7 @@ func Load() (*Config, error) {
 		SpeakerTokens: speakerTokens,
 		StorePath:     storePath(),
 		OtelEndpoint:  os.Getenv("OTEL_ENDPOINT"),
+		LogLevel:      parseLogLevel(os.Getenv("LOG_LEVEL")),
 		Test: TestConfig{
 			SpeakerBotID: parseSnowflake(os.Getenv("TEST_SPEAKER_BOT_ID")),
 			FileDCA:      os.Getenv("TEST_FILE_DCA"),
@@ -138,4 +141,14 @@ func storePath() string {
 		return p
 	}
 	return "store.yaml"
+}
+
+// parseLogLevel parses a log level string (debug, info, warn, error) into slog.Level.
+// Defaults to LevelInfo on empty or invalid input.
+func parseLogLevel(s string) slog.Level {
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(strings.ToUpper(s))); err != nil {
+		return slog.LevelInfo
+	}
+	return l
 }

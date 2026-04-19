@@ -14,20 +14,20 @@ import (
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
-		AddSource: true,
-		Level:     slog.LevelInfo,
-	})))
-
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		AddSource: true,
+		Level:     cfg.LogLevel,
+	})))
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	shutdownTelemetry, err := telemetry.Setup(ctx, cfg.OtelEndpoint)
+	shutdownTelemetry, err := telemetry.Setup(ctx, cfg.OtelEndpoint, cfg.LogLevel)
 	if err != nil {
 		log.Fatalf("failed to setup telemetry: %v", err)
 	}

@@ -95,6 +95,7 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | `DISCORD_SPEAKER_BOT_TOKEN_N` | ⚠️       | … any numeric suffix; gaps in numbering are supported                                                   |
 | `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)                                               |
 | `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
+| `LOG_LEVEL`                   | ❌        | Minimum log level: `debug`, `info`, `warn`, `error` (default: `info`)                                   |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.
 

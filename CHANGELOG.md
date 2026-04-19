@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-04-19
+
+### Added
+- **OpenTelemetry observability**: all three signals — traces, metrics, and logs — exported via OTLP gRPC to a single configurable endpoint; set `OTEL_ENDPOINT` (e.g. `alloy:4317`) to enable, leave empty to disable (no-op)
+- **Distributed tracing**: `discord.command` span wraps every slash command execution with `command`, `guild.id`, and `user.id` attributes; `voice.session` and `voice.session.guest` spans track the full lifetime of host and guest voice raid sessions
+- **Metrics**: `gdc.command.duration` (histogram), `gdc.command.total`, `gdc.voice.sessions.active`, `gdc.voice.session.start.total`, `gdc.voice.session.stop.total`
+- **OTel log bridge**: when `OTEL_ENDPOINT` is set, the default `slog` logger is replaced with the `otelslog` bridge so all log lines are exported via OTLP and automatically carry `trace_id`/`span_id` when a context is provided
+- **`onGuildMemberUpdate` event listener**: overwrites the member cache on every role change so `allowUser` picks up new role assignments on the very next audio frame without requiring a session restart
+
+### Changed
+- **Mixer CPU reduction (~60%)**: Opus encoder complexity lowered from 9 to 3; DTX enabled; PLC decodes skipped after 25 consecutive silent ticks (~500 ms) per input — avoids expensive PLC calls during sustained silence
+- **Mixer allocations eliminated**: PCM accumulator, decode scratch buffer, and encode buffer are now pre-allocated once in `NewMixer` and reused on every tick via `clear()`; only the final encoded output slice is allocated per frame
+- `bot.Run` now accepts a `context.Context`; the owner signal handler (`SIGINT`/`SIGTERM`) is set up in `main` via `signal.NotifyContext` and passed in — `bot.New` performs no network I/O
+- All `slog` call sites updated to `slog.*Context` variants to carry trace context through to the log bridge
+
 ## [0.5.0] - 2026-04-16
 
 ### Added

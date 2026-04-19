@@ -13,6 +13,10 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // voiceLeaveTimeout is the maximum time to wait for a voice Leave call.
@@ -92,10 +96,21 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 // Returns the effective RaidMode (which may differ from the requested mode).
 // The session ends automatically when the host ends or ctx is cancelled.
 func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (guild.RaidMode, error) {
+	ctx, span := telemetry.Tracer.Start(ctx, "voice.session.guest",
+		trace.WithAttributes(
+			attribute.String("guild.id", guestGuildID.String()),
+			attribute.String("relay.code", code),
+			attribute.String("guest.mode", string(guestMode)),
+		),
+	)
+
 	allySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
+		endSpanErr(span, err)
 		return guestMode, err
 	}
+
+	span.SetAttributes(attribute.String("host.mode", string(allySession.HostMode)))
 
 	if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
 		guestMode = guild.RaidModeAllyListener
@@ -105,6 +120,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
+		endSpanErr(span, err)
 		return guestMode, err
 	}
 
@@ -163,6 +179,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				setup.speakerCleanup()
 				guestCleanupOwner()
 				m.sessions.RemoveGuest(guestGuildID)
+				endSpanErr(span, err)
 				return guestMode, fmt.Errorf("guest: create channel mixer: %w", err)
 			}
 			guestChannelMixers[dest.channelID] = mx
@@ -173,6 +190,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			setup.speakerCleanup()
 			guestCleanupOwner()
 			m.sessions.RemoveGuest(guestGuildID)
+			endSpanErr(span, err)
 			return guestMode, fmt.Errorf("guest: create relay mixer: %w", err)
 		}
 	}
@@ -189,6 +207,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		setup.speakerCleanup()
 		guestCleanupOwner()
 		m.sessions.RemoveGuest(guestGuildID)
+		endSpanErr(span, err)
 		return guestMode, fmt.Errorf("failed to commit session: %w", err)
 	}
 
@@ -213,7 +232,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		toClose = outs
 	}
 
-	slog.Info("guest joined relay session",
+	telemetry.SessionsActive.Add(ctx, 1)
+	telemetry.SessionStart.Add(ctx, 1)
+
+	span.SetAttributes(attribute.Int("speaker.count", len(setup.joined)))
+
+	slog.InfoContext(ctx, "guest joined relay session",
 		slog.String("guildID", guestGuildID.String()),
 		slog.String("hostMode", string(allySession.HostMode)),
 		slog.String("guestMode", string(guestMode)),
@@ -237,7 +261,10 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				st.Session = nil
 			}
 			m.mu.Unlock()
-			slog.Info("guest session ended", slog.String("guildID", guestGuildID.String()))
+			telemetry.SessionsActive.Add(ctx, -1)
+			telemetry.SessionStop.Add(ctx, 1)
+			span.End()
+			slog.InfoContext(ctx, "guest session ended", slog.String("guildID", guestGuildID.String()))
 		}()
 		select {
 		case <-ctx.Done():
@@ -279,9 +306,19 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error) {
+	ctx, span := telemetry.Tracer.Start(ctx, "voice.session",
+		trace.WithAttributes(
+			attribute.String("guild.id", guildID.String()),
+			attribute.String("raid.mode", string(mode)),
+		),
+	)
+
 	allowUser := m.buildAllowUserFilter(guildID)
 	setup, err := m.setupSpeakers(ctx, guildID, mode, allowUser)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		span.End()
 		return "", err
 	}
 
@@ -289,11 +326,18 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	conn, err := ov.Join(ctx, guildID)
 	if err != nil {
 		setup.speakerCleanup()
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		span.End()
 		return "", fmt.Errorf("failed to join owner channel: %w", err)
 	}
 	if conn == nil {
 		setup.speakerCleanup()
-		return "", fmt.Errorf("no voice connection to owner channel")
+		err = fmt.Errorf("no voice connection to owner channel")
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		span.End()
+		return "", err
 	}
 
 	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
@@ -311,6 +355,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	chIn, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
 	if err != nil {
 		setup.speakerCleanup()
+		endSpanErr(span, err)
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
 
@@ -332,6 +377,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		if err != nil {
 			setup.speakerCleanup()
 			ownerCleanup()
+			endSpanErr(span, err)
 			return "", fmt.Errorf("create channel mixer: %w", err)
 		}
 		channelMixers[dest.channelID] = mx
@@ -341,11 +387,17 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err != nil {
 		setup.speakerCleanup()
 		ownerCleanup()
+		endSpanErr(span, err)
 		return "", fmt.Errorf("create relay mixer: %w", err)
 	}
 
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
+
+	span.SetAttributes(
+		attribute.String("relay.code", allyCode),
+		attribute.Int("speaker.count", len(setup.joined)),
+	)
 
 	session := &guild.Session{
 		GuildID:  guildID,
@@ -359,8 +411,12 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		ownerCleanup()
 		ov.Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
+		endSpanErr(span, err)
 		return "", err
 	}
+
+	telemetry.SessionsActive.Add(ctx, 1)
+	telemetry.SessionStart.Add(ctx, 1)
 
 	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
@@ -370,7 +426,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		registerRelayInputs(guildID, allySession, destinations, channelMixers)
 	}
 
-	slog.Info("voice raid started",
+	slog.InfoContext(ctx, "voice raid started",
 		slog.String("guildID", guildID.String()),
 		slog.String("mode", string(mode)),
 		slog.String("code", allyCode),
@@ -618,7 +674,10 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 	go func() {
 		defer func() {
 			ownerCleanup()
-			slog.Info("voice raid ended", slog.String("guildID", guildID.String()))
+			telemetry.SessionsActive.Add(ctx, -1)
+			telemetry.SessionStop.Add(ctx, 1)
+			trace.SpanFromContext(ctx).End()
+			slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", guildID.String()))
 		}()
 		go relayMixer.Run(ctx)
 		// Range blocks until the mixer closes its output channel (on ctx cancel),
@@ -709,4 +768,11 @@ func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]guild.Speaker, error
 		speakers = append(speakers, *v)
 	}
 	return speakers, nil
+}
+
+// endSpanErr records an error on a span and ends it.
+func endSpanErr(span trace.Span, err error) {
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	span.End()
 }

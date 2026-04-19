@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/handler"
@@ -12,6 +13,11 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -34,8 +40,8 @@ var Commands = []discord.ApplicationCommandCreate{
 				Description: "One Caller: owner captures. Many Callers: all channels capture and mix. (default: One Caller)",
 				Required:    false,
 				Choices: []discord.ApplicationCommandOptionChoiceString{
-					{Name: "One Caller", Value: string(callerModeOne)},
-					{Name: "Many Callers", Value: string(callerModeMany)},
+					{Name: "One Caller", Value: callerModeOne},
+					{Name: "Many Callers", Value: callerModeMany},
 				},
 			},
 		},
@@ -136,14 +142,40 @@ const speakersPerPage = 3
 // guildCommandHandler is a slash command handler that receives a validated guild ID.
 type guildCommandHandler func(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error
 
-// withGuild wraps a handler to validate the guild context.
+// withGuild wraps a handler to validate the guild context and create an OTel span.
 func (h *CommandHandlers) withGuild(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
 	return func(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 		guildID, errMsg := requireGuild(e.GuildID())
 		if errMsg != nil {
 			return e.CreateMessage(*errMsg)
 		}
-		return fn(guildID, data, e)
+
+		ctx, span := telemetry.Tracer.Start(e.Ctx, "discord.command",
+			trace.WithAttributes(
+				attribute.String("command", data.CommandName()),
+				attribute.String("guild.id", guildID.String()),
+				attribute.String("user.id", e.User().ID.String()),
+			),
+		)
+		start := time.Now()
+		e.Ctx = ctx
+		err := fn(guildID, data, e)
+		duration := time.Since(start).Seconds()
+
+		attrs := metric.WithAttributes(
+			attribute.String("command", data.CommandName()),
+			attribute.String("guild.id", guildID.String()),
+		)
+		telemetry.CommandCount.Add(ctx, 1, attrs)
+		telemetry.CommandDuration.Record(ctx, duration, attrs)
+
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+
+		return err
 	}
 }
 

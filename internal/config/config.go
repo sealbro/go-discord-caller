@@ -37,6 +37,8 @@ type Config struct {
 	SpeakerTokens []string
 	// StorePath is the path to the YAML persistence file (default: store.yaml)
 	StorePath string
+	// OtelEndpoint is the OTLP gRPC endpoint (e.g. "alloy:4317"); empty disables telemetry
+	OtelEndpoint string
 	// Test holds optional test/debug audio overrides
 	Test TestConfig
 }
@@ -75,6 +77,7 @@ func Load() (*Config, error) {
 		OwnerBotToken: ownerToken,
 		SpeakerTokens: speakerTokens,
 		StorePath:     storePath(),
+		OtelEndpoint:  os.Getenv("OTEL_ENDPOINT"),
 		Test: TestConfig{
 			SpeakerBotID: parseSnowflake(os.Getenv("TEST_SPEAKER_BOT_ID")),
 			FileDCA:      os.Getenv("TEST_FILE_DCA"),

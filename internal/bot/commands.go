@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/handler"
@@ -12,6 +13,11 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Commands is the list of slash commands registered with Discord.
@@ -34,8 +40,8 @@ var Commands = []discord.ApplicationCommandCreate{
 				Description: "One Caller: owner captures. Many Callers: all channels capture and mix. (default: One Caller)",
 				Required:    false,
 				Choices: []discord.ApplicationCommandOptionChoiceString{
-					{Name: "One Caller", Value: string(callerModeOne)},
-					{Name: "Many Callers", Value: string(callerModeMany)},
+					{Name: "One Caller", Value: callerModeOne},
+					{Name: "Many Callers", Value: callerModeMany},
 				},
 			},
 		},
@@ -136,14 +142,40 @@ const speakersPerPage = 3
 // guildCommandHandler is a slash command handler that receives a validated guild ID.
 type guildCommandHandler func(guildID snowflake.ID, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error
 
-// withGuild wraps a handler to validate the guild context.
+// withGuild wraps a handler to validate the guild context and create an OTel span.
 func (h *CommandHandlers) withGuild(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
 	return func(data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 		guildID, errMsg := requireGuild(e.GuildID())
 		if errMsg != nil {
 			return e.CreateMessage(*errMsg)
 		}
-		return fn(guildID, data, e)
+
+		ctx, span := telemetry.Tracer.Start(e.Ctx, "discord.command",
+			trace.WithAttributes(
+				attribute.String("command", data.CommandName()),
+				attribute.String("guild.id", guildID.String()),
+				attribute.String("user.id", e.User().ID.String()),
+			),
+		)
+		start := time.Now()
+		e.Ctx = ctx
+		err := fn(guildID, data, e)
+		duration := time.Since(start).Seconds()
+
+		attrs := metric.WithAttributes(
+			attribute.String("command", data.CommandName()),
+			attribute.String("guild.id", guildID.String()),
+		)
+		telemetry.CommandCount.Add(ctx, 1, attrs)
+		telemetry.CommandDuration.Record(ctx, duration, attrs)
+
+		if err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
+		}
+		span.End()
+
+		return err
 	}
 }
 
@@ -397,12 +429,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		if manyCallers {
 			mode = guild.RaidModeAllyCaller
 		}
-		ctx, cancelFunc := context.WithCancel(context.Background())
+		cmdCtx := e.Ctx
+		ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 		go func() {
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
 				cancelFunc()
-				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
+				slog.WarnContext(cmdCtx, "failed to join relay session", slog.String("code", code), slog.Any("err", err))
 				h.followUp(e, fmt.Sprintf("❌ Failed to join relay session `%s`: %s", code, err))
 				return
 			}
@@ -419,12 +452,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		mode = guild.RaidModeGuildCaller
 	}
 
-	ctx, cancelFunc := context.WithCancel(context.Background())
+	cmdCtx := e.Ctx
+	ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 	go func() {
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
-			slog.Warn("failed to start voice raid", slog.Any("err", err))
+			slog.WarnContext(cmdCtx, "failed to start voice raid", slog.Any("err", err))
 			h.followUp(e, "❌ Failed to start voice raid: "+err.Error())
 			return
 		}
@@ -432,7 +466,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		if relayCode != "" {
 			msg += fmt.Sprintf(" Relay code: `%s`", relayCode)
 		}
-		slog.Info("voice raid started", slog.String("relayCode", relayCode))
+		slog.InfoContext(cmdCtx, "voice raid started", slog.String("relayCode", relayCode))
 		h.followUp(e, msg)
 	}()
 
@@ -451,9 +485,10 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, _ discord.Sl
 		return err
 	}
 
+	cmdCtx := e.Ctx
 	go func() {
-		if err := h.manager.StopVoiceRaid(context.Background(), guildID); err != nil {
-			slog.Warn("failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
+		if err := h.manager.StopVoiceRaid(cmdCtx, guildID); err != nil {
+			slog.WarnContext(cmdCtx, "failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
 			h.followUp(e, "❌ Failed to stop voice raid: "+err.Error())
 			return
 		}
@@ -501,7 +536,7 @@ func (h *CommandHandlers) handleBindManagerRole(guildID snowflake.ID, data disco
 func (h *CommandHandlers) handleSpeakersPage(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
-		slog.Warn("handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		slog.WarnContext(e.Ctx, "handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
 	}
 
@@ -572,7 +607,7 @@ func (h *CommandHandlers) handleToggleSpeaker(guildID snowflake.ID, _ discord.Bu
 
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
-		slog.Warn("handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		slog.WarnContext(e.Ctx, "handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
 	}
 
@@ -626,7 +661,7 @@ func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, data discord.S
 
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
-		slog.Warn("handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		slog.WarnContext(e.Ctx, "handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
 	}
 

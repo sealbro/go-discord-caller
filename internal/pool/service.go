@@ -72,13 +72,13 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 
 			botUserID, ok := guild.BotUserID(token)
 			if !ok {
-				slog.Warn("pool: invalid pool token", slog.Int("index", index))
+				slog.WarnContext(ctx, "pool: invalid pool token", slog.Int("index", index))
 				return
 			}
 
 			client, err := newPoolClient(token)
 			if err != nil {
-				slog.Warn("pool: failed to build client",
+				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
 					slog.Any("err", err),
 				)
@@ -90,7 +90,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 			results[i] = result{botUserID: botUserID, client: client}
 
 			if err = client.OpenGateway(ctx); err != nil {
-				slog.Warn("pool: failed to open gateway",
+				slog.WarnContext(ctx, "pool: failed to open gateway",
 					slog.Int("index", index),
 					slog.Any("err", err),
 				)
@@ -99,7 +99,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			slog.Info("pool: speaker gateway ready", slog.Int("index", index))
+			slog.InfoContext(ctx, "pool: speaker gateway ready", slog.Int("index", index))
 		}(i, token)
 	}
 	wg.Wait()
@@ -141,14 +141,14 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	newClient, err := newPoolClient(token)
 	if err != nil {
-		slog.Warn("pool: reconnect failed to build client",
+		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
 		return false
 	}
 	if err = newClient.OpenGateway(ctx); err != nil {
-		slog.Warn("pool: reconnect failed to open gateway",
+		slog.WarnContext(ctx, "pool: reconnect failed to open gateway",
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
@@ -158,7 +158,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 	s.mu.Lock()
 	s.poolClients[botUserID] = newClient
 	s.mu.Unlock()
-	slog.Info("pool: reconnected speaker gateway", slog.String("botUserID", botUserID.String()))
+	slog.InfoContext(ctx, "pool: reconnected speaker gateway", slog.String("botUserID", botUserID.String()))
 	return true
 }
 
@@ -197,12 +197,12 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 		}
 
 		if client == nil || client.Gateway == nil {
-			slog.Warn("pool: watchdog detected bot without gateway, attempting reconnect",
+			slog.WarnContext(ctx, "pool: watchdog detected bot without gateway, attempting reconnect",
 				slog.String("botUserID", botUserID.String()),
 			)
 			reconnectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 			if s.Reconnect(reconnectCtx, botUserID) {
-				slog.Info("pool: watchdog successfully reconnected bot",
+				slog.InfoContext(ctx, "pool: watchdog successfully reconnected bot",
 					slog.String("botUserID", botUserID.String()),
 				)
 			}
@@ -212,7 +212,7 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 
 		// Gateway exists but is not connected. Disgo's internal reconnect loop is
 		// already running with exponential backoff — log for visibility only.
-		slog.Warn("pool: watchdog detected disconnected gateway",
+		slog.WarnContext(ctx, "pool: watchdog detected disconnected gateway",
 			slog.String("botUserID", botUserID.String()),
 			slog.String("status", client.Gateway.Status().String()),
 		)
@@ -279,5 +279,5 @@ func (s *Service) Shutdown(ctx context.Context) {
 		}
 	}
 	s.poolClients = make(map[snowflake.ID]*bot.Client)
-	slog.Info("pool service shut down")
+	slog.InfoContext(ctx, "pool service shut down")
 }

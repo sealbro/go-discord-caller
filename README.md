@@ -87,13 +87,14 @@ Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown 
 
 Configuration is loaded from environment variables (a `.env` file in the working directory is also supported via [godotenv](https://github.com/joho/godotenv)).
 
-| Variable                      | Required | Description                                                    |
-|-------------------------------|----------|----------------------------------------------------------------|
-| `DISCORD_OWNER_BOT_TOKEN`     | ✅        | Token for the owner / caller bot                               |
-| `DISCORD_SPEAKER_BOT_TOKEN_1` | ⚠️       | Token for the first speaker bot                                |
-| `DISCORD_SPEAKER_BOT_TOKEN_2` | ⚠️       | Token for the second speaker bot                               |
-| `DISCORD_SPEAKER_BOT_TOKEN_N` | ⚠️       | … any numeric suffix; gaps in numbering are supported          |
-| `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)      |
+| Variable                      | Required | Description                                                                                             |
+|-------------------------------|----------|---------------------------------------------------------------------------------------------------------|
+| `DISCORD_OWNER_BOT_TOKEN`     | ✅        | Token for the owner / caller bot                                                                        |
+| `DISCORD_SPEAKER_BOT_TOKEN_1` | ⚠️       | Token for the first speaker bot                                                                         |
+| `DISCORD_SPEAKER_BOT_TOKEN_2` | ⚠️       | Token for the second speaker bot                                                                        |
+| `DISCORD_SPEAKER_BOT_TOKEN_N` | ⚠️       | … any numeric suffix; gaps in numbering are supported                                                   |
+| `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)                                               |
+| `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.
 
@@ -184,6 +185,7 @@ The multi-stage build installs `libdave`, compiles the binary with CGO, then cop
 - [disgo](https://github.com/disgoorg/disgo) – Discord API & gateway client
 - [godave / libdave](https://github.com/disgoorg/godave) – Discord DAVE E2EE voice protocol (CGO)
 - [godotenv](https://github.com/joho/godotenv) – `.env` file loading
+- [OpenTelemetry Go](https://opentelemetry.io/docs/languages/go/) – traces, metrics, and logs via OTLP gRPC
 
 ## Articles
 

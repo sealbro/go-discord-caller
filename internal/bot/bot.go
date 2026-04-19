@@ -4,9 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/disgoorg/disgo"
@@ -83,16 +80,17 @@ type ManagerService interface {
 
 // Bot wraps the disgo client and all application services.
 type Bot struct {
-	client       *bot.Client
-	manager      ManagerService
-	store        store.Store
-	guildReadyCh chan []snowflake.ID
+	client        *bot.Client
+	manager       ManagerService
+	store         store.Store
+	poolSvc       *pool.Service
+	speakerTokens []string
+	guildReadyCh  chan []snowflake.ID
 }
 
-// New creates and configures a new Bot instance with all services wired together.
+// New creates and configures a new Bot instance. It performs no network I/O —
+// all connections are established in Run.
 func New(cfg *config.Config) (*Bot, error) {
-	ctx := context.Background()
-
 	// Command router
 	r := handler.New()
 
@@ -130,15 +128,6 @@ func New(cfg *config.Config) (*Bot, error) {
 	poolSvc := pool.NewService()
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test)
 
-	// Open one dedicated gateway per speaker token immediately at startup.
-	if err := connectPool(ctx, poolSvc, cfg.SpeakerTokens); err != nil {
-		st.Close()
-		return nil, err
-	}
-
-	// Start watchdog to monitor gateway health and reconnect bots that failed at startup.
-	poolSvc.StartWatchdog(ctx, 30*time.Second)
-
 	// Wire command handlers.
 	cmdHandlers := NewCommandHandlers(managerSvc)
 	cmdHandlers.Register(r)
@@ -146,25 +135,32 @@ func New(cfg *config.Config) (*Bot, error) {
 	client.AddEventListeners(eventListeners(managerSvc)...)
 
 	return &Bot{
-		client:       client,
-		manager:      managerSvc,
-		store:        st,
-		guildReadyCh: guildReadyCh,
+		client:        client,
+		manager:       managerSvc,
+		store:         st,
+		poolSvc:       poolSvc,
+		speakerTokens: cfg.SpeakerTokens,
+		guildReadyCh:  guildReadyCh,
 	}, nil
 }
 
-// Run opens the owner gateway, registers slash commands, and blocks until an OS signal.
-func (b *Bot) Run() error {
-	ctx := context.Background()
+// Run connects the speaker pool, opens the owner gateway, registers slash commands,
+// and blocks until ctx is cancelled.
+func (b *Bot) Run(ctx context.Context) error {
+	if err := connectPool(ctx, b.poolSvc, b.speakerTokens); err != nil {
+		return err
+	}
+	b.poolSvc.StartWatchdog(ctx, 30*time.Second)
 
 	if err := b.client.OpenGateway(ctx); err != nil {
 		return err
 	}
 	defer func() {
 		// Graceful shutdown: stop all raids, close all speaker gateways, then the owner gateway.
-		b.manager.Shutdown(ctx)
+		shutdownCtx := context.Background()
+		b.manager.Shutdown(shutdownCtx)
 		b.store.Close()
-		b.client.Close(ctx)
+		b.client.Close(shutdownCtx)
 	}()
 
 	// Wait for the Ready event to deliver guild IDs, then sync slash commands.
@@ -173,24 +169,22 @@ func (b *Bot) Run() error {
 	select {
 	case guildIDs = <-b.guildReadyCh:
 	case <-time.After(10 * time.Second):
-		slog.Warn("timed out waiting for Ready event, syncing commands globally")
+		slog.WarnContext(ctx, "timed out waiting for Ready event, syncing commands globally")
 	}
-	slog.Info("discovered guilds for command sync", slog.Int("count", len(guildIDs)))
+	slog.InfoContext(ctx, "discovered guilds for command sync", slog.Int("count", len(guildIDs)))
 	if err := handler.SyncCommands(b.client, Commands, guildIDs); err != nil {
-		slog.Warn("failed to sync slash commands", slog.Any("err", err))
+		slog.WarnContext(ctx, "failed to sync slash commands", slog.Any("err", err))
 	}
 
 	if selfUser, ok := b.client.Caches.SelfUser(); ok {
-		slog.Info("owner bot invite URL",
+		slog.InfoContext(ctx, "owner bot invite URL",
 			slog.String("url", installOwnerURL(selfUser.ID)),
 		)
 	}
 
-	slog.Info("bot is running. Press Ctrl+C to stop.")
+	slog.InfoContext(ctx, "bot is running. Press Ctrl+C to stop.")
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-	<-stop
+	<-ctx.Done()
 
 	slog.Info("shutting down...")
 
@@ -230,6 +224,6 @@ func connectPool(ctx context.Context, poolSvc *pool.Service, tokens []string) er
 	if connected < total {
 		return fmt.Errorf("speaker pool: only %d/%d speaker gateways connected at startup", connected, total)
 	}
-	slog.Info("speaker pool ready", slog.Int("total", total))
+	slog.InfoContext(ctx, "speaker pool ready", slog.Int("total", total))
 	return nil
 }

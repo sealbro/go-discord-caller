@@ -20,17 +20,6 @@ var (
 	SessionStop    metric.Int64Counter
 )
 
-// Speaker pool metrics
-var (
-	SpeakerJoins metric.Int64Counter
-)
-
-// Voice frame metrics
-var (
-	VoiceFramesReceived metric.Int64Counter
-	VoiceFramesDropped  metric.Int64Counter
-)
-
 func init() {
 	var err error
 
@@ -57,21 +46,6 @@ func init() {
 
 	SessionStop, err = meter.Int64Counter("gdc.voice.session.stop.total",
 		metric.WithDescription("Voice raid stops"),
-	)
-	must(err)
-
-	SpeakerJoins, err = meter.Int64Counter("gdc.voice.speaker.joined.total",
-		metric.WithDescription("Speaker bot voice channel joins"),
-	)
-	must(err)
-
-	VoiceFramesReceived, err = meter.Int64Counter("gdc.voice.frames.received.total",
-		metric.WithDescription("Opus frames forwarded to relay channel"),
-	)
-	must(err)
-
-	VoiceFramesDropped, err = meter.Int64Counter("gdc.voice.frames.dropped.total",
-		metric.WithDescription("Opus frames dropped"),
 	)
 	must(err)
 }

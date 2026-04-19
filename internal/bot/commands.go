@@ -430,7 +430,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 			mode = guild.RaidModeAllyCaller
 		}
 		cmdCtx := e.Ctx
-		ctx, cancelFunc := context.WithCancel(context.Background())
+		ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 		go func() {
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
@@ -453,7 +453,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 	}
 
 	cmdCtx := e.Ctx
-	ctx, cancelFunc := context.WithCancel(context.Background())
+	ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 	go func() {
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {

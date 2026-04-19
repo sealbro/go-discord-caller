@@ -35,17 +35,26 @@ func Setup(ctx context.Context, endpoint string) (func(), error) {
 	if err != nil {
 		return nil, err
 	}
+	// Close the connection on any setup error so we don't leak it.
+	var setupErr error
+	defer func() {
+		if setupErr != nil {
+			_ = conn.Close()
+		}
+	}()
 
 	res, err := resource.New(ctx,
 		resource.WithAttributes(semconv.ServiceName(serviceName)),
 	)
 	if err != nil {
+		setupErr = err
 		return nil, err
 	}
 
 	// Traces
 	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
 	if err != nil {
+		setupErr = err
 		return nil, err
 	}
 	tp := trace.NewTracerProvider(
@@ -57,6 +66,7 @@ func Setup(ctx context.Context, endpoint string) (func(), error) {
 	// Metrics
 	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn))
 	if err != nil {
+		setupErr = err
 		return nil, err
 	}
 	mp := metric.NewMeterProvider(
@@ -68,6 +78,7 @@ func Setup(ctx context.Context, endpoint string) (func(), error) {
 	// Logs
 	logExporter, err := otlploggrpc.New(ctx, otlploggrpc.WithGRPCConn(conn))
 	if err != nil {
+		setupErr = err
 		return nil, err
 	}
 	lp := log.NewLoggerProvider(

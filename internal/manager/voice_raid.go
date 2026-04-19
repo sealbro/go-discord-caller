@@ -129,12 +129,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	var ownerCleanup func()
 	var ownerChOut chan []byte
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
-		slog.Warn("guest: failed to join owner channel", slog.Any("err", err))
+		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
 		ownerChOut = make(chan []byte, audioChanBuf)
 		_, cleanup, err := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider().Apply(ctx, conn, ownerChOut)
 		if err != nil {
-			slog.Warn("guest: failed to setup owner relay", slog.Any("err", err))
+			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
 			ownerChOut = nil
 		} else {
 			ownerCleanup = cleanup
@@ -298,7 +298,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		m.sessions.RemoveHost(guildID)
 	}
 
-	slog.Info("voice raid stopped", slog.String("guildID", guildID.String()))
+	slog.InfoContext(ctx, "voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil
 }
 
@@ -459,12 +459,12 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 			defer wg.Done()
 			gv, ok := m.speakerVoice(guildID, sp.ID)
 			if !ok {
-				slog.Warn("speaker not in pool", slog.String("speakerID", sp.ID.String()))
+				slog.WarnContext(ctx, "speaker not in pool", slog.String("speakerID", sp.ID.String()))
 				return
 			}
 			conn, err := gv.Join(ctx, guildID)
 			if err != nil {
-				slog.Warn("speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
+				slog.WarnContext(ctx, "speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				return
 			}
 			if withCapture {
@@ -473,7 +473,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 			chOut := make(chan []byte, audioChanBuf)
 			chCapture, cleanup, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
-				slog.Error("failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
+				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
 				return
 			}
@@ -599,7 +599,7 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 
 		relayCh := make(chan []byte, audioChanBuf)
 		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
-			slog.Warn("relay mixer: failed to add input", slog.Any("err", err))
+			slog.WarnContext(ctx, "relay mixer: failed to add input", slog.Any("err", err))
 		} else {
 			fanTargets = append(fanTargets, relayCh)
 			removals = append(removals, mixerRef{relayMixer, src.id})
@@ -611,7 +611,7 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 			}
 			mixCh := make(chan []byte, audioChanBuf)
 			if err := chanMixers[dest.channelID].AddInput(src.id, mixCh); err != nil {
-				slog.Warn("channel mixer: failed to add input", slog.Any("err", err))
+				slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
 			} else {
 				fanTargets = append(fanTargets, mixCh)
 				removals = append(removals, mixerRef{chanMixers[dest.channelID], src.id})

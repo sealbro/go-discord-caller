@@ -112,7 +112,7 @@ func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 
 // Shutdown stops every active voice raid and closes all speaker gateways.
 func (m *Service) Shutdown(ctx context.Context) {
-	slog.Info("shutting down manager service...")
+	slog.InfoContext(ctx, "shutting down manager service...")
 
 	// Collect active guild IDs under read lock to avoid holding it during I/O.
 	m.mu.RLock()
@@ -126,7 +126,7 @@ func (m *Service) Shutdown(ctx context.Context) {
 
 	for _, guildID := range activeGuilds {
 		if err := m.StopVoiceRaid(ctx, guildID); err != nil {
-			slog.Warn("shutdown: failed to stop voice raid",
+			slog.WarnContext(ctx, "shutdown: failed to stop voice raid",
 				slog.String("guildID", guildID.String()),
 				slog.Any("err", err),
 			)

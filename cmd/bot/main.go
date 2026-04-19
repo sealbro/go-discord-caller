@@ -5,6 +5,8 @@ import (
 	"log"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
@@ -22,7 +24,10 @@ func main() {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	shutdownTelemetry, err := telemetry.Setup(context.Background(), cfg.OtelEndpoint)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	shutdownTelemetry, err := telemetry.Setup(ctx, cfg.OtelEndpoint)
 	if err != nil {
 		log.Fatalf("failed to setup telemetry: %v", err)
 	}
@@ -33,7 +38,7 @@ func main() {
 		log.Fatalf("failed to create bot: %v", err)
 	}
 
-	if err := b.Run(); err != nil {
+	if err := b.Run(ctx); err != nil {
 		log.Fatalf("bot error: %v", err)
 	}
 }

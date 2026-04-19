@@ -429,12 +429,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		if manyCallers {
 			mode = guild.RaidModeAllyCaller
 		}
+		cmdCtx := e.Ctx
 		ctx, cancelFunc := context.WithCancel(context.Background())
 		go func() {
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
 				cancelFunc()
-				slog.Warn("failed to join relay session", slog.String("code", code), slog.Any("err", err))
+				slog.WarnContext(cmdCtx, "failed to join relay session", slog.String("code", code), slog.Any("err", err))
 				h.followUp(e, fmt.Sprintf("❌ Failed to join relay session `%s`: %s", code, err))
 				return
 			}
@@ -451,12 +452,13 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		mode = guild.RaidModeGuildCaller
 	}
 
+	cmdCtx := e.Ctx
 	ctx, cancelFunc := context.WithCancel(context.Background())
 	go func() {
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
-			slog.Warn("failed to start voice raid", slog.Any("err", err))
+			slog.WarnContext(cmdCtx, "failed to start voice raid", slog.Any("err", err))
 			h.followUp(e, "❌ Failed to start voice raid: "+err.Error())
 			return
 		}
@@ -464,7 +466,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		if relayCode != "" {
 			msg += fmt.Sprintf(" Relay code: `%s`", relayCode)
 		}
-		slog.Info("voice raid started", slog.String("relayCode", relayCode))
+		slog.InfoContext(cmdCtx, "voice raid started", slog.String("relayCode", relayCode))
 		h.followUp(e, msg)
 	}()
 
@@ -483,9 +485,10 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, _ discord.Sl
 		return err
 	}
 
+	cmdCtx := e.Ctx
 	go func() {
-		if err := h.manager.StopVoiceRaid(context.Background(), guildID); err != nil {
-			slog.Warn("failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
+		if err := h.manager.StopVoiceRaid(cmdCtx, guildID); err != nil {
+			slog.WarnContext(cmdCtx, "failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
 			h.followUp(e, "❌ Failed to stop voice raid: "+err.Error())
 			return
 		}
@@ -533,7 +536,7 @@ func (h *CommandHandlers) handleBindManagerRole(guildID snowflake.ID, data disco
 func (h *CommandHandlers) handleSpeakersPage(guildID snowflake.ID, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
-		slog.Warn("handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		slog.WarnContext(e.Ctx, "handleSpeakersPage: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
 	}
 
@@ -604,7 +607,7 @@ func (h *CommandHandlers) handleToggleSpeaker(guildID snowflake.ID, _ discord.Bu
 
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
-		slog.Warn("handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		slog.WarnContext(e.Ctx, "handleToggleSpeaker: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
 	}
 
@@ -658,7 +661,7 @@ func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, data discord.S
 
 	page, err := strconv.Atoi(e.Vars["page"])
 	if err != nil {
-		slog.Warn("handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
+		slog.WarnContext(e.Ctx, "handleBindChannel: invalid page number", slog.String("page", e.Vars["page"]), slog.Any("err", err))
 		page = 0
 	}
 

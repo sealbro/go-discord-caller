@@ -67,7 +67,7 @@ func (m *Service) prefetchChannelMembers(ctx context.Context, conn voice.Conn, b
 	}
 	if len(userIDs) > 0 {
 		if err := m.ownerClient.RequestMembers(ctx, guildID, false, "", userIDs...); err != nil {
-			slog.Warn("prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
+			slog.WarnContext(ctx, "prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
 		}
 	}
 }

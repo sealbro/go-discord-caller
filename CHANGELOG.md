@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-04-20
+
+### Fixed
+- **Guest AllyCaller owner bot not capturing audio**: in `JoinSession` the owner bot was wired with `WithVoiceProvider` only — its capture channel was silently discarded and `EmptyVoiceReceiver` was used, so users speaking in the guest owner's channel were never relayed to the host; now `WithVoiceReceiver` is added and the capture channel is included as a source in `wireFanout`, mirroring the host `StartVoiceRaid` setup
+
+### Changed
+- **Mixer: decode once per source** (`wireFanout`): each incoming Opus packet is decoded to PCM exactly once in the fanout goroutine and the resulting `opus.Frame` (PCM + raw Opus bytes) is distributed to all downstream mixers; previously each mixer held its own `hraban.Decoder` and decoded independently — with 3 sources × 3 mixers this cuts decodes from 9 → 3 per 20 ms tick; decode scratch buffer moves from `Mixer` struct to each per-source goroutine (supersedes 0.6.0 pre-allocation in `NewMixer`)
+- **Mixer: PLC removed**: 0.6.0 introduced a per-input silent-tick counter to skip Opus PLC after 25 ticks (~500 ms); with decoders gone from the mixer, PLC is eliminated entirely — a silent source simply contributes zero samples each tick
+- **Mixer: single-source encode bypass**: when only one source is active the mixer forwards the original Opus packet directly, skipping the encode step entirely; the common single-speaker case now costs one `copy` instead of a full `Encode` call
+- **Mixer: Timer-based tick** (was Ticker): `Run` now resets a `time.Timer` after each tick completes, preventing stale-frame back-pressure when a tick takes longer than 20 ms under load
+- **Mixer: encoder tuned for voice relay**: bitrate set to 16 kbps (was ~32 kbps default), in-band FEC enabled, packet-loss percentage set to 5 % — smaller frames, built-in loss resilience; `SetVBR` omitted (not exposed by hraban/opus wrapper)
+- **Mixer: 4× unrolled PCM accumulation loop**: inner accumulation loop unrolled to hint the compiler toward SIMD emission (SSE2/AVX2/NEON); `mixerPCMBuf` (1920) is always divisible by 4 so no tail loop is needed
+- **Fanout read-only contract documented**: `wireFanout` carries an explicit comment that `Frame.Opus` is shared read-only across all targets; the mixer's single-source path copies it before forwarding downstream
+
 ## [0.6.0] - 2026-04-19
 
 ### Added

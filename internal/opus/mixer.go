@@ -12,6 +12,15 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
+// MixerSampleRate, MixerChannels, MixerPCMBuf are exported so callers that
+// produce PCM for mixer inputs (e.g. decode-once fanout goroutines) can allocate
+// correctly-sized buffers without duplicating these constants.
+const (
+	MixerSampleRate = mixerSampleRate
+	MixerChannels   = mixerChannels
+	MixerPCMBuf     = mixerPCMBuf
+)
+
 const (
 	mixerSampleRate = 48000
 	mixerChannels   = 2
@@ -22,16 +31,21 @@ const (
 	// Frames are dropped silently when the consumer falls more than 600 ms behind.
 	// Increase this if guest guilds experience frequent audio gaps under load.
 	mixerOutputBuf = 30
-	// silenceResetThreshold is the number of consecutive silent ticks (~500 ms)
-	// after which PLC is skipped and the decoder is considered cold. When a real
-	// frame arrives the silent counter resets and normal decoding resumes.
-	silenceResetThreshold = 25
 )
 
+// Frame carries one audio frame through a mixer input channel.
+// PCM holds the pre-decoded samples used when multiple sources are mixed.
+// Opus holds the original encoded packet used for single-source passthrough
+// (when only one source is active the mixer forwards Opus directly, skipping re-encode).
+type Frame struct {
+	PCM  []int16
+	Opus []byte
+}
+
+// inputEntry holds a single mixer input. The channel carries Frame values
+// produced by an upstream fanout goroutine.
 type inputEntry struct {
-	ch          <-chan []byte
-	dec         *hraban.Decoder
-	silentTicks int
+	ch <-chan Frame
 }
 
 // Mixer receives Opus frames from multiple named input channels, mixes their PCM,
@@ -48,6 +62,7 @@ type Mixer struct {
 	// Pre-allocated scratch buffers reused on every tick.
 	// Only accessed from the single Run goroutine — no synchronisation needed.
 	entriesBuf []*inputEntry
+	framesBuf  []Frame // active frames collected each tick
 	mixed      []int32
 	pcm        []int16
 	encodeBuf  []byte
@@ -70,6 +85,20 @@ func NewMixer() (*Mixer, error) {
 	if err := enc.SetDTX(true); err != nil {
 		return nil, fmt.Errorf("mixer: set dtx: %w", err)
 	}
+	// 16 kbps is sufficient for voice relay; default (~32 kbps) produces larger
+	// frames than needed and wastes channel buffer space.
+	if err := enc.SetBitrate(16000); err != nil {
+		return nil, fmt.Errorf("mixer: set bitrate: %w", err)
+	}
+	// In-band FEC embeds redundancy so the receiver can reconstruct a lost packet
+	// from the next one, avoiding audible glitches without retransmission.
+	if err := enc.SetInBandFEC(true); err != nil {
+		return nil, fmt.Errorf("mixer: set inband fec: %w", err)
+	}
+	// Tune FEC aggressiveness to match typical Discord packet loss (~5%).
+	if err := enc.SetPacketLossPerc(5); err != nil {
+		return nil, fmt.Errorf("mixer: set packet loss perc: %w", err)
+	}
 	return &Mixer{
 		inputs:    make(map[snowflake.ID]*inputEntry),
 		out:       make(chan []byte, mixerOutputBuf),
@@ -77,17 +106,15 @@ func NewMixer() (*Mixer, error) {
 		mixed:     make([]int32, mixerPCMBuf),
 		pcm:       make([]int16, mixerPCMBuf),
 		encodeBuf: make([]byte, 4096),
+		framesBuf: make([]Frame, 0, 8),
 	}, nil
 }
 
 // AddInput registers a new audio source identified by id.
-func (m *Mixer) AddInput(id snowflake.ID, ch <-chan []byte) error {
-	dec, err := hraban.NewDecoder(mixerSampleRate, mixerChannels)
-	if err != nil {
-		return fmt.Errorf("mixer: new decoder for %s: %w", id, err)
-	}
+// ch must carry Frame values produced by an upstream fanout goroutine.
+func (m *Mixer) AddInput(id snowflake.ID, ch <-chan Frame) error {
 	m.mu.Lock()
-	m.inputs[id] = &inputEntry{ch: ch, dec: dec}
+	m.inputs[id] = &inputEntry{ch: ch}
 	m.mu.Unlock()
 	return nil
 }
@@ -104,23 +131,25 @@ func (m *Mixer) Output() <-chan []byte {
 	return m.out
 }
 
-// Run ticks every 20 ms, mixing all pending frames, until ctx is cancelled.
+// Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
+// one. Using time.Timer (reset after each tick) instead of time.Ticker prevents
+// stale-frame buildup: if a tick takes longer than 20 ms under load, the next
+// tick is deferred rather than queued immediately from a backlog.
 // Closes the output channel on return.
 func (m *Mixer) Run(ctx context.Context) {
-	ticker := time.NewTicker(mixerFrameDur)
-	defer func() {
-		ticker.Stop()
-		close(m.out)
-	}()
+	defer close(m.out)
+	timer := time.NewTimer(mixerFrameDur)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
+			timer.Reset(mixerFrameDur)
 		}
 	}
 }
@@ -135,38 +164,49 @@ func (m *Mixer) tick() error {
 
 	// Zero the accumulator in-place instead of allocating a new slice.
 	clear(m.mixed)
-	hasAudio := false
 
+	m.framesBuf = m.framesBuf[:0]
 	for _, e := range m.entriesBuf {
-		var pkt []byte
 		select {
-		case pkt = <-e.ch:
-			e.silentTicks = 0
-			if len(pkt) > 0 {
-				hasAudio = true
+		case f := <-e.ch:
+			if len(f.PCM) > 0 {
+				m.framesBuf = append(m.framesBuf, f)
 			}
 		default:
-			// No frame available. Skip PLC entirely once the input has been
-			// silent long enough — avoids expensive Opus PLC decodes during
-			// sustained silence.
-			e.silentTicks++
-			if e.silentTicks > silenceResetThreshold {
-				continue
-			}
-			// pkt stays nil → decoder applies PLC for short gaps
-		}
-		n, err := e.dec.Decode(pkt, m.pcm)
-		if err != nil {
-			slog.Debug("mixer: decode failed", slog.Any("err", err))
-			continue
-		}
-		for i := 0; i < n*mixerChannels; i++ {
-			m.mixed[i] += int32(m.pcm[i])
+			// No frame available this tick; source contributes silence.
 		}
 	}
 
-	if !hasAudio {
+	if len(m.framesBuf) == 0 {
 		return nil
+	}
+
+	// Single active source: forward the original Opus packet directly.
+	// No re-encode needed — eliminates 1 encode per tick for the common case.
+	if len(m.framesBuf) == 1 {
+		src := m.framesBuf[0].Opus
+		out := make([]byte, len(src))
+		copy(out, src)
+		select {
+		case m.out <- out:
+		default:
+			slog.Debug("mixer: output channel full, dropping frame")
+		}
+		return nil
+	}
+
+	// Multiple active sources: accumulate PCM and re-encode (mix-minus).
+	// The inner loop is unrolled 4× to help the compiler emit SIMD instructions
+	// (SSE2/AVX2/NEON). mixerPCMBuf (1920) is always divisible by 4 so no tail
+	// loop is needed.
+	for _, f := range m.framesBuf {
+		pcm := f.PCM
+		for i := 0; i < len(pcm); i += 4 {
+			m.mixed[i] += int32(pcm[i])
+			m.mixed[i+1] += int32(pcm[i+1])
+			m.mixed[i+2] += int32(pcm[i+2])
+			m.mixed[i+3] += int32(pcm[i+3])
+		}
 	}
 
 	// Clamp to int16 range and write into pcm for re-encoding.

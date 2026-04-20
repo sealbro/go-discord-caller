@@ -125,20 +125,30 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, err
 	}
 
-	// Join the owner bot as a relay receiver into its bound channel.
+	// Join the owner bot into its bound channel.
+	// In AllyCaller mode the owner also captures incoming audio (WithVoiceReceiver)
+	// so users speaking in the owner's channel are relayed to the host — mirroring
+	// what StartVoiceRaid does for the host owner bot.
 	ownerVoice := m.ownerVoice(guestGuildID)
 	var ownerCleanup func()
 	var ownerChOut chan []byte
+	var ownerChIn chan []byte // non-nil in AllyCaller mode; capture from owner's channel
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
+		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider()
+		if guestMode.WithCapture() {
+			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
+			ownerSetup.WithVoiceReceiver(allowUser)
+		}
 		ownerChOut = make(chan []byte, audioChanBuf)
-		_, cleanup, err := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider().Apply(ctx, conn, ownerChOut)
+		chIn, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
 		if err != nil {
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
 			ownerChOut = nil
 		} else {
 			ownerCleanup = cleanup
+			ownerChIn = chIn
 		}
 	}
 
@@ -219,6 +229,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 	if guestMode.WithCapture() && guestRelayMixer != nil {
 		sources := buildGuestSources(setup.joined)
+		// Include the owner bot's capture channel as a source so users speaking
+		// in the owner's channel are mixed and relayed — the missing half of the
+		// guest AllyCaller flow that speakers already provide for their channels.
+		if ownerChIn != nil {
+			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn})
+		}
 		wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
 		toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
 		startChannelMixers(ctx, destinations, guestChannelMixers)
@@ -647,6 +663,12 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 					// Decode once; distribute a Frame carrying both PCM and the original
 					// Opus bytes. The mixer uses PCM when mixing multiple sources and
 					// forwards Opus directly when only one source is active (point 8).
+					//
+					// READ-ONLY CONTRACT: pkt is the slice received from the Discord
+					// VoiceReceiver and is shared across every Frame sent to targets.
+					// No consumer may mutate pkt. The mixer copies it before forwarding
+					// to its output channel (see Mixer.tick single-source path), so
+					// downstream consumers always get their own slice.
 					n, err := dec.Decode(pkt, scratch)
 					if err != nil {
 						slog.Debug("wireFanout: decode failed", slog.Any("err", err))

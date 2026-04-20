@@ -85,6 +85,20 @@ func NewMixer() (*Mixer, error) {
 	if err := enc.SetDTX(true); err != nil {
 		return nil, fmt.Errorf("mixer: set dtx: %w", err)
 	}
+	// 16 kbps is sufficient for voice relay; default (~32 kbps) produces larger
+	// frames than needed and wastes channel buffer space.
+	if err := enc.SetBitrate(16000); err != nil {
+		return nil, fmt.Errorf("mixer: set bitrate: %w", err)
+	}
+	// In-band FEC embeds redundancy so the receiver can reconstruct a lost packet
+	// from the next one, avoiding audible glitches without retransmission.
+	if err := enc.SetInBandFEC(true); err != nil {
+		return nil, fmt.Errorf("mixer: set inband fec: %w", err)
+	}
+	// Tune FEC aggressiveness to match typical Discord packet loss (~5%).
+	if err := enc.SetPacketLossPerc(5); err != nil {
+		return nil, fmt.Errorf("mixer: set packet loss perc: %w", err)
+	}
 	return &Mixer{
 		inputs:    make(map[snowflake.ID]*inputEntry),
 		out:       make(chan []byte, mixerOutputBuf),
@@ -117,23 +131,25 @@ func (m *Mixer) Output() <-chan []byte {
 	return m.out
 }
 
-// Run ticks every 20 ms, mixing all pending frames, until ctx is cancelled.
+// Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
+// one. Using time.Timer (reset after each tick) instead of time.Ticker prevents
+// stale-frame buildup: if a tick takes longer than 20 ms under load, the next
+// tick is deferred rather than queued immediately from a backlog.
 // Closes the output channel on return.
 func (m *Mixer) Run(ctx context.Context) {
-	ticker := time.NewTicker(mixerFrameDur)
-	defer func() {
-		ticker.Stop()
-		close(m.out)
-	}()
+	defer close(m.out)
+	timer := time.NewTimer(mixerFrameDur)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
+			timer.Reset(mixerFrameDur)
 		}
 	}
 }
@@ -180,9 +196,16 @@ func (m *Mixer) tick() error {
 	}
 
 	// Multiple active sources: accumulate PCM and re-encode (mix-minus).
+	// The inner loop is unrolled 4× to help the compiler emit SIMD instructions
+	// (SSE2/AVX2/NEON). mixerPCMBuf (1920) is always divisible by 4 so no tail
+	// loop is needed.
 	for _, f := range m.framesBuf {
-		for i, v := range f.PCM {
-			m.mixed[i] += int32(v)
+		pcm := f.PCM
+		for i := 0; i < len(pcm); i += 4 {
+			m.mixed[i] += int32(pcm[i])
+			m.mixed[i+1] += int32(pcm[i+1])
+			m.mixed[i+2] += int32(pcm[i+2])
+			m.mixed[i+3] += int32(pcm[i+3])
 		}
 	}
 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	hraban "github.com/hraban/opus"
@@ -52,9 +53,14 @@ type inputEntry struct {
 // and outputs a single re-encoded Opus stream on Output().
 // Call Run to start the 20 ms tick loop; it blocks until ctx is cancelled and
 // closes the output channel on return.
+//
+// A mixer can be paused when its destination channel has no listeners (e.g. no
+// non-bot users). While paused, tick still drains input channels to prevent
+// upstream backpressure, but skips mixing, encoding, and output — saving CPU.
 type Mixer struct {
 	mu     sync.Mutex
 	inputs map[snowflake.ID]*inputEntry
+	paused atomic.Bool
 
 	out chan []byte
 	enc *hraban.Encoder
@@ -126,6 +132,19 @@ func (m *Mixer) RemoveInput(id snowflake.ID) {
 	m.mu.Unlock()
 }
 
+// SetPaused controls whether the mixer is paused. While paused, tick drains
+// input channels (preventing upstream backpressure) but skips mixing, encoding,
+// and output. Use this to suspend mixers whose destination channel has no
+// non-bot listeners.
+func (m *Mixer) SetPaused(p bool) {
+	m.paused.Store(p)
+}
+
+// Paused reports whether the mixer is currently paused.
+func (m *Mixer) Paused() bool {
+	return m.paused.Load()
+}
+
 // Output returns the channel carrying mixed Opus frames.
 func (m *Mixer) Output() <-chan []byte {
 	return m.out
@@ -155,6 +174,8 @@ func (m *Mixer) Run(ctx context.Context) {
 }
 
 func (m *Mixer) tick() error {
+	paused := m.paused.Load()
+
 	m.mu.Lock()
 	m.entriesBuf = m.entriesBuf[:0]
 	for _, e := range m.inputs {
@@ -162,9 +183,7 @@ func (m *Mixer) tick() error {
 	}
 	m.mu.Unlock()
 
-	// Zero the accumulator in-place instead of allocating a new slice.
-	clear(m.mixed)
-
+	// Always drain inputs to prevent upstream backpressure, even when paused.
 	m.framesBuf = m.framesBuf[:0]
 	for _, e := range m.entriesBuf {
 		// Drain to latest: if multiple frames are queued (transient upstream burst
@@ -190,9 +209,14 @@ func (m *Mixer) tick() error {
 		}
 	}
 
-	if len(m.framesBuf) == 0 {
+	// When paused (no non-bot listeners in the destination channel), skip
+	// mixing/encoding/output entirely. Inputs were already drained above.
+	if paused || len(m.framesBuf) == 0 {
 		return nil
 	}
+
+	// Zero the accumulator in-place instead of allocating a new slice.
+	clear(m.mixed)
 
 	// Single active source: forward the original Opus packet directly.
 	// No re-encode needed — eliminates 1 encode per tick for the common case.

@@ -29,6 +29,7 @@ type SessionManager interface {
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
 	HasActiveSession(guildID snowflake.ID) bool
+	UpdateMixerPause(guildID snowflake.ID)
 }
 
 // BindingManager handles channel and role bindings.

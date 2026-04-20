@@ -206,13 +206,22 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		}
 	}
 
+	var guestMixerPausers map[snowflake.ID]guild.MixerPauser
+	if guestChannelMixers != nil {
+		guestMixerPausers = make(map[snowflake.ID]guild.MixerPauser, len(guestChannelMixers))
+		for chID, mx := range guestChannelMixers {
+			guestMixerPausers[chID] = mx
+		}
+	}
+
 	session := &guild.Session{
-		GuildID:  guestGuildID,
-		Cancel:   cancelFunc,
-		Cleanup:  setup.speakerCleanup,
-		AllyCode: code,
-		IsGuest:  true,
-		Speakers: setup.speakers,
+		GuildID:       guestGuildID,
+		Cancel:        cancelFunc,
+		Cleanup:       setup.speakerCleanup,
+		AllyCode:      code,
+		IsGuest:       true,
+		Speakers:      setup.speakers,
+		ChannelMixers: guestMixerPausers,
 	}
 	if err := m.commitSession(session); err != nil {
 		setup.speakerCleanup()
@@ -220,6 +229,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		m.sessions.RemoveGuest(guestGuildID)
 		endSpanErr(span, err)
 		return guestMode, fmt.Errorf("failed to commit session: %w", err)
+	}
+
+	// Pause mixers for channels that currently have no non-bot listeners.
+	if guestMixerPausers != nil {
+		m.syncMixerPauseState(guestGuildID, session)
 	}
 
 	// toClose holds channels closed on teardown. In caller mode these are the
@@ -416,12 +430,18 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		attribute.Int("speaker.count", len(setup.joined)),
 	)
 
+	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers))
+	for chID, mx := range channelMixers {
+		mixerPausers[chID] = mx
+	}
+
 	session := &guild.Session{
-		GuildID:  guildID,
-		Cancel:   cancelFunc,
-		Cleanup:  setup.speakerCleanup,
-		AllyCode: allyCode,
-		Speakers: setup.speakers,
+		GuildID:       guildID,
+		Cancel:        cancelFunc,
+		Cleanup:       setup.speakerCleanup,
+		AllyCode:      allyCode,
+		Speakers:      setup.speakers,
+		ChannelMixers: mixerPausers,
 	}
 	if err := m.commitSession(session); err != nil {
 		setup.speakerCleanup()
@@ -431,6 +451,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		endSpanErr(span, err)
 		return "", err
 	}
+
+	// Pause mixers for channels that currently have no non-bot listeners.
+	m.syncMixerPauseState(guildID, session)
 
 	telemetry.SessionsActive.Add(ctx, 1)
 	telemetry.SessionStart.Add(ctx, 1)

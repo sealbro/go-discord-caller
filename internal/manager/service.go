@@ -135,6 +135,45 @@ func (m *Service) Shutdown(ctx context.Context) {
 	m.poolSvc.Shutdown(ctx)
 }
 
+// channelHasListeners returns true if channelID contains at least one non-bot
+// user according to the owner bot's voice-state cache.
+func (m *Service) channelHasListeners(guildID, channelID snowflake.ID) bool {
+	for vs := range m.ownerClient.Caches.VoiceStates(guildID) {
+		if vs.ChannelID == nil || *vs.ChannelID != channelID {
+			continue
+		}
+		member, ok := m.ownerClient.Caches.Member(guildID, vs.UserID)
+		if ok && !member.User.Bot {
+			return true
+		}
+	}
+	return false
+}
+
+// syncMixerPauseState checks every channel mixer in session and pauses those
+// whose destination channel has no non-bot listeners.
+func (m *Service) syncMixerPauseState(guildID snowflake.ID, session *guild.Session) {
+	for chID, mx := range session.ChannelMixers {
+		mx.SetPaused(!m.channelHasListeners(guildID, chID))
+	}
+}
+
+// UpdateMixerPause is called on voice state changes (join/leave/move) to
+// pause or resume channel mixers for the affected guild. Safe to call when
+// there is no active session — it is a no-op.
+func (m *Service) UpdateMixerPause(guildID snowflake.ID) {
+	m.mu.RLock()
+	st := m.statuses[guildID]
+	if st == nil || st.Session == nil || st.Session.ChannelMixers == nil {
+		m.mu.RUnlock()
+		return
+	}
+	session := st.Session
+	m.mu.RUnlock()
+
+	m.syncMixerPauseState(guildID, session)
+}
+
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -170,6 +209,7 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 		sessionCopy := *st.Session
 		sessionCopy.Cancel = nil
 		sessionCopy.Cleanup = nil
+		sessionCopy.ChannelMixers = nil
 		sessionCopy.Speakers = make([]guild.Speaker, len(st.Session.Speakers))
 		copy(sessionCopy.Speakers, st.Session.Speakers)
 		snap.Session = &sessionCopy

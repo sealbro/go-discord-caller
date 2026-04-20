@@ -9,6 +9,7 @@ import (
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -587,17 +588,19 @@ type mixerRef struct {
 	id snowflake.ID
 }
 
-// wireFanout starts a goroutine per source that copies each incoming packet to all
-// relevant mixer inputs. The relay mixer receives every source; per-channel mixers
-// skip the source from their own channel (mix-minus).
+// wireFanout starts a goroutine per source that decodes each incoming Opus packet
+// exactly once and distributes the resulting PCM to all relevant mixer inputs.
+// Decoding once (vs once per mixer) cuts decode operations from sources×mixers to
+// sources. The relay mixer receives every source; per-channel mixers skip the source
+// from their own channel (mix-minus).
 // Each goroutine calls RemoveInput on every mixer it registered when it exits,
-// so dead decoders are not retained for the lifetime of the session.
+// so stale entries are not retained for the lifetime of the session.
 func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer) {
 	for _, src := range sources {
-		var fanTargets []chan []byte
+		var fanTargets []chan opus.Frame
 		var removals []mixerRef
 
-		relayCh := make(chan []byte, audioChanBuf)
+		relayCh := make(chan opus.Frame, audioChanBuf)
 		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
 			slog.WarnContext(ctx, "relay mixer: failed to add input", slog.Any("err", err))
 		} else {
@@ -609,7 +612,7 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 			if dest.channelID == src.channelID {
 				continue // mix-minus: don't relay audio back to its origin channel
 			}
-			mixCh := make(chan []byte, audioChanBuf)
+			mixCh := make(chan opus.Frame, audioChanBuf)
 			if err := chanMixers[dest.channelID].AddInput(src.id, mixCh); err != nil {
 				slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
 			} else {
@@ -618,12 +621,18 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 			}
 		}
 
-		go func(in <-chan []byte, targets []chan []byte, removals []mixerRef) {
+		go func(in <-chan []byte, targets []chan opus.Frame, removals []mixerRef) {
 			defer func() {
 				for _, r := range removals {
 					r.mx.RemoveInput(r.id)
 				}
 			}()
+			dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+			if err != nil {
+				slog.ErrorContext(ctx, "wireFanout: failed to create decoder", slog.Any("err", err))
+				return
+			}
+			scratch := make([]int16, opus.MixerPCMBuf)
 			for {
 				select {
 				case <-ctx.Done():
@@ -632,9 +641,23 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 					if !ok {
 						return
 					}
+					if len(pkt) == 0 {
+						continue // DTX silence — nothing to decode or distribute
+					}
+					// Decode once; distribute a Frame carrying both PCM and the original
+					// Opus bytes. The mixer uses PCM when mixing multiple sources and
+					// forwards Opus directly when only one source is active (point 8).
+					n, err := dec.Decode(pkt, scratch)
+					if err != nil {
+						slog.Debug("wireFanout: decode failed", slog.Any("err", err))
+						continue
+					}
+					pcm := make([]int16, n*opus.MixerChannels)
+					copy(pcm, scratch[:n*opus.MixerChannels])
+					frame := opus.Frame{PCM: pcm, Opus: pkt}
 					for _, t := range targets {
 						select {
-						case t <- pkt:
+						case t <- frame:
 						default:
 						}
 					}
@@ -689,21 +712,54 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 }
 
 // registerRelayInputs wires a guild as a relay receiver in the ally session.
-// For each destination channel it creates a dedicated relay input channel, adds
-// it to that channel's Mixer (using relayInputID as the source), and registers
-// the full set with the session via AddGuild. Returns the relay input channels
-// so the caller can close them on teardown.
+// For each destination channel it creates:
+//   - an Opus input channel (chan []byte) registered with the ally session, and
+//   - a PCM bridge goroutine that decodes once and forwards []int16 to the channel mixer.
+//
+// The ally session keeps sending Opus packets; the bridge decodes each exactly once
+// before the mixer accumulates it. Returns the Opus input channels so the caller
+// can close them on teardown (closing triggers bridge goroutine exit).
 func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
 	relayIns := make([]chan<- []byte, 0, len(dests))
 	for _, dest := range dests {
-		relayIn := make(chan []byte, audioChanBuf)
-		if err := chanMixers[dest.channelID].AddInput(relayInputID, relayIn); err != nil {
+		relayOpusIn := make(chan []byte, audioChanBuf)
+		relayFrameOut := make(chan opus.Frame, audioChanBuf)
+		if err := chanMixers[dest.channelID].AddInput(relayInputID, relayFrameOut); err != nil {
 			slog.Warn("relay: failed to add input to channel mixer",
 				slog.String("channelID", dest.channelID.String()),
 				slog.Any("err", err))
 			continue
 		}
-		relayIns = append(relayIns, relayIn)
+		// Bridge: decode relay Opus packets once and forward Frame to the mixer.
+		// Both PCM and original Opus bytes are included so the mixer can apply
+		// the single-source passthrough optimisation (point 8).
+		// Exits when relayOpusIn is closed (session teardown closes it via toClose).
+		go func(in <-chan []byte, out chan<- opus.Frame) {
+			defer close(out)
+			dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+			if err != nil {
+				slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
+				return
+			}
+			scratch := make([]int16, opus.MixerPCMBuf)
+			for pkt := range in {
+				if len(pkt) == 0 {
+					continue
+				}
+				n, err := dec.Decode(pkt, scratch)
+				if err != nil {
+					slog.Debug("relay bridge: decode failed", slog.Any("err", err))
+					continue
+				}
+				pcm := make([]int16, n*opus.MixerChannels)
+				copy(pcm, scratch[:n*opus.MixerChannels])
+				select {
+				case out <- opus.Frame{PCM: pcm, Opus: pkt}:
+				default:
+				}
+			}
+		}(relayOpusIn, relayFrameOut)
+		relayIns = append(relayIns, relayOpusIn)
 	}
 	if len(relayIns) > 0 {
 		session.AddGuild(guildID, relayIns)

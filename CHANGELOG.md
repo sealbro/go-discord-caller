@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] - 2026-04-20
 
+### Added
+- **`LOG_LEVEL` env var**: controls the minimum log level for both the stdout `slog` text handler and the OTel log bridge; accepted values: `debug`, `info`, `warn`, `error` (default: `info`); previously the level was hardcoded to `info` with no way to enable debug output at runtime
+- **OTel log bridge level gating**: `telemetry.Setup` now wraps the `otelslog` handler in a `levelHandler` that short-circuits `Enabled()` at the configured level — prevents below-threshold records from being serialised and shipped via OTLP even when the bridge is active
+
 ### Fixed
 - **Guest AllyCaller owner bot not capturing audio**: in `JoinSession` the owner bot was wired with `WithVoiceProvider` only — its capture channel was silently discarded and `EmptyVoiceReceiver` was used, so users speaking in the guest owner's channel were never relayed to the host; now `WithVoiceReceiver` is added and the capture channel is included as a source in `wireFanout`, mirroring the host `StartVoiceRaid` setup
 

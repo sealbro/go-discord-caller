@@ -228,16 +228,16 @@ func (s *YAMLStore) save() error {
 	}
 	tmpPath := tmp.Name()
 	if _, err := tmp.Write(out); err != nil {
-		tmp.Close()
-		os.Remove(tmpPath)
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: write temp file: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: close temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, s.path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: rename failed: %w", err)
 	}
 	return nil

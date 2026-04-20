@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"slices"
 	"sync"
 	"time"
@@ -51,6 +52,7 @@ type YAMLStore struct {
 
 	dirtyCh chan struct{} // signals the flush goroutine
 	done    chan struct{} // closed by Close to stop the flush goroutine
+	flushed chan struct{} // closed by flushLoop after the final save completes
 }
 
 // NewYAMLStore opens (or creates) the YAML file at path and loads existing bindings.
@@ -62,6 +64,7 @@ func NewYAMLStore(path string) (*YAMLStore, error) {
 		relayCodes: make(map[snowflake.ID]string),
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
+		flushed:    make(chan struct{}),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -77,6 +80,7 @@ func NewYAMLStore(path string) (*YAMLStore, error) {
 // flushLoop runs in a background goroutine and coalesces rapid mutations
 // into a single file write after saveDebounce of quiet time.
 func (s *YAMLStore) flushLoop() {
+	defer close(s.flushed)
 	timer := time.NewTimer(0)
 	if !timer.Stop() {
 		<-timer.C
@@ -115,7 +119,7 @@ func (s *YAMLStore) markDirty() {
 	}
 }
 
-// Close flushes any pending writes and stops the background goroutine.
+// Close flushes any pending writes and blocks until the final save completes.
 // After Close returns, no further write methods should be called; any markDirty
 // signals sent after the flush goroutine exits are silently discarded.
 func (s *YAMLStore) Close() {
@@ -124,6 +128,7 @@ func (s *YAMLStore) Close() {
 	default:
 		close(s.done)
 	}
+	<-s.flushed
 }
 
 // load reads the YAML file and populates the in-memory maps.
@@ -212,8 +217,28 @@ func (s *YAMLStore) save() error {
 	if err != nil {
 		return fmt.Errorf("yaml store: marshal failed: %w", err)
 	}
-	if err := os.WriteFile(s.path, out, 0o644); err != nil {
-		return fmt.Errorf("yaml store: write failed: %w", err)
+
+	// Atomic write: write to a temp file in the same directory, then rename.
+	// os.Rename is atomic on POSIX and prevents partial/empty files if the
+	// process is killed between truncate and write-complete.
+	dir := filepath.Dir(s.path)
+	tmp, err := os.CreateTemp(dir, ".store-*.yaml.tmp")
+	if err != nil {
+		return fmt.Errorf("yaml store: create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(out); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("yaml store: write temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("yaml store: close temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, s.path); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("yaml store: rename failed: %w", err)
 	}
 	return nil
 }

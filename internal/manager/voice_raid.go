@@ -765,6 +765,20 @@ func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*d
 			}
 			scratch := make([]int16, opus.MixerPCMBuf)
 			for pkt := range in {
+				// Drain to latest relay packet to avoid accumulating latency
+				// across the inter-guild relay hop.
+			drainRelay:
+				for {
+					select {
+					case newer, ok := <-in:
+						if !ok {
+							break drainRelay
+						}
+						pkt = newer
+					default:
+						break drainRelay
+					}
+				}
 				if len(pkt) == 0 {
 					continue
 				}

@@ -167,13 +167,26 @@ func (m *Mixer) tick() error {
 
 	m.framesBuf = m.framesBuf[:0]
 	for _, e := range m.entriesBuf {
-		select {
-		case f := <-e.ch:
-			if len(f.PCM) > 0 {
-				m.framesBuf = append(m.framesBuf, f)
+		// Drain to latest: if multiple frames are queued (transient upstream burst
+		// or downstream stall), skip stale frames and use only the freshest one.
+		// Real-time voice prefers freshness over completeness — a 20 ms gap is
+		// far less noticeable than cumulative latency from processing every frame.
+		var latest Frame
+		hasFrame := false
+	drain:
+		for {
+			select {
+			case f := <-e.ch:
+				if len(f.PCM) > 0 {
+					latest = f
+					hasFrame = true
+				}
+			default:
+				break drain
 			}
-		default:
-			// No frame available this tick; source contributes silence.
+		}
+		if hasFrame {
+			m.framesBuf = append(m.framesBuf, latest)
 		}
 	}
 

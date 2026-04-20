@@ -20,13 +20,23 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+// levelHandler wraps a slog.Handler and gates Enabled() by a minimum level.
+type levelHandler struct {
+	level slog.Leveler
+	slog.Handler
+}
+
+func (h levelHandler) Enabled(ctx context.Context, l slog.Level) bool {
+	return l >= h.level.Level() && h.Handler.Enabled(ctx, l)
+}
+
 const serviceName = "go-discord-caller"
 
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.
 // All three signals are exported via OTLP gRPC to a single endpoint.
 // Returns a shutdown function that flushes and closes all providers.
 // When endpoint is empty, no-op providers are used and nil shutdown is returned.
-func Setup(ctx context.Context, endpoint string) (func(), error) {
+func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), error) {
 	if endpoint == "" {
 		return func() {}, nil
 	}
@@ -89,10 +99,11 @@ func Setup(ctx context.Context, endpoint string) (func(), error) {
 
 	// Replace default slog with OTel bridge so all slog calls export via OTLP
 	// and automatically inject trace_id/span_id when context is provided.
-	slog.SetDefault(otelslog.NewLogger(serviceName,
+	otelHandler := otelslog.NewHandler(serviceName,
 		otelslog.WithLoggerProvider(lp),
 		otelslog.WithSource(true),
-	))
+	)
+	slog.SetDefault(slog.New(levelHandler{level: level, Handler: otelHandler}))
 
 	shutdown := func() {
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -28,7 +28,22 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("voice provider channel closed")
 		}
-		return data, nil
+		// Drain stale frames: if more frames are queued, skip to the latest.
+		// The disgo voice sender calls ProvideOpusFrame every ~20 ms; any backlog
+		// means upstream produced faster than we consumed. Delivering stale frames
+		// in order would add cumulative latency — dropping them keeps playback
+		// close to real-time with only brief audio gaps.
+		for {
+			select {
+			case newer, ok := <-v.ch:
+				if !ok {
+					return data, nil
+				}
+				data = newer
+			default:
+				return data, nil
+			}
+		}
 	}
 }
 

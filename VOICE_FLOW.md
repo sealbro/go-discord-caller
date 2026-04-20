@@ -46,7 +46,7 @@ flowchart TD
     end
 
     subgraph RELAY["Inter-Guild Relay"]
-        AllySession["ally.Session Broadcast()"]
+        AllySession["ally.Session BroadcastFromGuild()"]
         RelayMix -- "Output()" --> AllySession
     end
 
@@ -168,7 +168,7 @@ flowchart TD
     end
 
     subgraph RELAY["Inter-Guild Relay"]
-        AllySession["ally.Session Broadcast()"]
+        AllySession["ally.Session BroadcastFromGuild()"]
         RelayMix -- "Output()" --> AllySession
     end
 
@@ -287,6 +287,7 @@ flowchart TD
 
     subgraph GUEST["Guest Guild — RaidModeAllyCaller"]
         subgraph GChA["Channel A (owner)"]
+            GOwnerVR["Owner VoiceReceiver"]
             GOwnerVP["Owner VoiceProvider"]
         end
         subgraph GChB["Channel B"]
@@ -294,7 +295,9 @@ flowchart TD
             GSpkVP["Speaker VoiceProvider"]
         end
 
+        GchIn["chIn (owner capture)"]
         GchCap["chCapture"]
+        GFanA["Fanout A"]
         GFanB["Fanout B"]
         GMixA["ChannelMixer A (mix-minus)"]
         GMixB["ChannelMixer B (mix-minus)"]
@@ -304,7 +307,11 @@ flowchart TD
         GRelayInA["relayIn A"]
         GRelayInB["relayIn B"]
 
-        GSpkVR --> GchCap --> GFanB
+        GOwnerVR --> GchIn  --> GFanA
+        GSpkVR   --> GchCap --> GFanB
+
+        GFanA -- "mixCh_B"   --> GMixB
+        GFanA -- "relayCh_A" --> GRelayMix
 
         GFanB -- "mixCh_A"   --> GMixA
         GFanB -- "relayCh_B" --> GRelayMix
@@ -339,21 +346,25 @@ flowchart TD
     %%  12 : HMixB → HchOut
     %%  13 : HchOut → HSpkVP
     %%  14 : HRelayMix → BFGHost
-    %%  15 : GSpkVR → GchCap
-    %%  16 : GchCap → GFanB
-    %%  17 : GFanB → GMixA
-    %%  18 : GFanB → GRelayMix
-    %%  19 : GRelayInA → GMixA
-    %%  20 : GRelayInB → GMixB
-    %%  21 : GMixA → GchOwnerOut
-    %%  22 : GchOwnerOut → GOwnerVP
-    %%  23 : GMixB → GchOut
-    %%  24 : GchOut → GSpkVP
-    %%  25 : GRelayMix → BFGGuest
-    %%  26 : BFGHost → GRelayInA
-    %%  27 : BFGHost → GRelayInB
-    %%  28 : BFGGuest → HRelayInA
-    %%  29 : BFGGuest → HRelayInB
+    %%  15 : GOwnerVR → GchIn
+    %%  16 : GchIn → GFanA
+    %%  17 : GSpkVR → GchCap
+    %%  18 : GchCap → GFanB
+    %%  19 : GFanA → GMixB
+    %%  20 : GFanA → GRelayMix
+    %%  21 : GFanB → GMixA
+    %%  22 : GFanB → GRelayMix
+    %%  23 : GRelayInA → GMixA
+    %%  24 : GRelayInB → GMixB
+    %%  25 : GMixA → GchOwnerOut
+    %%  26 : GchOwnerOut → GOwnerVP
+    %%  27 : GMixB → GchOut
+    %%  28 : GchOut → GSpkVP
+    %%  29 : GRelayMix → BFGGuest
+    %%  30 : BFGHost → GRelayInA
+    %%  31 : BFGHost → GRelayInB
+    %%  32 : BFGGuest → HRelayInA
+    %%  33 : BFGGuest → HRelayInB
 
     %% Host Ch A (owner) — blue shades, dark→light
     linkStyle 0  stroke:#0d47a1,stroke-width:2px
@@ -376,32 +387,38 @@ flowchart TD
     linkStyle 7  stroke:#6a1b9a,stroke-width:2px
     linkStyle 14 stroke:#ba68c8,stroke-width:2px
 
+    %% Guest Ch A (owner) capture — cyan shades, dark→light
+    linkStyle 15 stroke:#006064,stroke-width:2px
+    linkStyle 16 stroke:#00838f,stroke-width:2px
+    linkStyle 19 stroke:#0097a7,stroke-width:2px
+    linkStyle 20 stroke:#00acc1,stroke-width:2px
+
     %% Guest Ch B (speaker) capture — orange shades, dark→light
-    linkStyle 15 stroke:#e65100,stroke-width:2px
-    linkStyle 16 stroke:#ef6c00,stroke-width:2px
-    linkStyle 17 stroke:#f57c00,stroke-width:2px
-    linkStyle 18 stroke:#ffa726,stroke-width:2px
+    linkStyle 17 stroke:#e65100,stroke-width:2px
+    linkStyle 18 stroke:#ef6c00,stroke-width:2px
+    linkStyle 21 stroke:#f57c00,stroke-width:2px
+    linkStyle 22 stroke:#ffa726,stroke-width:2px
 
     %% Guest Ch A (owner) output — red shades
-    linkStyle 19 stroke:#b71c1c,stroke-width:2px
-    linkStyle 21 stroke:#e53935,stroke-width:2px
-    linkStyle 22 stroke:#e57373,stroke-width:2px
+    linkStyle 23 stroke:#b71c1c,stroke-width:2px
+    linkStyle 25 stroke:#e53935,stroke-width:2px
+    linkStyle 26 stroke:#e57373,stroke-width:2px
 
     %% Guest Ch B output — pink shades
-    linkStyle 20 stroke:#880e4f,stroke-width:2px
-    linkStyle 23 stroke:#c2185b,stroke-width:2px
-    linkStyle 24 stroke:#f06292,stroke-width:2px
+    linkStyle 24 stroke:#880e4f,stroke-width:2px
+    linkStyle 27 stroke:#c2185b,stroke-width:2px
+    linkStyle 28 stroke:#f06292,stroke-width:2px
 
     %% Guest relay — purple shades (lighter than host)
-    linkStyle 25 stroke:#ce93d8,stroke-width:2px
+    linkStyle 29 stroke:#ce93d8,stroke-width:2px
 
     %% Host → Guest relay delivery — teal shades
-    linkStyle 26 stroke:#00695c,stroke-width:2px
-    linkStyle 27 stroke:#26a69a,stroke-width:2px
+    linkStyle 30 stroke:#00695c,stroke-width:2px
+    linkStyle 31 stroke:#26a69a,stroke-width:2px
 
     %% Guest → Host relay delivery — gold shades
-    linkStyle 28 stroke:#f57f17,stroke-width:2px
-    linkStyle 29 stroke:#ffca28,stroke-width:2px
+    linkStyle 32 stroke:#f57f17,stroke-width:2px
+    linkStyle 33 stroke:#ffca28,stroke-width:2px
 ```
 
 ---
@@ -416,7 +433,7 @@ This prevents echo: users in channel X would otherwise hear their own audio play
 | Stage            | Component                              | Description                                                                   |
 |------------------|----------------------------------------|-------------------------------------------------------------------------------|
 | Capture          | `VoiceReceiver` → `chIn` / `chCapture`| Role-filtered Opus frames from Discord                                        |
-| Fanout           | goroutine per source                   | Copies each packet to all registered mixer input channels                     |
-| Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; output drives speaker `VoiceProvider`s in channel X|
+| Fanout           | goroutine per source                   | Decodes Opus once, distributes `Frame{PCM, Opus}` to all mixer input channels |
+| Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; single-source passthrough forwards Opus directly   |
 | Relay mix        | `RelayMixer`                           | Mixes all sources; output is broadcast to every attached guest guild          |
-| Guest delivery   | `ally.Session.Broadcast`               | Sends relay packets to guest speaker and owner output channels                |
+| Guest delivery   | `ally.Session.BroadcastFromGuild`      | Sends relay packets to all guilds except the sender                           |

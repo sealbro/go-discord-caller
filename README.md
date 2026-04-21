@@ -50,7 +50,11 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 ## Features
 
 - **Multi-speaker relay** – unlimited speaker bots, each bound to a different voice channel
-- **Two caller modes** – default one-caller broadcast (`/start`) or full multi-channel conference (`/start mode:many`) where every bound channel captures and plays back audio with mix-minus echo prevention
+- **Three caller modes** 
+  - default one-caller broadcast (`/start`) or single-caller broadcast (`/start mode:one`) where only the designated caller is captured,
+  - hub-and-spoke broadcast (`/start mode:one-many`) where speakers only hear the owner,
+  - full multi-channel conference (`/start mode:many`) where every bound channel captures and plays back audio with mix-minus echo prevention
+- **Automatic audio pause** – bots stop processing audio for channels with no active listeners, reducing idle resource usage
 - **Inter-guild relay** – guest guilds join a host session via relay code; guests are listener-only by default, or active participants with `mode:many`
 - **Persistent relay codes** – each guild has a unique 8-character code stored in YAML; shared via `/status` so other servers can join
 - **Per-guild configuration** – capture role, manager role, owner channel, and per-speaker bindings are stored per guild and survive restarts
@@ -63,15 +67,16 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 
 > Manager role is configured via `/setup`. `/status` is available to everyone.
 
-| Command                            | Required role | Description                                                                                                                          |
-|------------------------------------|---------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `/setup`                           | Manager       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)                                  |
-| `/start`                           | Manager       | Start a voice raid in **one-caller** mode — only the designated caller is captured; speakers play back in listen-only                |
-| `/start mode:many`                 | Manager       | Start a voice raid in **many-callers** mode — every bound channel captures and plays back audio with mix-minus echo prevention       |
-| `/start code:XXXXXX`               | Manager       | Join an existing relay session as a **listener** — receives host audio but does not capture locally                                  |
-| `/start code:XXXXXX mode:many`     | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when host uses `mode:many`)  |
-| `/stop`                            | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                |
-| `/status`                          | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                          |
+| Command                        | Required role | Description                                                                                                                                       |
+|--------------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `/setup`                       | Manager       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)                                               |
+| `/start`                       | Manager       | Start a voice raid in **one-caller** mode — only the designated caller is captured; speakers play back in listen-only                             |
+| `/start mode:one-many`         | Manager       | Start a voice raid in **hub-and-spoke** mode — the owner hears all speakers, but speakers only hear the owner; prevents cross-talk in large raids |
+| `/start mode:many`             | Manager       | Start a voice raid in **many-callers** mode — every bound channel captures and plays back audio with mix-minus echo prevention                    |
+| `/start code:XXXXXX`           | Manager       | Join an existing relay session as a **listener** — receives host audio but does not capture locally                                               |
+| `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when host uses `mode:many`)               |
+| `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
+| `/status`                      | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
 
 ## Inter-guild relay
 

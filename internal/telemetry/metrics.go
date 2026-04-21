@@ -20,6 +20,12 @@ var (
 	SessionStop    metric.Int64Counter
 )
 
+// Mixer metrics
+var (
+	MixerTickDuration    metric.Float64Histogram
+	MixerPipelineLatency metric.Float64Histogram
+)
+
 func init() {
 	var err error
 
@@ -46,6 +52,20 @@ func init() {
 
 	SessionStop, err = meter.Int64Counter("gdc.voice.session.stop.total",
 		metric.WithDescription("Voice raid stops"),
+	)
+	must(err)
+
+	MixerTickDuration, err = meter.Float64Histogram("gdc.mixer.tick.duration",
+		metric.WithDescription("Mixer tick processing time"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 2, 5, 10, 20),
+	)
+	must(err)
+
+	MixerPipelineLatency, err = meter.Float64Histogram("gdc.mixer.pipeline.latency",
+		metric.WithDescription("End-to-end latency from fanout decode to mixer output"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(1, 5, 10, 20, 40, 60, 100, 200, 500),
 	)
 	must(err)
 }

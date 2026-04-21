@@ -17,7 +17,8 @@ func eventListeners(managerSvc ManagerService) []bot.EventListener {
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
-		bot.NewListenerFunc(onVoiceLeave),
+		bot.NewListenerFunc(onVoiceLeave(managerSvc)),
+		bot.NewListenerFunc(onVoiceMove(managerSvc)),
 	}
 }
 
@@ -101,17 +102,37 @@ func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 			slog.String("channelID", e.VoiceState.ChannelID.String()),
 			slog.Bool("allowedToSpeak", allowed),
 		)
+
+		// A non-bot user appeared — resume the mixer for this channel if paused.
+		m.UpdateMixerPause(guildID)
 	}
 }
 
 // onVoiceLeave is called whenever a user leaves a voice channel.
-func onVoiceLeave(e *events.GuildVoiceLeave) {
-	if e.Member.User.Bot {
-		return
-	}
+func onVoiceLeave(m ManagerService) func(*events.GuildVoiceLeave) {
+	return func(e *events.GuildVoiceLeave) {
+		if e.Member.User.Bot {
+			return
+		}
 
-	slog.Info("user left voice channel",
-		slog.String("userID", e.Member.User.ID.String()),
-		slog.String("guildID", e.VoiceState.GuildID.String()),
-	)
+		slog.Info("user left voice channel",
+			slog.String("userID", e.Member.User.ID.String()),
+			slog.String("guildID", e.VoiceState.GuildID.String()),
+		)
+
+		// A non-bot user left — pause the mixer if this was the last listener.
+		m.UpdateMixerPause(e.VoiceState.GuildID)
+	}
+}
+
+// onVoiceMove is called whenever a user moves between voice channels.
+func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
+	return func(e *events.GuildVoiceMove) {
+		if e.Member.User.Bot {
+			return
+		}
+
+		// Both the old and new channel may need mixer pause state updated.
+		m.UpdateMixerPause(e.VoiceState.GuildID)
+	}
 }

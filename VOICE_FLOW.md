@@ -436,4 +436,39 @@ This prevents echo: users in channel X would otherwise hear their own audio play
 | Fanout           | goroutine per source                   | Decodes Opus once, distributes `Frame{PCM, Opus}` to all mixer input channels |
 | Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; single-source passthrough forwards Opus directly   |
 | Relay mix        | `RelayMixer`                           | Mixes all sources; output is broadcast to every attached guest guild          |
+| Relay bridge     | goroutine per guest dest channel       | Decodes relay Opus once → `Frame{PCM, Opus}` → guest `ChannelMixer` input    |
 | Guest delivery   | `ally.Session.BroadcastFromGuild`      | Sends relay packets to all guilds except the sender                           |
+
+## Latency control — drain-to-latest
+
+Every buffered channel in the pipeline (capture → fanout → mixer → speaker) can hold
+up to `audioChanBuf` (30) frames × 20 ms = 600 ms. Under transient stalls (GC, CPU spike)
+buffers fill and latency compounds across stages.
+
+Three drain-to-latest points keep end-to-end latency near real-time:
+
+| Drain point          | Location                          | Mechanism                                                              |
+|----------------------|-----------------------------------|------------------------------------------------------------------------|
+| **Mixer inputs**     | `Mixer.tick()` input read loop    | Reads all queued frames per input, keeps only the freshest one         |
+| **Relay bridge**     | `registerRelayInputs` goroutine   | Drains `relayOpusIn` to latest packet before decoding                  |
+| **VoiceProvider**    | `ProvideOpusFrame()`              | Drains `chOut` to latest frame before returning to disgo sender        |
+
+Dropped frames produce brief audio gaps (one 20 ms tick) — far less noticeable than
+cumulative delay from processing every stale frame in order.
+
+## Empty-channel pause
+
+Channel mixers are **paused** when their destination voice channel has no non-bot users.
+A paused mixer still drains its inputs (preventing upstream backpressure from fanout
+goroutines) but skips mixing, encoding, and output — eliminating the Opus encode cost
+for channels nobody is listening in.
+
+| Event                       | Action                                                                   |
+|-----------------------------|--------------------------------------------------------------------------|
+| `GuildVoiceJoin`            | `UpdateMixerPause` → resumes mixer if channel now has a listener         |
+| `GuildVoiceLeave`           | `UpdateMixerPause` → pauses mixer if channel is now empty                |
+| `GuildVoiceMove`            | `UpdateMixerPause` → re-evaluates both old and new channel               |
+| Session start               | `syncMixerPauseState` → sets initial pause state for all channel mixers  |
+
+Pause state is stored per-session in `Session.ChannelMixers` (`channelID → MixerPauser`).
+The `VoiceProvider` for a paused channel receives no frames, so Discord gets silence naturally.

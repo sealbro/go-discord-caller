@@ -242,14 +242,19 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	var toClose []chan<- []byte
 
 	if guestMode.WithCapture() && guestRelayMixer != nil {
-		sources := buildGuestSources(setup.joined)
+		sources := buildGuestSources(ctx, setup.joined)
 		// Include the owner bot's capture channel as a source so users speaking
 		// in the owner's channel are mixed and relayed — the missing half of the
 		// guest AllyCaller flow that speakers already provide for their channels.
 		if ownerChIn != nil {
 			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn})
 		}
-		wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
+		if guestMode.IsStarTopology() {
+			// Guest star: all sources → relay only; channel mixers fed by registerRelayInputs.
+			wireFanoutOneMany(ctx, sources, destinations, guestChannelMixers, guestRelayMixer, 0)
+		} else {
+			wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
+		}
 		toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
 		startChannelMixers(ctx, destinations, guestChannelMixers)
 		startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
@@ -390,7 +395,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
 
-	sources := buildSources(m.ownerBotID, ov.ChannelID(), chIn, setup.joined)
+	sources := buildSources(ctx, m.ownerBotID, ov.ChannelID(), chIn, setup.joined)
 	destinations := buildDestinations(setup.joined)
 
 	// Add the owner's channel as a playback destination so its mix-minus mixer
@@ -458,12 +463,28 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	telemetry.SessionsActive.Add(ctx, 1)
 	telemetry.SessionStart.Add(ctx, 1)
 
-	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
+	if mode.IsStarTopology() {
+		wireFanoutOneMany(ctx, sources, destinations, channelMixers, relayMixer, ov.ChannelID())
+	} else {
+		wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
+	}
 
 	// When the host allows guest capture, register host channel mixers as relay
 	// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
+	// In star topology, guest relay only reaches the owner's channel mixer (hub).
 	if mode.AllowGuestCapture() {
-		registerRelayInputs(guildID, allySession, destinations, channelMixers)
+		if mode.IsStarTopology() {
+			ownerDests := make([]*destChannel, 0, 1)
+			for _, d := range destinations {
+				if d.channelID == ov.ChannelID() {
+					ownerDests = append(ownerDests, d)
+					break
+				}
+			}
+			registerRelayInputs(guildID, allySession, ownerDests, channelMixers)
+		} else {
+			registerRelayInputs(guildID, allySession, destinations, channelMixers)
+		}
 	}
 
 	slog.InfoContext(ctx, "voice raid started",
@@ -574,7 +595,9 @@ func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, co
 // iterDeduplicatedCaptures calls fn for the first capture channel per voice
 // channel across joined. Any subsequent capture from the same channel is drained
 // in a background goroutine to prevent the VoiceReceiver from blocking.
-func iterDeduplicatedCaptures(joined []speakerResult, fn func(speakerResult)) {
+// ctx is threaded through so the drain goroutine exits promptly on cancellation
+// rather than waiting for the channel to close.
+func iterDeduplicatedCaptures(ctx context.Context, joined []speakerResult, fn func(speakerResult)) {
 	seen := map[snowflake.ID]bool{}
 	for _, r := range joined {
 		if r.chCapture == nil {
@@ -582,7 +605,15 @@ func iterDeduplicatedCaptures(joined []speakerResult, fn func(speakerResult)) {
 		}
 		if seen[r.gv.ChannelID()] {
 			go func(ch <-chan []byte) {
-				for range ch {
+				for {
+					select {
+					case _, ok := <-ch:
+						if !ok {
+							return
+						}
+					case <-ctx.Done():
+						return
+					}
 				}
 			}(r.chCapture)
 			continue
@@ -594,9 +625,9 @@ func iterDeduplicatedCaptures(joined []speakerResult, fn func(speakerResult)) {
 
 // buildSources returns a deduplicated list of audio sources (one capture channel per voice
 // channel). When two speaker bots share a channel the second capture is drained and discarded.
-func buildSources(ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, joined []speakerResult) []sourceEntry {
+func buildSources(ctx context.Context, ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, joined []speakerResult) []sourceEntry {
 	sources := []sourceEntry{{ownerUserID, ownerChannelID, chIn}}
-	iterDeduplicatedCaptures(joined, func(r speakerResult) {
+	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
 		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
 	})
 	return sources
@@ -625,6 +656,56 @@ func buildDestinations(joined []speakerResult) []*destChannel {
 type mixerRef struct {
 	mx *opus.Mixer
 	id snowflake.ID
+}
+
+// runFanoutSource is the shared goroutine body for wireFanout and wireFanoutOneMany.
+// It decodes each incoming Opus packet exactly once and distributes the resulting
+// Frame to all mixer input channels in targets. When the source channel closes or
+// ctx is cancelled, it calls RemoveInput on every mixer it registered and exits.
+//
+// READ-ONLY CONTRACT: pkt is shared across every Frame sent to targets.
+// No consumer may mutate pkt. The mixer copies it before forwarding
+// to its output channel (see Mixer.tick single-source path), so
+// downstream consumers always get their own slice.
+func runFanoutSource(ctx context.Context, in <-chan []byte, targets []chan opus.Frame, removals []mixerRef) {
+	defer func() {
+		for _, r := range removals {
+			r.mx.RemoveInput(r.id)
+		}
+	}()
+	dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+	if err != nil {
+		slog.ErrorContext(ctx, "fanout: failed to create decoder", slog.Any("err", err))
+		return
+	}
+	scratch := make([]int16, opus.MixerPCMBuf)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt, ok := <-in:
+			if !ok {
+				return
+			}
+			if len(pkt) == 0 {
+				continue // DTX silence — nothing to decode or distribute
+			}
+			n, err := dec.Decode(pkt, scratch)
+			if err != nil {
+				slog.Debug("fanout: decode failed", slog.Any("err", err))
+				continue
+			}
+			pcm := make([]int16, n*opus.MixerChannels)
+			copy(pcm, scratch[:n*opus.MixerChannels])
+			frame := opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}
+			for _, t := range targets {
+				select {
+				case t <- frame:
+				default:
+				}
+			}
+		}
+	}
 }
 
 // wireFanout starts a goroutine per source that decodes each incoming Opus packet
@@ -660,60 +741,71 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 			}
 		}
 
-		go func(in <-chan []byte, targets []chan opus.Frame, removals []mixerRef) {
-			defer func() {
-				for _, r := range removals {
-					r.mx.RemoveInput(r.id)
-				}
-			}()
-			dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
-			if err != nil {
-				slog.ErrorContext(ctx, "wireFanout: failed to create decoder", slog.Any("err", err))
-				return
-			}
-			scratch := make([]int16, opus.MixerPCMBuf)
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case pkt, ok := <-in:
-					if !ok {
-						return
-					}
-					if len(pkt) == 0 {
-						continue // DTX silence — nothing to decode or distribute
-					}
-					// Decode once; distribute a Frame carrying both PCM and the original
-					// Opus bytes. The mixer uses PCM when mixing multiple sources and
-					// forwards Opus directly when only one source is active (point 8).
-					//
-					// READ-ONLY CONTRACT: pkt is the slice received from the Discord
-					// VoiceReceiver and is shared across every Frame sent to targets.
-					// No consumer may mutate pkt. The mixer copies it before forwarding
-					// to its output channel (see Mixer.tick single-source path), so
-					// downstream consumers always get their own slice.
-					n, err := dec.Decode(pkt, scratch)
-					if err != nil {
-						slog.Debug("wireFanout: decode failed", slog.Any("err", err))
+		go runFanoutSource(ctx, src.ch, fanTargets, removals)
+	}
+}
+
+// wireFanoutOneMany implements a star-topology fanout where the owner channel is
+// the central hub. The owner source fans out to all destination channel mixers
+// (mix-minus), but speaker sources fan out ONLY to the owner's channel mixer —
+// speakers cannot hear each other.
+//
+// ownerChannelID identifies the hub channel. When 0 (guest star mode), ALL
+// sources go to the relay mixer only — no local channel-to-channel routing.
+// The guest's channel mixers receive audio solely via registerRelayInputs
+// (the host's relay), ensuring guest speakers hear only the host owner.
+func wireFanoutOneMany(ctx context.Context, sources []sourceEntry, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer, ownerChannelID snowflake.ID) {
+	for _, src := range sources {
+		var fanTargets []chan opus.Frame
+		var removals []mixerRef
+
+		// All sources always feed the relay mixer.
+		relayCh := make(chan opus.Frame, audioChanBuf)
+		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
+			slog.WarnContext(ctx, "relay mixer: failed to add input", slog.Any("err", err))
+		} else {
+			fanTargets = append(fanTargets, relayCh)
+			removals = append(removals, mixerRef{relayMixer, src.id})
+		}
+
+		if ownerChannelID != 0 {
+			if src.channelID == ownerChannelID {
+				// Owner source → all channel mixers except its own (standard mix-minus).
+				for _, dest := range dests {
+					if dest.channelID == src.channelID {
 						continue
 					}
-					pcm := make([]int16, n*opus.MixerChannels)
-					copy(pcm, scratch[:n*opus.MixerChannels])
-					frame := opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}
-					for _, t := range targets {
-						select {
-						case t <- frame:
-						default:
-						}
+					mixCh := make(chan opus.Frame, audioChanBuf)
+					if err := chanMixers[dest.channelID].AddInput(src.id, mixCh); err != nil {
+						slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
+					} else {
+						fanTargets = append(fanTargets, mixCh)
+						removals = append(removals, mixerRef{chanMixers[dest.channelID], src.id})
+					}
+				}
+			} else {
+				// Speaker source → owner channel mixer ONLY (star spoke → hub).
+				if ownerMixer, ok := chanMixers[ownerChannelID]; ok {
+					mixCh := make(chan opus.Frame, audioChanBuf)
+					if err := ownerMixer.AddInput(src.id, mixCh); err != nil {
+						slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
+					} else {
+						fanTargets = append(fanTargets, mixCh)
+						removals = append(removals, mixerRef{ownerMixer, src.id})
 					}
 				}
 			}
-		}(src.ch, fanTargets, removals)
+		}
+		// When ownerChannelID == 0 (guest star), sources go to relay only.
+
+		go runFanoutSource(ctx, src.ch, fanTargets, removals)
 	}
 }
 
 // startChannelMixers runs each per-channel mixer and forwards its output to all
 // speaker output channels in that destination, closing them when the mixer stops.
+// Closing destOuts signals VoiceProvider goroutines to shut down cleanly; it is
+// safe because this goroutine is the sole writer after mixer.Run returns.
 func startChannelMixers(ctx context.Context, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) {
 	for _, dest := range dests {
 		mx := chanMixers[dest.channelID]
@@ -773,6 +865,7 @@ func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*d
 			slog.Warn("relay: failed to add input to channel mixer",
 				slog.String("channelID", dest.channelID.String()),
 				slog.Any("err", err))
+			close(relayFrameOut)
 			continue
 		}
 		// Bridge: decode relay Opus packets once and forward Frame to the mixer.
@@ -829,9 +922,9 @@ func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*d
 // buildGuestSources returns deduplicated capture sources from speaker joins.
 // Unlike the host's buildSources, the guest owner bot is provider-only so
 // it contributes no capture channel.
-func buildGuestSources(joined []speakerResult) []sourceEntry {
+func buildGuestSources(ctx context.Context, joined []speakerResult) []sourceEntry {
 	var sources []sourceEntry
-	iterDeduplicatedCaptures(joined, func(r speakerResult) {
+	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
 		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
 	})
 	return sources

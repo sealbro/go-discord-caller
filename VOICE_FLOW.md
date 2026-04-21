@@ -423,10 +423,337 @@ flowchart TD
 
 ---
 
+## RaidModeOneManyGuildCaller — star topology (host)
+
+Star topology: the owner is the central hub. Speakers capture audio but each
+speaker's fanout targets **only the owner's ChannelMixer** — speakers cannot
+hear each other. The owner's fanout uses standard mix-minus (all channels
+except its own). Guest relay inputs also target only the owner's ChannelMixer.
+
+```mermaid
+flowchart TD
+    subgraph HOST_GUILD["Host Guild — RaidModeOneManyGuildCaller"]
+        subgraph ChA["Discord Channel A (owner = hub)"]
+            OwnerVR["Owner VoiceReceiver"]
+            OwnerVP["Owner VoiceProvider"]
+        end
+        subgraph ChB["Discord Channel B"]
+            Spk1VR["Speaker1 VoiceReceiver"]
+            Spk1VP["Speaker1 VoiceProvider"]
+        end
+        subgraph ChC["Discord Channel C"]
+            Spk2VR["Speaker2 VoiceReceiver"]
+            Spk2VP["Speaker2 VoiceProvider"]
+        end
+
+        chIn["chIn (owner capture)"]
+        chCaptureB["chCapture (spk1 capture)"]
+        chCaptureC["chCapture (spk2 capture)"]
+
+        OwnerVR --> chIn
+        Spk1VR --> chCaptureB
+        Spk2VR --> chCaptureC
+
+        FanA["Fanout A (goroutine)"]
+        FanB["Fanout B (goroutine)"]
+        FanC["Fanout C (goroutine)"]
+
+        chIn       --> FanA
+        chCaptureB --> FanB
+        chCaptureC --> FanC
+
+        MixA["ChannelMixer A (hub — all spk sources)"]
+        MixB["ChannelMixer B (owner only)"]
+        MixC["ChannelMixer C (owner only)"]
+        RelayMix["RelayMixer (all sources)"]
+
+        %% Owner fanout → all channel mixers except A (mix-minus) + relay
+        FanA -- "mixCh_B" --> MixB
+        FanA -- "mixCh_C" --> MixC
+        FanA -- "relayCh_A" --> RelayMix
+
+        %% Speaker B fanout → owner mixer A ONLY (star spoke → hub) + relay
+        FanB -- "mixCh_A" --> MixA
+        FanB -- "relayCh_B" --> RelayMix
+
+        %% Speaker C fanout → owner mixer A ONLY (star spoke → hub) + relay
+        FanC -- "mixCh_A" --> MixA
+        FanC -- "relayCh_C" --> RelayMix
+
+        HRelayInA["relayIn A (guest → owner only)"]
+        HRelayInA --> MixA
+
+        chOwnerOut["chOwnerOut"]
+        chOutB["chOut (spk1)"]
+        chOutC["chOut (spk2)"]
+
+        MixA -- "Output()" --> chOwnerOut
+        MixB -- "Output()" --> chOutB
+        MixC -- "Output()" --> chOutC
+
+        chOwnerOut --> OwnerVP
+        chOutB     --> Spk1VP
+        chOutC     --> Spk2VP
+    end
+
+    subgraph RELAY["Inter-Guild Relay"]
+        AllySession["ally.Session BroadcastFromGuild()"]
+        RelayMix -- "Output()" --> AllySession
+    end
+
+    subgraph GUEST_GUILD["Guest Guild"]
+        GuestOwnerVP["Guest Owner VoiceProvider"]
+        GuestSpkVP["Guest Speaker VoiceProvider(s)"]
+        AllySession -- "chOut (owner)"    --> GuestOwnerVP
+        AllySession -- "chOut (speakers)" --> GuestSpkVP
+    end
+
+    %% link indices:
+    %%  0-2   : VoiceReceiver → capture channel
+    %%  3-5   : capture channel → fanout
+    %%  6,7   : FanA → MixB, MixC (owner → speakers, mix-minus)
+    %%  8     : FanA → RelayMix
+    %%  9     : FanB → MixA (spk1 → owner ONLY)
+    %%  10    : FanB → RelayMix
+    %%  11    : FanC → MixA (spk2 → owner ONLY)
+    %%  12    : FanC → RelayMix
+    %%  13    : HRelayInA → MixA
+    %%  14-16 : MixA/B/C → chOut
+    %%  17-19 : chOut → VoiceProvider
+    %%  20    : RelayMix → AllySession
+    %%  21-22 : AllySession → Guest VoiceProviders
+
+    %% Channel A (Owner hub) — blue shades
+    linkStyle 0  stroke:#0d47a1,stroke-width:2px
+    linkStyle 3  stroke:#1565c0,stroke-width:2px
+    linkStyle 9  stroke:#1976d2,stroke-width:2px
+    linkStyle 11 stroke:#1e88e5,stroke-width:2px
+    linkStyle 13 stroke:#2196f3,stroke-width:2px
+    linkStyle 14 stroke:#42a5f5,stroke-width:2px
+    linkStyle 17 stroke:#90caf9,stroke-width:2px
+
+    %% Channel B (Speaker1) — green shades
+    linkStyle 1  stroke:#1b5e20,stroke-width:2px
+    linkStyle 4  stroke:#2e7d32,stroke-width:2px
+    linkStyle 6  stroke:#388e3c,stroke-width:2px
+    linkStyle 15 stroke:#66bb6a,stroke-width:2px
+    linkStyle 18 stroke:#a5d6a7,stroke-width:2px
+
+    %% Channel C (Speaker2) — orange shades
+    linkStyle 2  stroke:#e65100,stroke-width:2px
+    linkStyle 5  stroke:#ef6c00,stroke-width:2px
+    linkStyle 7  stroke:#f57c00,stroke-width:2px
+    linkStyle 16 stroke:#ffa726,stroke-width:2px
+    linkStyle 19 stroke:#ffcc80,stroke-width:2px
+
+    %% Relay path — purple shades
+    linkStyle 8  stroke:#4a148c,stroke-width:2px
+    linkStyle 10 stroke:#6a1b9a,stroke-width:2px
+    linkStyle 12 stroke:#8e24aa,stroke-width:2px
+    linkStyle 20 stroke:#ba68c8,stroke-width:2px
+
+    %% Guest delivery — red shades
+    linkStyle 21 stroke:#b71c1c,stroke-width:2px
+    linkStyle 22 stroke:#e57373,stroke-width:2px
+```
+
+---
+
+## RaidModeOneManyGuildCaller + RaidModeOneManyAllyCaller — star topology inter-guild
+
+Both guilds use the star topology. The host owner is the central hub across guilds.
+
+- **Host**: Owner hears all local speakers + guest relay. Speakers hear only the owner.
+  Guest relay input is wired to the owner's ChannelMixer only.
+- **Guest**: All captures go to relay only (no local cross-channel mixing). Channel mixers
+  receive audio solely from `registerRelayInputs` (host's relay), so guest speakers
+  hear only the host owner — not each other.
+
+```mermaid
+flowchart TD
+    subgraph HOST["Host Guild — RaidModeOneManyGuildCaller"]
+        subgraph HChA["Channel A (owner = hub)"]
+            HOwnerVR["Owner VoiceReceiver"]
+            HOwnerVP["Owner VoiceProvider"]
+        end
+        subgraph HChB["Channel B"]
+            HSpkVR["Speaker VoiceReceiver"]
+            HSpkVP["Speaker VoiceProvider"]
+        end
+
+        HchIn["chIn"]
+        HchCap["chCapture"]
+        HFanA["Fanout A"]
+        HFanB["Fanout B"]
+        HMixA["ChannelMixer A (hub)"]
+        HMixB["ChannelMixer B (owner only)"]
+        HRelayMix["RelayMixer"]
+        HchOwnerOut["chOwnerOut"]
+        HchOut["chOut (spk)"]
+        HRelayInA["relayIn A (guest → owner only)"]
+
+        HOwnerVR --> HchIn  --> HFanA
+        HSpkVR   --> HchCap --> HFanB
+
+        %% Owner → speaker channel (mix-minus)
+        HFanA -- "mixCh_B"   --> HMixB
+        HFanA -- "relayCh_A" --> HRelayMix
+
+        %% Speaker → owner channel ONLY (star spoke → hub)
+        HFanB -- "mixCh_A"   --> HMixA
+        HFanB -- "relayCh_B" --> HRelayMix
+
+        %% Guest relay → owner mixer only
+        HRelayInA --> HMixA
+
+        HMixA -- "Output()" --> HchOwnerOut --> HOwnerVP
+        HMixB -- "Output()" --> HchOut      --> HSpkVP
+    end
+
+    subgraph SESSION["ally.Session"]
+        BFGHost["BroadcastFromGuild(hostID)"]
+        BFGGuest["BroadcastFromGuild(guestID)"]
+    end
+
+    HRelayMix -- "Output()" --> BFGHost
+
+    subgraph GUEST["Guest Guild — RaidModeOneManyAllyCaller"]
+        subgraph GChA["Channel A (owner)"]
+            GOwnerVR["Owner VoiceReceiver"]
+            GOwnerVP["Owner VoiceProvider"]
+        end
+        subgraph GChB["Channel B"]
+            GSpkVR["Speaker VoiceReceiver"]
+            GSpkVP["Speaker VoiceProvider"]
+        end
+
+        GchIn["chIn (owner capture)"]
+        GchCap["chCapture"]
+        GFanA["Fanout A"]
+        GFanB["Fanout B"]
+        GMixA["ChannelMixer A (relay only)"]
+        GMixB["ChannelMixer B (relay only)"]
+        GRelayMix["RelayMixer"]
+        GchOwnerOut["chOwnerOut"]
+        GchOut["chOut (spk)"]
+        GRelayInA["relayIn A"]
+        GRelayInB["relayIn B"]
+
+        GOwnerVR --> GchIn  --> GFanA
+        GSpkVR   --> GchCap --> GFanB
+
+        %% Guest star: ALL sources → relay ONLY (no local channel-to-channel)
+        GFanA -- "relayCh_A" --> GRelayMix
+        GFanB -- "relayCh_B" --> GRelayMix
+
+        %% Host relay → all guest channel mixers
+        GRelayInA --> GMixA
+        GRelayInB --> GMixB
+
+        GMixA -- "Output()" --> GchOwnerOut --> GOwnerVP
+        GMixB -- "Output()" --> GchOut      --> GSpkVP
+    end
+
+    GRelayMix -- "Output()" --> BFGGuest
+
+    BFGHost  -- "relayIn A" --> GRelayInA
+    BFGHost  -- "relayIn B" --> GRelayInB
+    BFGGuest -- "relayIn A" --> HRelayInA
+
+    %% link indices:
+    %%  0  : HOwnerVR → HchIn
+    %%  1  : HchIn → HFanA
+    %%  2  : HSpkVR → HchCap
+    %%  3  : HchCap → HFanB
+    %%  4  : HFanA → HMixB (owner → spk, mix-minus)
+    %%  5  : HFanA → HRelayMix
+    %%  6  : HFanB → HMixA (spk → owner ONLY)
+    %%  7  : HFanB → HRelayMix
+    %%  8  : HRelayInA → HMixA
+    %%  9  : HMixA → HchOwnerOut
+    %%  10 : HchOwnerOut → HOwnerVP
+    %%  11 : HMixB → HchOut
+    %%  12 : HchOut → HSpkVP
+    %%  13 : HRelayMix → BFGHost
+    %%  14 : GOwnerVR → GchIn
+    %%  15 : GchIn → GFanA
+    %%  16 : GSpkVR → GchCap
+    %%  17 : GchCap → GFanB
+    %%  18 : GFanA → GRelayMix (relay only!)
+    %%  19 : GFanB → GRelayMix (relay only!)
+    %%  20 : GRelayInA → GMixA
+    %%  21 : GRelayInB → GMixB
+    %%  22 : GMixA → GchOwnerOut
+    %%  23 : GchOwnerOut → GOwnerVP
+    %%  24 : GMixB → GchOut
+    %%  25 : GchOut → GSpkVP
+    %%  26 : GRelayMix → BFGGuest
+    %%  27 : BFGHost → GRelayInA
+    %%  28 : BFGHost → GRelayInB
+    %%  29 : BFGGuest → HRelayInA
+
+    %% Host Ch A (owner hub) — blue shades
+    linkStyle 0  stroke:#0d47a1,stroke-width:2px
+    linkStyle 1  stroke:#1565c0,stroke-width:2px
+    linkStyle 6  stroke:#1976d2,stroke-width:2px
+    linkStyle 8  stroke:#1e88e5,stroke-width:2px
+    linkStyle 9  stroke:#42a5f5,stroke-width:2px
+    linkStyle 10 stroke:#90caf9,stroke-width:2px
+
+    %% Host Ch B (speaker) — green shades
+    linkStyle 2  stroke:#1b5e20,stroke-width:2px
+    linkStyle 3  stroke:#2e7d32,stroke-width:2px
+    linkStyle 4  stroke:#388e3c,stroke-width:2px
+    linkStyle 11 stroke:#66bb6a,stroke-width:2px
+    linkStyle 12 stroke:#a5d6a7,stroke-width:2px
+
+    %% Host relay — purple shades
+    linkStyle 5  stroke:#4a148c,stroke-width:2px
+    linkStyle 7  stroke:#6a1b9a,stroke-width:2px
+    linkStyle 13 stroke:#ba68c8,stroke-width:2px
+
+    %% Guest capture — cyan shades
+    linkStyle 14 stroke:#006064,stroke-width:2px
+    linkStyle 15 stroke:#00838f,stroke-width:2px
+    linkStyle 16 stroke:#e65100,stroke-width:2px
+    linkStyle 17 stroke:#ef6c00,stroke-width:2px
+
+    %% Guest sources → relay ONLY — teal
+    linkStyle 18 stroke:#00695c,stroke-width:2px
+    linkStyle 19 stroke:#26a69a,stroke-width:2px
+
+    %% Guest channel output (from relay) — red/pink shades
+    linkStyle 20 stroke:#b71c1c,stroke-width:2px
+    linkStyle 21 stroke:#880e4f,stroke-width:2px
+    linkStyle 22 stroke:#e53935,stroke-width:2px
+    linkStyle 23 stroke:#e57373,stroke-width:2px
+    linkStyle 24 stroke:#c2185b,stroke-width:2px
+    linkStyle 25 stroke:#f06292,stroke-width:2px
+
+    %% Guest relay out — purple
+    linkStyle 26 stroke:#ce93d8,stroke-width:2px
+
+    %% Host → Guest relay delivery — teal
+    linkStyle 27 stroke:#00695c,stroke-width:2px
+    linkStyle 28 stroke:#26a69a,stroke-width:2px
+
+    %% Guest → Host relay delivery — gold (owner mixer only)
+    linkStyle 29 stroke:#f57f17,stroke-width:2px
+```
+
+---
+
 ## Mix-minus rule
 
 Each `ChannelMixer[X]` receives audio from **every source except sources originating in channel X**.
 This prevents echo: users in channel X would otherwise hear their own audio played back to them.
+
+### Star topology exception (OneManyGuildCaller / OneManyAllyCaller)
+
+In star mode the mix-minus rule is tightened: speaker channel mixers receive audio **only from the
+owner channel** (not from other speakers). The owner's channel mixer receives all speaker sources
+(standard mix-minus still applies — it skips its own channel). Guest star mode goes further: sources
+feed the relay mixer only, and channel mixers receive audio exclusively from `registerRelayInputs`.
 
 ## Data flow summary
 

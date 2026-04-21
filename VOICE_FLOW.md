@@ -236,8 +236,12 @@ Both guilds have a full mix-minus graph. Both use `BroadcastFromGuild` so neithe
 hears its own audio echoed back. `registerRelayInputs` wires relay inputs into each
 guild's `ChannelMixer`s so incoming relay audio is mixed alongside local sources.
 
-- **Host → Guest**: `RelayMixer` → `BroadcastFromGuild(hostID)` → guest `relayIn` channels → guest `ChannelMixer`s
-- **Guest → Host**: guest `RelayMixer` → `BroadcastFromGuild(guestID)` → host `relayIn` channels → host `ChannelMixer`s
+- **Host → Guest**: `RelayMixer` → `BroadcastFromGuild(hostID)` → guest `relayOpusIn` → Bridge (decode once) → guest `ChannelMixer`s
+- **Guest → Host**: guest `RelayMixer` → `BroadcastFromGuild(guestID)` → host `relayOpusIn` → Bridge (decode once) → host `ChannelMixer`s
+
+Each relay bridge is a **single goroutine** with a **single decoder** that fans the resulting
+`opus.Frame` to all destination channel mixers — one decode per packet regardless of how
+many destination channels exist.
 
 ```mermaid
 flowchart TD
@@ -260,8 +264,8 @@ flowchart TD
         HRelayMix["RelayMixer"]
         HchOwnerOut["chOwnerOut"]
         HchOut["chOut (spk)"]
-        HRelayInA["relayIn A"]
-        HRelayInB["relayIn B"]
+        HRelayIn["relayOpusIn (host)"]
+        HBridge["Bridge (decode once)"]
 
         HOwnerVR --> HchIn  --> HFanA
         HSpkVR   --> HchCap --> HFanB
@@ -271,8 +275,9 @@ flowchart TD
         HFanB -- "mixCh_A"   --> HMixA
         HFanB -- "relayCh_B" --> HRelayMix
 
-        HRelayInA --> HMixA
-        HRelayInB --> HMixB
+        HRelayIn --> HBridge
+        HBridge -- "Frame A" --> HMixA
+        HBridge -- "Frame B" --> HMixB
 
         HMixA -- "Output()" --> HchOwnerOut --> HOwnerVP
         HMixB -- "Output()" --> HchOut      --> HSpkVP
@@ -304,8 +309,8 @@ flowchart TD
         GRelayMix["RelayMixer"]
         GchOwnerOut["chOwnerOut"]
         GchOut["chOut (spk)"]
-        GRelayInA["relayIn A"]
-        GRelayInB["relayIn B"]
+        GRelayIn["relayOpusIn (guest)"]
+        GBridge["Bridge (decode once)"]
 
         GOwnerVR --> GchIn  --> GFanA
         GSpkVR   --> GchCap --> GFanB
@@ -316,8 +321,9 @@ flowchart TD
         GFanB -- "mixCh_A"   --> GMixA
         GFanB -- "relayCh_B" --> GRelayMix
 
-        GRelayInA --> GMixA
-        GRelayInB --> GMixB
+        GRelayIn --> GBridge
+        GBridge -- "Frame A" --> GMixA
+        GBridge -- "Frame B" --> GMixB
 
         GMixA -- "Output()" --> GchOwnerOut --> GOwnerVP
         GMixB -- "Output()" --> GchOut      --> GSpkVP
@@ -325,10 +331,8 @@ flowchart TD
 
     GRelayMix -- "Output()" --> BFGGuest
 
-    BFGHost  -- "relayIn A" --> GRelayInA
-    BFGHost  -- "relayIn B" --> GRelayInB
-    BFGGuest -- "relayIn A" --> HRelayInA
-    BFGGuest -- "relayIn B" --> HRelayInB
+    BFGHost  --> GRelayIn
+    BFGGuest --> HRelayIn
 
     %% link indices:
     %%  0  : HOwnerVR → HchIn
@@ -339,86 +343,86 @@ flowchart TD
     %%  5  : HFanA → HRelayMix
     %%  6  : HFanB → HMixA
     %%  7  : HFanB → HRelayMix
-    %%  8  : HRelayInA → HMixA
-    %%  9  : HRelayInB → HMixB
-    %%  10 : HMixA → HchOwnerOut
-    %%  11 : HchOwnerOut → HOwnerVP
-    %%  12 : HMixB → HchOut
-    %%  13 : HchOut → HSpkVP
-    %%  14 : HRelayMix → BFGHost
-    %%  15 : GOwnerVR → GchIn
-    %%  16 : GchIn → GFanA
-    %%  17 : GSpkVR → GchCap
-    %%  18 : GchCap → GFanB
-    %%  19 : GFanA → GMixB
-    %%  20 : GFanA → GRelayMix
-    %%  21 : GFanB → GMixA
-    %%  22 : GFanB → GRelayMix
-    %%  23 : GRelayInA → GMixA
-    %%  24 : GRelayInB → GMixB
-    %%  25 : GMixA → GchOwnerOut
-    %%  26 : GchOwnerOut → GOwnerVP
-    %%  27 : GMixB → GchOut
-    %%  28 : GchOut → GSpkVP
-    %%  29 : GRelayMix → BFGGuest
-    %%  30 : BFGHost → GRelayInA
-    %%  31 : BFGHost → GRelayInB
-    %%  32 : BFGGuest → HRelayInA
-    %%  33 : BFGGuest → HRelayInB
+    %%  8  : HRelayIn → HBridge
+    %%  9  : HBridge → HMixA (Frame A)
+    %%  10 : HBridge → HMixB (Frame B)
+    %%  11 : HMixA → HchOwnerOut
+    %%  12 : HchOwnerOut → HOwnerVP
+    %%  13 : HMixB → HchOut
+    %%  14 : HchOut → HSpkVP
+    %%  15 : HRelayMix → BFGHost
+    %%  16 : GOwnerVR → GchIn
+    %%  17 : GchIn → GFanA
+    %%  18 : GSpkVR → GchCap
+    %%  19 : GchCap → GFanB
+    %%  20 : GFanA → GMixB
+    %%  21 : GFanA → GRelayMix
+    %%  22 : GFanB → GMixA
+    %%  23 : GFanB → GRelayMix
+    %%  24 : GRelayIn → GBridge
+    %%  25 : GBridge → GMixA (Frame A)
+    %%  26 : GBridge → GMixB (Frame B)
+    %%  27 : GMixA → GchOwnerOut
+    %%  28 : GchOwnerOut → GOwnerVP
+    %%  29 : GMixB → GchOut
+    %%  30 : GchOut → GSpkVP
+    %%  31 : GRelayMix → BFGGuest
+    %%  32 : BFGHost → GRelayIn
+    %%  33 : BFGGuest → HRelayIn
 
     %% Host Ch A (owner) — blue shades, dark→light
     linkStyle 0  stroke:#0d47a1,stroke-width:2px
     linkStyle 1  stroke:#1565c0,stroke-width:2px
     linkStyle 6  stroke:#1976d2,stroke-width:2px
     linkStyle 8  stroke:#1e88e5,stroke-width:2px
-    linkStyle 10 stroke:#42a5f5,stroke-width:2px
-    linkStyle 11 stroke:#90caf9,stroke-width:2px
+    linkStyle 9  stroke:#2196f3,stroke-width:2px
+    linkStyle 11 stroke:#42a5f5,stroke-width:2px
+    linkStyle 12 stroke:#90caf9,stroke-width:2px
 
     %% Host Ch B (speaker) — green shades, dark→light
     linkStyle 2  stroke:#1b5e20,stroke-width:2px
     linkStyle 3  stroke:#2e7d32,stroke-width:2px
     linkStyle 4  stroke:#388e3c,stroke-width:2px
-    linkStyle 9  stroke:#43a047,stroke-width:2px
-    linkStyle 12 stroke:#66bb6a,stroke-width:2px
-    linkStyle 13 stroke:#a5d6a7,stroke-width:2px
+    linkStyle 10 stroke:#43a047,stroke-width:2px
+    linkStyle 13 stroke:#66bb6a,stroke-width:2px
+    linkStyle 14 stroke:#a5d6a7,stroke-width:2px
 
     %% Host relay — purple shades
     linkStyle 5  stroke:#4a148c,stroke-width:2px
     linkStyle 7  stroke:#6a1b9a,stroke-width:2px
-    linkStyle 14 stroke:#ba68c8,stroke-width:2px
+    linkStyle 15 stroke:#ba68c8,stroke-width:2px
 
     %% Guest Ch A (owner) capture — cyan shades, dark→light
-    linkStyle 15 stroke:#006064,stroke-width:2px
-    linkStyle 16 stroke:#00838f,stroke-width:2px
-    linkStyle 19 stroke:#0097a7,stroke-width:2px
-    linkStyle 20 stroke:#00acc1,stroke-width:2px
+    linkStyle 16 stroke:#006064,stroke-width:2px
+    linkStyle 17 stroke:#00838f,stroke-width:2px
+    linkStyle 22 stroke:#0097a7,stroke-width:2px
+    linkStyle 24 stroke:#00acc1,stroke-width:2px
 
     %% Guest Ch B (speaker) capture — orange shades, dark→light
-    linkStyle 17 stroke:#e65100,stroke-width:2px
-    linkStyle 18 stroke:#ef6c00,stroke-width:2px
-    linkStyle 21 stroke:#f57c00,stroke-width:2px
-    linkStyle 22 stroke:#ffa726,stroke-width:2px
+    linkStyle 18 stroke:#e65100,stroke-width:2px
+    linkStyle 19 stroke:#ef6c00,stroke-width:2px
+    linkStyle 20 stroke:#f57c00,stroke-width:2px
+    linkStyle 23 stroke:#ffa726,stroke-width:2px
 
     %% Guest Ch A (owner) output — red shades
-    linkStyle 23 stroke:#b71c1c,stroke-width:2px
-    linkStyle 25 stroke:#e53935,stroke-width:2px
-    linkStyle 26 stroke:#e57373,stroke-width:2px
+    linkStyle 25 stroke:#b71c1c,stroke-width:2px
+    linkStyle 27 stroke:#e53935,stroke-width:2px
+    linkStyle 28 stroke:#e57373,stroke-width:2px
 
     %% Guest Ch B output — pink shades
-    linkStyle 24 stroke:#880e4f,stroke-width:2px
-    linkStyle 27 stroke:#c2185b,stroke-width:2px
-    linkStyle 28 stroke:#f06292,stroke-width:2px
+    linkStyle 26 stroke:#880e4f,stroke-width:2px
+    linkStyle 29 stroke:#c2185b,stroke-width:2px
+    linkStyle 30 stroke:#f06292,stroke-width:2px
 
     %% Guest relay — purple shades (lighter than host)
-    linkStyle 29 stroke:#ce93d8,stroke-width:2px
+    linkStyle 21 stroke:#ce93d8,stroke-width:2px
+    linkStyle 31 stroke:#ce93d8,stroke-width:2px
 
-    %% Host → Guest relay delivery — teal shades
-    linkStyle 30 stroke:#00695c,stroke-width:2px
-    linkStyle 31 stroke:#26a69a,stroke-width:2px
+    %% Host → Guest relay delivery — teal
+    linkStyle 32 stroke:#00695c,stroke-width:2px
 
-    %% Guest → Host relay delivery — gold shades
-    linkStyle 32 stroke:#f57f17,stroke-width:2px
-    linkStyle 33 stroke:#ffca28,stroke-width:2px
+    %% Guest → Host relay delivery — gold
+    linkStyle 33 stroke:#f57f17,stroke-width:2px
 ```
 
 ---
@@ -590,7 +594,8 @@ flowchart TD
         HRelayMix["RelayMixer"]
         HchOwnerOut["chOwnerOut"]
         HchOut["chOut (spk)"]
-        HRelayInA["relayIn A (guest → owner only)"]
+        HRelayIn["relayOpusIn (host)"]
+        HBridge["Bridge (decode once)"]
 
         HOwnerVR --> HchIn  --> HFanA
         HSpkVR   --> HchCap --> HFanB
@@ -603,8 +608,9 @@ flowchart TD
         HFanB -- "mixCh_A"   --> HMixA
         HFanB -- "relayCh_B" --> HRelayMix
 
-        %% Guest relay → owner mixer only
-        HRelayInA --> HMixA
+        %% Guest relay → owner mixer only (star: relay enters only at hub)
+        HRelayIn --> HBridge
+        HBridge -- "Frame" --> HMixA
 
         HMixA -- "Output()" --> HchOwnerOut --> HOwnerVP
         HMixB -- "Output()" --> HchOut      --> HSpkVP
@@ -636,8 +642,8 @@ flowchart TD
         GRelayMix["RelayMixer"]
         GchOwnerOut["chOwnerOut"]
         GchOut["chOut (spk)"]
-        GRelayInA["relayIn A"]
-        GRelayInB["relayIn B"]
+        GRelayIn["relayOpusIn (guest)"]
+        GBridge["Bridge (decode once)"]
 
         GOwnerVR --> GchIn  --> GFanA
         GSpkVR   --> GchCap --> GFanB
@@ -646,9 +652,10 @@ flowchart TD
         GFanA -- "relayCh_A" --> GRelayMix
         GFanB -- "relayCh_B" --> GRelayMix
 
-        %% Host relay → all guest channel mixers
-        GRelayInA --> GMixA
-        GRelayInB --> GMixB
+        %% Host relay → all guest channel mixers via single bridge
+        GRelayIn --> GBridge
+        GBridge -- "Frame A" --> GMixA
+        GBridge -- "Frame B" --> GMixB
 
         GMixA -- "Output()" --> GchOwnerOut --> GOwnerVP
         GMixB -- "Output()" --> GchOut      --> GSpkVP
@@ -656,9 +663,8 @@ flowchart TD
 
     GRelayMix -- "Output()" --> BFGGuest
 
-    BFGHost  -- "relayIn A" --> GRelayInA
-    BFGHost  -- "relayIn B" --> GRelayInB
-    BFGGuest -- "relayIn A" --> HRelayInA
+    BFGHost  --> GRelayIn
+    BFGGuest --> HRelayIn
 
     %% link indices:
     %%  0  : HOwnerVR → HchIn
@@ -669,76 +675,80 @@ flowchart TD
     %%  5  : HFanA → HRelayMix
     %%  6  : HFanB → HMixA (spk → owner ONLY)
     %%  7  : HFanB → HRelayMix
-    %%  8  : HRelayInA → HMixA
-    %%  9  : HMixA → HchOwnerOut
-    %%  10 : HchOwnerOut → HOwnerVP
-    %%  11 : HMixB → HchOut
-    %%  12 : HchOut → HSpkVP
-    %%  13 : HRelayMix → BFGHost
-    %%  14 : GOwnerVR → GchIn
-    %%  15 : GchIn → GFanA
-    %%  16 : GSpkVR → GchCap
-    %%  17 : GchCap → GFanB
-    %%  18 : GFanA → GRelayMix (relay only!)
-    %%  19 : GFanB → GRelayMix (relay only!)
-    %%  20 : GRelayInA → GMixA
-    %%  21 : GRelayInB → GMixB
-    %%  22 : GMixA → GchOwnerOut
-    %%  23 : GchOwnerOut → GOwnerVP
-    %%  24 : GMixB → GchOut
-    %%  25 : GchOut → GSpkVP
-    %%  26 : GRelayMix → BFGGuest
-    %%  27 : BFGHost → GRelayInA
-    %%  28 : BFGHost → GRelayInB
-    %%  29 : BFGGuest → HRelayInA
+    %%  8  : HRelayIn → HBridge
+    %%  9  : HBridge → HMixA (Frame, owner only)
+    %%  10 : HMixA → HchOwnerOut
+    %%  11 : HchOwnerOut → HOwnerVP
+    %%  12 : HMixB → HchOut
+    %%  13 : HchOut → HSpkVP
+    %%  14 : HRelayMix → BFGHost
+    %%  15 : GOwnerVR → GchIn
+    %%  16 : GchIn → GFanA
+    %%  17 : GSpkVR → GchCap
+    %%  18 : GchCap → GFanB
+    %%  19 : GFanA → GRelayMix (relay only!)
+    %%  20 : GFanB → GRelayMix (relay only!)
+    %%  21 : GRelayIn → GBridge
+    %%  22 : GBridge → GMixA (Frame A)
+    %%  23 : GBridge → GMixB (Frame B)
+    %%  24 : GMixA → GchOwnerOut
+    %%  25 : GchOwnerOut → GOwnerVP
+    %%  26 : GMixB → GchOut
+    %%  27 : GchOut → GSpkVP
+    %%  28 : GRelayMix → BFGGuest
+    %%  29 : BFGHost → GRelayIn
+    %%  30 : BFGGuest → HRelayIn
 
     %% Host Ch A (owner hub) — blue shades
     linkStyle 0  stroke:#0d47a1,stroke-width:2px
     linkStyle 1  stroke:#1565c0,stroke-width:2px
     linkStyle 6  stroke:#1976d2,stroke-width:2px
     linkStyle 8  stroke:#1e88e5,stroke-width:2px
-    linkStyle 9  stroke:#42a5f5,stroke-width:2px
-    linkStyle 10 stroke:#90caf9,stroke-width:2px
+    linkStyle 9  stroke:#2196f3,stroke-width:2px
+    linkStyle 10 stroke:#42a5f5,stroke-width:2px
+    linkStyle 11 stroke:#90caf9,stroke-width:2px
 
     %% Host Ch B (speaker) — green shades
     linkStyle 2  stroke:#1b5e20,stroke-width:2px
     linkStyle 3  stroke:#2e7d32,stroke-width:2px
     linkStyle 4  stroke:#388e3c,stroke-width:2px
-    linkStyle 11 stroke:#66bb6a,stroke-width:2px
-    linkStyle 12 stroke:#a5d6a7,stroke-width:2px
+    linkStyle 12 stroke:#66bb6a,stroke-width:2px
+    linkStyle 13 stroke:#a5d6a7,stroke-width:2px
 
     %% Host relay — purple shades
     linkStyle 5  stroke:#4a148c,stroke-width:2px
     linkStyle 7  stroke:#6a1b9a,stroke-width:2px
-    linkStyle 13 stroke:#ba68c8,stroke-width:2px
+    linkStyle 14 stroke:#ba68c8,stroke-width:2px
 
-    %% Guest capture — cyan shades
-    linkStyle 14 stroke:#006064,stroke-width:2px
-    linkStyle 15 stroke:#00838f,stroke-width:2px
-    linkStyle 16 stroke:#e65100,stroke-width:2px
-    linkStyle 17 stroke:#ef6c00,stroke-width:2px
+    %% Guest capture — cyan/orange shades
+    linkStyle 15 stroke:#006064,stroke-width:2px
+    linkStyle 16 stroke:#00838f,stroke-width:2px
+    linkStyle 17 stroke:#e65100,stroke-width:2px
+    linkStyle 18 stroke:#ef6c00,stroke-width:2px
 
     %% Guest sources → relay ONLY — teal
-    linkStyle 18 stroke:#00695c,stroke-width:2px
-    linkStyle 19 stroke:#26a69a,stroke-width:2px
+    linkStyle 19 stroke:#00695c,stroke-width:2px
+    linkStyle 20 stroke:#26a69a,stroke-width:2px
+
+    %% Guest relay bridge — cyan
+    linkStyle 21 stroke:#00acc1,stroke-width:2px
 
     %% Guest channel output (from relay) — red/pink shades
-    linkStyle 20 stroke:#b71c1c,stroke-width:2px
-    linkStyle 21 stroke:#880e4f,stroke-width:2px
-    linkStyle 22 stroke:#e53935,stroke-width:2px
-    linkStyle 23 stroke:#e57373,stroke-width:2px
-    linkStyle 24 stroke:#c2185b,stroke-width:2px
-    linkStyle 25 stroke:#f06292,stroke-width:2px
+    linkStyle 22 stroke:#b71c1c,stroke-width:2px
+    linkStyle 23 stroke:#880e4f,stroke-width:2px
+    linkStyle 24 stroke:#e53935,stroke-width:2px
+    linkStyle 25 stroke:#e57373,stroke-width:2px
+    linkStyle 26 stroke:#c2185b,stroke-width:2px
+    linkStyle 27 stroke:#f06292,stroke-width:2px
 
     %% Guest relay out — purple
-    linkStyle 26 stroke:#ce93d8,stroke-width:2px
+    linkStyle 28 stroke:#ce93d8,stroke-width:2px
 
     %% Host → Guest relay delivery — teal
-    linkStyle 27 stroke:#00695c,stroke-width:2px
-    linkStyle 28 stroke:#26a69a,stroke-width:2px
+    linkStyle 29 stroke:#00695c,stroke-width:2px
 
     %% Guest → Host relay delivery — gold (owner mixer only)
-    linkStyle 29 stroke:#f57f17,stroke-width:2px
+    linkStyle 30 stroke:#f57f17,stroke-width:2px
 ```
 
 ---
@@ -757,31 +767,31 @@ feed the relay mixer only, and channel mixers receive audio exclusively from `re
 
 ## Data flow summary
 
-| Stage            | Component                              | Description                                                                   |
-|------------------|----------------------------------------|-------------------------------------------------------------------------------|
-| Capture          | `VoiceReceiver` → `chIn` / `chCapture`| Role-filtered Opus frames from Discord                                        |
-| Fanout           | goroutine per source                   | Decodes Opus once, distributes `Frame{PCM, Opus}` to all mixer input channels |
-| Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; single-source passthrough forwards Opus directly   |
-| Relay mix        | `RelayMixer`                           | Mixes all sources; output is broadcast to every attached guest guild          |
-| Relay bridge     | goroutine per guest dest channel       | Decodes relay Opus once → `Frame{PCM, Opus}` → guest `ChannelMixer` input    |
-| Guest delivery   | `ally.Session.BroadcastFromGuild`      | Sends relay packets to all guilds except the sender                           |
+| Stage            | Component                              | Description                                                                                           |
+|------------------|----------------------------------------|-------------------------------------------------------------------------------------------------------|
+| Capture          | `VoiceReceiver` → `chIn` / `chCapture`| Role-filtered Opus frames from Discord                                                                |
+| Fanout           | goroutine per source                   | Decodes Opus once, distributes `Frame{PCM, Opus}` to all mixer input channels                        |
+| Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; single-source passthrough forwards `Frame.Opus` directly (no copy/re-encode)|
+| Relay mix        | `RelayMixer`                           | Mixes all sources; output is broadcast to every attached guest guild                                  |
+| Relay bridge     | one goroutine per guild                | Decodes relay Opus **once**, fans `Frame{PCM, Opus}` to all dest `ChannelMixer` inputs               |
+| Guest delivery   | `ally.Session.BroadcastFromGuild`      | Sends one Opus channel per guest guild; bridge decodes and distributes to N mixers locally            |
 
 ## Latency control — drain-to-latest
 
-Every buffered channel in the pipeline (capture → fanout → mixer → speaker) can hold
-up to `audioChanBuf` (30) frames × 20 ms = 600 ms. Under transient stalls (GC, CPU spike)
-buffers fill and latency compounds across stages.
+Every buffered channel in the pipeline (capture → fanout → mixer → speaker) holds up to
+`audioChanBuf` (10) frames × 20 ms = **200 ms** max. Under transient stalls (GC, CPU spike)
+buffers fill and latency compounds across stages. Three drain points keep end-to-end latency
+near real-time:
 
-Three drain-to-latest points keep end-to-end latency near real-time:
+| Drain point       | Location                        | Threshold                        | Mechanism                                                               |
+|-------------------|---------------------------------|----------------------------------|-------------------------------------------------------------------------|
+| **Mixer inputs**  | `Mixer.tick()` input read loop  | `mixerInputDrainThreshold` = 4   | Drops backlog frames, keeps only the freshest                           |
+| **Relay bridge**  | `registerRelayInputs` goroutine | `relayBridgeDrainThreshold` = 3  | Drains `relayOpusIn` to latest before decoding; inactive under normal jitter |
+| **VoiceProvider** | `ProvideOpusFrame()`            | `providerDrainThreshold` = 3     | Drops excess frames but keeps the last one, preserving speech continuity|
 
-| Drain point          | Location                          | Mechanism                                                              |
-|----------------------|-----------------------------------|------------------------------------------------------------------------|
-| **Mixer inputs**     | `Mixer.tick()` input read loop    | Reads all queued frames per input, keeps only the freshest one         |
-| **Relay bridge**     | `registerRelayInputs` goroutine   | Drains `relayOpusIn` to latest packet before decoding                  |
-| **VoiceProvider**    | `ProvideOpusFrame()`              | Drains `chOut` to latest frame before returning to disgo sender        |
-
-Dropped frames produce brief audio gaps (one 20 ms tick) — far less noticeable than
-cumulative delay from processing every stale frame in order.
+Dropped frames produce a brief audio gap (one 20 ms tick) — far less noticeable than
+cumulative delay from playing stale frames in order. The `VoiceProvider` intentionally
+keeps the final queued frame so speech is not cut mid-word at drain boundaries.
 
 ## Empty-channel pause
 

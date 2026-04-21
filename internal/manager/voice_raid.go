@@ -848,75 +848,93 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 	}()
 }
 
+// relayBridgeDrainThreshold is the number of queued Opus packets in the relay
+// input channel above which the bridge goroutine drains to the latest.
+// 3 frames × 20 ms = 60 ms of tolerated relay jitter before drain kicks in.
+const relayBridgeDrainThreshold = 3
+
 // registerRelayInputs wires a guild as a relay receiver in the ally session.
-// For each destination channel it creates:
-//   - an Opus input channel (chan []byte) registered with the ally session, and
-//   - a PCM bridge goroutine that decodes once and forwards []int16 to the channel mixer.
-//
-// The ally session keeps sending Opus packets; the bridge decodes each exactly once
-// before the mixer accumulates it. Returns the Opus input channels so the caller
-// can close them on teardown (closing triggers bridge goroutine exit).
+// A single Opus input channel is registered with the session. One bridge
+// goroutine decodes each incoming packet exactly once and fans the resulting
+// opus.Frame out to every destination channel mixer — mirroring what
+// runFanoutSource does for local sources. Returns the single Opus input channel
+// so the caller can close it on teardown (closing triggers bridge goroutine exit,
+// which then closes all downstream frame channels).
 func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
-	relayIns := make([]chan<- []byte, 0, len(dests))
+	// Register one frame output channel per destination mixer.
+	frameOuts := make([]chan opus.Frame, 0, len(dests))
 	for _, dest := range dests {
-		relayOpusIn := make(chan []byte, audioChanBuf)
-		relayFrameOut := make(chan opus.Frame, audioChanBuf)
-		if err := chanMixers[dest.channelID].AddInput(relayInputID, relayFrameOut); err != nil {
+		frameOut := make(chan opus.Frame, audioChanBuf)
+		if err := chanMixers[dest.channelID].AddInput(relayInputID, frameOut); err != nil {
 			slog.Warn("relay: failed to add input to channel mixer",
 				slog.String("channelID", dest.channelID.String()),
 				slog.Any("err", err))
-			close(relayFrameOut)
+			close(frameOut)
 			continue
 		}
-		// Bridge: decode relay Opus packets once and forward Frame to the mixer.
-		// Both PCM and original Opus bytes are included so the mixer can apply
-		// the single-source passthrough optimisation (point 8).
-		// Exits when relayOpusIn is closed (session teardown closes it via toClose).
-		go func(in <-chan []byte, out chan<- opus.Frame) {
-			defer close(out)
-			dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
-			if err != nil {
-				slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
-				return
+		frameOuts = append(frameOuts, frameOut)
+	}
+	if len(frameOuts) == 0 {
+		return nil
+	}
+
+	// Single Opus input channel shared across all destination mixers.
+	// Bridge: decode once, fan Frame out to every registered mixer input.
+	// Both PCM and original Opus bytes are forwarded so the mixer can apply
+	// the single-source passthrough optimisation when only one source is active.
+	// Exits when relayOpusIn is closed (session teardown closes it via toClose).
+	relayOpusIn := make(chan []byte, audioChanBuf)
+	go func(in <-chan []byte, outs []chan opus.Frame) {
+		defer func() {
+			for _, out := range outs {
+				close(out)
 			}
-			scratch := make([]int16, opus.MixerPCMBuf)
-			for pkt := range in {
-				// Drain to latest relay packet to avoid accumulating latency
-				// across the inter-guild relay hop.
+		}()
+		dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+		if err != nil {
+			slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
+			return
+		}
+		scratch := make([]int16, opus.MixerPCMBuf)
+		for pkt := range in {
+			// Drain to latest relay packet only when a backlog has built up,
+			// avoiding drops under normal jitter where two packets arrive close together.
+			if len(in) > relayBridgeDrainThreshold {
 			drainRelay:
 				for {
 					select {
 					case newer, ok := <-in:
 						if !ok {
-							break drainRelay
+							return
 						}
 						pkt = newer
 					default:
 						break drainRelay
 					}
 				}
-				if len(pkt) == 0 {
-					continue
-				}
-				n, err := dec.Decode(pkt, scratch)
-				if err != nil {
-					slog.Debug("relay bridge: decode failed", slog.Any("err", err))
-					continue
-				}
-				pcm := make([]int16, n*opus.MixerChannels)
-				copy(pcm, scratch[:n*opus.MixerChannels])
+			}
+			if len(pkt) == 0 {
+				continue
+			}
+			n, err := dec.Decode(pkt, scratch)
+			if err != nil {
+				slog.Debug("relay bridge: decode failed", slog.Any("err", err))
+				continue
+			}
+			pcm := make([]int16, n*opus.MixerChannels)
+			copy(pcm, scratch[:n*opus.MixerChannels])
+			frame := opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}
+			for _, out := range outs {
 				select {
-				case out <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}:
+				case out <- frame:
 				default:
 				}
 			}
-		}(relayOpusIn, relayFrameOut)
-		relayIns = append(relayIns, relayOpusIn)
-	}
-	if len(relayIns) > 0 {
-		session.AddGuild(guildID, relayIns)
-	}
-	return relayIns
+		}
+	}(relayOpusIn, frameOuts)
+
+	session.AddGuild(guildID, []chan<- []byte{relayOpusIn})
+	return []chan<- []byte{relayOpusIn}
 }
 
 // buildGuestSources returns deduplicated capture sources from speaker joins.

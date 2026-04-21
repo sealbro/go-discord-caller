@@ -29,10 +29,10 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
-	// mixerOutputBuf is the output channel buffer depth (30 frames × 20 ms = 600 ms).
-	// Frames are dropped silently when the consumer falls more than 600 ms behind.
+	// mixerOutputBuf is the output channel buffer depth (10 frames × 20 ms = 200 ms).
+	// Frames are dropped silently when the consumer falls more than 200 ms behind.
 	// Increase this if guest guilds experience frequent audio gaps under load.
-	mixerOutputBuf = 50
+	mixerOutputBuf = 10
 )
 
 // Frame carries one audio frame through a mixer input channel.
@@ -85,8 +85,8 @@ const mixerComplexity = 3
 
 // mixerInputDrainThreshold is the maximum number of queued frames per input
 // (beyond the one just read) before the mixer drains to the latest.
-// 5 frames × 20 ms = 100 ms of tolerated jitter before drain kicks in.
-const mixerInputDrainThreshold = 20
+// 4 frames × 20 ms = 80 ms of tolerated jitter before drain kicks in.
+const mixerInputDrainThreshold = 4
 
 // NewMixer creates a Mixer ready to accept inputs and run.
 func NewMixer() (*Mixer, error) {
@@ -274,12 +274,11 @@ func (m *Mixer) tick(ctx context.Context) error {
 
 	// Single active source: forward the original Opus packet directly.
 	// No re-encode needed — eliminates 1 encode per tick for the common case.
+	// Frame.Opus is already an isolated copy made by the fanout goroutine so no
+	// defensive copy is needed here.
 	if len(m.framesBuf) == 1 {
-		src := m.framesBuf[0].Opus
-		out := make([]byte, len(src))
-		copy(out, src)
 		select {
-		case m.out <- out:
+		case m.out <- m.framesBuf[0].Opus:
 		default:
 			slog.Debug("mixer: output channel full, dropping frame")
 		}

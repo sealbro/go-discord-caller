@@ -20,7 +20,9 @@ import (
 
 // audioChanBuf is the buffer size for Opus frame channels between the voice
 // receiver/provider and the relay fan-out goroutines.
-const audioChanBuf = 50
+// 10 frames × 20 ms = 200 ms max buffer depth; drain thresholds handle jitter
+// without accumulating large silent latency.
+const audioChanBuf = 10
 
 // Service orchestrates speaker bots and voice raid sessions.
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.

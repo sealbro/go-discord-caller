@@ -178,7 +178,7 @@ func (m *Mixer) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 			start := time.Now()
-			if err := m.tick(); err != nil {
+			if err := m.tick(ctx); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
 			elapsed := time.Since(start)
@@ -194,7 +194,7 @@ func (m *Mixer) Run(ctx context.Context) {
 	}
 }
 
-func (m *Mixer) tick() error {
+func (m *Mixer) tick(ctx context.Context) error {
 	paused := m.paused.Load()
 
 	m.mu.Lock()
@@ -203,6 +203,10 @@ func (m *Mixer) tick() error {
 		m.entriesBuf = append(m.entriesBuf, e)
 	}
 	m.mu.Unlock()
+	// entriesBuf is safe to read without the lock from here: inputEntry.ch is
+	// assigned once in AddInput and never mutated. RemoveInput only deletes the
+	// map entry; it does not touch the inputEntry struct itself. Reading a
+	// closed or already-drained channel is always safe in Go.
 
 	// Read one frame per input. Only drain to latest when paused (to prevent
 	// upstream backpressure) or when the backlog exceeds the threshold
@@ -261,7 +265,7 @@ func (m *Mixer) tick() error {
 		}
 	}
 	if !oldest.IsZero() {
-		telemetry.MixerPipelineLatency.Record(context.Background(),
+		telemetry.MixerPipelineLatency.Record(ctx,
 			float64(now.Sub(oldest).Microseconds())/1000)
 	}
 

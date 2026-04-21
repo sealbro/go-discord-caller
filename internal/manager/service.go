@@ -168,10 +168,16 @@ func (m *Service) UpdateMixerPause(guildID snowflake.ID) {
 		m.mu.RUnlock()
 		return
 	}
-	session := st.Session
+	// Snapshot the mixer map under the read lock so we can iterate without
+	// holding the lock (channelHasListeners acquires sub-locks on the disgo
+	// cache, and holding mu there risks a lock-order inversion).
+	mixers := make(map[snowflake.ID]guild.MixerPauser, len(st.Session.ChannelMixers))
+	maps.Copy(mixers, st.Session.ChannelMixers)
 	m.mu.RUnlock()
 
-	m.syncMixerPauseState(guildID, session)
+	for chID, mx := range mixers {
+		mx.SetPaused(!m.channelHasListeners(guildID, chID))
+	}
 }
 
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-21
+
+### Added
+- **`mode:one-many` for `/start`**: new raid mode where the owner hears all speakers but speakers only hear the owner — useful for large raids where cross-talk between speaker channels is unwanted
+- **Automatic audio pause on empty channels**: bots stop processing audio for a channel when no real users are listening, reducing idle CPU usage
+- **Audio pipeline metrics**: mixer processing time and end-to-end audio latency are now exported as OTel metrics — `gdc.mixer.tick.duration` and `gdc.mixer.pipeline.latency`
+
+### Changed
+- **Lower audio latency**: stale audio frames are dropped when the pipeline falls behind, keeping audio close to real-time instead of playing back an accumulated delay
+- **More reliable config persistence**: bot settings are now saved atomically, preventing corruption if the process is interrupted during a write
+
+### Fixed
+- **Spurious warnings on startup**: a harmless log warning that appeared on every clean boot has been removed
+
 ## [0.6.1] - 2026-04-20
 
 ### Added

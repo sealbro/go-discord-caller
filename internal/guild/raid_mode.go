@@ -2,24 +2,32 @@ package guild
 
 // RaidMode defines how a voice raid captures and relays audio.
 //
-// Two caller-mode choices map to four concrete modes depending on whether the
+// Three caller-mode choices map to concrete modes depending on whether the
 // guild is the host or a guest:
 //
-//	callerModeOne  → host: RaidModeOneCaller  / guest: RaidModeAllyListener
-//	callerModeMany → host: RaidModeGuildCaller / guest: RaidModeAllyCaller
+//	callerModeOne     → host: RaidModeOneCaller           / guest: RaidModeAllyListener
+//	callerModeMany    → host: RaidModeGuildCaller         / guest: RaidModeAllyCaller
+//	callerModeOneMany → host: RaidModeOneManyGuildCaller  / guest: RaidModeOneManyAllyCaller
 //
 // Full behaviour matrix:
 //
-//	Scenario          Host mode     Guest mode   Speakers   Cross-server   Guests
-//	                                             capture?   relay?         contribute?
-//	────────────────────────────────────────────────────────────────────────────────
-//	Host, one caller  OneCaller     —            ✗          ✓ (code gen)   ✗
-//	Host, many calls  GuildCaller   —            ✓          ✓ (code gen)   ✓
-//	Guest, listener   —             GuestOne     ✗          receives only  ✗
-//	Guest, ally       —             AllyCaller*  ✓          recv + send    ✓
+//	Scenario             Host mode              Guest mode             Speakers   Cross-server   Guests
+//	                                                                   capture?   relay?         contribute?
+//	──────────────────────────────────────────────────────────────────────────────────────────────────────────
+//	Host, one caller     OneCaller              —                      ✗          ✓ (code gen)   ✗
+//	Host, many callers   GuildCaller            —                      ✓          ✓ (code gen)   ✓
+//	Host, one↔many       OneManyGuildCaller     —                      ✓          ✓ (code gen)   ✓
+//	Guest, listener      —                      AllyListener           ✗          receives only  ✗
+//	Guest, ally          —                      AllyCaller*            ✓          recv + send    ✓
+//	Guest, one↔many      —                      OneManyAllyCaller*     ✓          recv + send    ✓
 //
-//	* AllyCaller is only effective when the host uses GuildCaller; it is
-//	  automatically downgraded to GuestOne when the host uses OneCaller.
+//	* AllyCaller/OneManyAllyCaller are only effective when the host allows guest
+//	  capture; they are automatically downgraded to AllyListener otherwise.
+//
+// Star topology (one↔many): The owner is the central hub. Owner hears all
+// speakers, but each speaker only hears the owner — speakers cannot hear each
+// other. In guest mode, all captures go to the relay (reaching the host owner)
+// and all channels receive the relay (host owner's voice).
 type RaidMode string
 
 const (
@@ -55,20 +63,44 @@ const (
 	// RaidModeAllyListener when the host uses callerModeOne.
 	// Mapped from: guest + callerModeMany.
 	RaidModeAllyCaller RaidMode = "ally_caller"
+
+	// RaidModeOneManyGuildCaller (Host) uses a star topology: the owner bot is
+	// the central hub that hears all speakers, but each speaker only hears the
+	// owner — speakers cannot hear each other. Speakers capture audio and send
+	// it only to the owner's channel mixer; the owner's audio fans out to all
+	// speaker channel mixers. The relay mixer broadcasts all sources to guests.
+	// Mapped from: host + callerModeOneMany.
+	RaidModeOneManyGuildCaller RaidMode = "one_many_guild_caller"
+
+	// RaidModeOneManyAllyCaller (Guest) uses the star topology in guest mode:
+	// all captures go to the relay mixer only (reaching the host owner via
+	// broadcast) and all channels receive the relay from the host (owner's
+	// voice). Guest speakers cannot hear each other locally — only the host
+	// owner's relayed audio reaches them. Downgraded to RaidModeAllyListener
+	// when the host does not allow guest capture.
+	// Mapped from: guest + callerModeOneMany.
+	RaidModeOneManyAllyCaller RaidMode = "one_many_ally_caller"
 )
 
 // WithCapture reports whether speaker bots in this guild should capture audio
 // from their channels in addition to relaying.
 func (m RaidMode) WithCapture() bool {
-	return m == RaidModeGuildCaller || m == RaidModeAllyCaller
+	return m == RaidModeGuildCaller || m == RaidModeAllyCaller ||
+		m == RaidModeOneManyGuildCaller || m == RaidModeOneManyAllyCaller
 }
 
 // AllowGuestCapture reports whether this host mode permits guest guilds to
 // capture audio from their own channels and contribute it to the relay mixer.
-// Only RaidModeGuildCaller (host many-callers) allows this; guests that join
-// with RaidModeAllyCaller are downgraded to RaidModeAllyListener otherwise.
+// Only RaidModeGuildCaller and RaidModeOneManyGuildCaller allow this; guests
+// are downgraded to RaidModeAllyListener otherwise.
 func (m RaidMode) AllowGuestCapture() bool {
-	return m == RaidModeGuildCaller
+	return m == RaidModeGuildCaller || m == RaidModeOneManyGuildCaller
+}
+
+// IsStarTopology reports whether this mode uses the one↔many star topology
+// where the owner is the hub and speakers are isolated from each other.
+func (m RaidMode) IsStarTopology() bool {
+	return m == RaidModeOneManyGuildCaller || m == RaidModeOneManyAllyCaller
 }
 
 // Pretty returns a human-readable label for use in Discord messages.
@@ -82,6 +114,10 @@ func (m RaidMode) Pretty() string {
 		return "Listener (guest)"
 	case RaidModeAllyCaller:
 		return "Caller (guest)"
+	case RaidModeOneManyGuildCaller:
+		return "One↔Many Callers (host)"
+	case RaidModeOneManyAllyCaller:
+		return "One↔Many Caller (guest)"
 	default:
 		return string(m)
 	}

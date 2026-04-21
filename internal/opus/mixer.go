@@ -32,7 +32,7 @@ const (
 	// mixerOutputBuf is the output channel buffer depth (30 frames × 20 ms = 600 ms).
 	// Frames are dropped silently when the consumer falls more than 600 ms behind.
 	// Increase this if guest guilds experience frequent audio gaps under load.
-	mixerOutputBuf = 30
+	mixerOutputBuf = 50
 )
 
 // Frame carries one audio frame through a mixer input channel.
@@ -82,6 +82,11 @@ type Mixer struct {
 // Default is 9 (max quality); 3 gives ~60% CPU reduction vs default with
 // acceptable voice quality for relay use cases.
 const mixerComplexity = 3
+
+// mixerInputDrainThreshold is the maximum number of queued frames per input
+// (beyond the one just read) before the mixer drains to the latest.
+// 5 frames × 20 ms = 100 ms of tolerated jitter before drain kicks in.
+const mixerInputDrainThreshold = 20
 
 // NewMixer creates a Mixer ready to accept inputs and run.
 func NewMixer() (*Mixer, error) {
@@ -158,6 +163,9 @@ func (m *Mixer) Output() <-chan []byte {
 // one. Using time.Timer (reset after each tick) instead of time.Ticker prevents
 // stale-frame buildup: if a tick takes longer than 20 ms under load, the next
 // tick is deferred rather than queued immediately from a backlog.
+// The timer accounts for tick processing time to prevent systematic drift:
+// without correction each period is 20 ms + processing, causing the mixer to
+// under-produce frames relative to the real-time Opus frame rate.
 // Closes the output channel on return.
 func (m *Mixer) Run(ctx context.Context) {
 	defer close(m.out)
@@ -173,8 +181,15 @@ func (m *Mixer) Run(ctx context.Context) {
 			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
-			telemetry.MixerTickDuration.Record(ctx, float64(time.Since(start).Microseconds())/1000)
-			timer.Reset(mixerFrameDur)
+			elapsed := time.Since(start)
+			telemetry.MixerTickDuration.Record(ctx, float64(elapsed.Microseconds())/1000)
+			// Subtract processing time so the next tick fires closer to 20 ms
+			// after the previous one started, not 20 ms after it finished.
+			next := mixerFrameDur - elapsed
+			if next < time.Millisecond {
+				next = time.Millisecond
+			}
+			timer.Reset(next)
 		}
 	}
 }
@@ -189,27 +204,43 @@ func (m *Mixer) tick() error {
 	}
 	m.mu.Unlock()
 
-	// Always drain inputs to prevent upstream backpressure, even when paused.
+	// Read one frame per input. Only drain to latest when paused (to prevent
+	// upstream backpressure) or when the backlog exceeds the threshold
+	// (to cap accumulated latency). Under normal jitter (0–2 frames queued)
+	// frames are consumed one-per-tick without drops, and the channel buffer
+	// absorbs timing misalignment between upstream fanout and the mixer tick.
 	m.framesBuf = m.framesBuf[:0]
 	for _, e := range m.entriesBuf {
-		// Drain to latest: if multiple frames are queued (transient upstream burst
-		// or downstream stall), skip stale frames and use only the freshest one.
-		// Real-time voice prefers freshness over completeness — a 20 ms gap is
-		// far less noticeable than cumulative latency from processing every frame.
 		var latest Frame
 		hasFrame := false
-	drain:
-		for {
-			select {
-			case f := <-e.ch:
-				if len(f.PCM) > 0 {
-					latest = f
-					hasFrame = true
+
+		// Non-blocking read of one frame.
+		select {
+		case f := <-e.ch:
+			if len(f.PCM) > 0 {
+				latest = f
+				hasFrame = true
+			}
+		default:
+		}
+
+		// Drain remaining frames when paused (backpressure relief) or when
+		// the active backlog exceeds the threshold (~100 ms of latency).
+		if paused || (hasFrame && len(e.ch) > mixerInputDrainThreshold) {
+		drain:
+			for {
+				select {
+				case f := <-e.ch:
+					if len(f.PCM) > 0 {
+						latest = f
+						hasFrame = true
+					}
+				default:
+					break drain
 				}
-			default:
-				break drain
 			}
 		}
+
 		if hasFrame {
 			m.framesBuf = append(m.framesBuf, latest)
 		}

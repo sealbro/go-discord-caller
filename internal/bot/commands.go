@@ -37,11 +37,12 @@ var Commands = []discord.ApplicationCommandCreate{
 			},
 			discord.ApplicationCommandOptionString{
 				Name:        "mode",
-				Description: "One Caller: owner captures. Many Callers: all channels capture and mix. (default: One Caller)",
+				Description: "One Caller: owner captures. Many Callers: all mix. One↔Many: star topology. (default: One Caller)",
 				Required:    false,
 				Choices: []discord.ApplicationCommandOptionChoiceString{
 					{Name: "One Caller", Value: callerModeOne},
 					{Name: "Many Callers", Value: callerModeMany},
+					{Name: "One↔Many Callers", Value: callerModeOneMany},
 				},
 			},
 		},
@@ -123,11 +124,12 @@ func (h *CommandHandlers) Register(r handler.Router) {
 
 // callerModeChoice is the value of the "mode" slash command option.
 // It maps to different RaidModes depending on whether a relay code is supplied:
-//   - no code (host): callerModeOne → RaidModeOneCaller, callerModeMany → RaidModeGuildCaller
-//   - with code (guest): callerModeOne → RaidModeAllyListener, callerModeMany → RaidModeAllyCaller
+//   - no code (host): callerModeOne → RaidModeOneCaller, callerModeMany → RaidModeGuildCaller, callerModeOneMany → RaidModeOneManyGuildCaller
+//   - with code (guest): callerModeOne → RaidModeAllyListener, callerModeMany → RaidModeAllyCaller, callerModeOneMany → RaidModeOneManyAllyCaller
 const (
-	callerModeOne  string = "one"
-	callerModeMany string = "many"
+	callerModeOne     string = "one"
+	callerModeMany    string = "many"
+	callerModeOneMany string = "one_many"
 )
 
 // speakersPerPage is the maximum number of speakers shown per page in the
@@ -416,18 +418,21 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		return err
 	}
 
-	manyCallers := false
-	if modeStr, ok := data.OptString("mode"); ok {
-		manyCallers = modeStr == callerModeMany
-	}
+	modeStr, _ := data.OptString("mode")
 
 	if hasCode && code != "" {
 		// Joining an existing relay session as a guest.
-		// callerModeOne → RaidModeAllyListener (listeners only)
-		// callerModeMany → RaidModeAllyCaller (active capture; only effective when host also uses many-callers)
-		mode := guild.RaidModeAllyListener
-		if manyCallers {
+		// callerModeOne     → RaidModeAllyListener       (listeners only)
+		// callerModeMany    → RaidModeAllyCaller          (active capture; only effective when host allows)
+		// callerModeOneMany → RaidModeOneManyAllyCaller   (star topology guest; only effective when host allows)
+		var mode guild.RaidMode
+		switch modeStr {
+		case callerModeMany:
 			mode = guild.RaidModeAllyCaller
+		case callerModeOneMany:
+			mode = guild.RaidModeOneManyAllyCaller
+		default:
+			mode = guild.RaidModeAllyListener
 		}
 		cmdCtx := e.Ctx
 		ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
@@ -445,11 +450,17 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 	}
 
 	// Starting a new host raid. A relay code is always generated.
-	// callerModeOne → RaidModeOneCaller  (guests are listeners only)
-	// callerModeMany → RaidModeGuildCaller (guests may capture if they use Many Callers)
-	mode := guild.RaidModeOneCaller
-	if manyCallers {
+	// callerModeOne     → RaidModeOneCaller           (guests are listeners only)
+	// callerModeMany    → RaidModeGuildCaller          (guests may capture if they use Many Callers)
+	// callerModeOneMany → RaidModeOneManyGuildCaller   (star topology; guests may capture)
+	var mode guild.RaidMode
+	switch modeStr {
+	case callerModeMany:
 		mode = guild.RaidModeGuildCaller
+	case callerModeOneMany:
+		mode = guild.RaidModeOneManyGuildCaller
+	default:
+		mode = guild.RaidModeOneCaller
 	}
 
 	cmdCtx := e.Ctx

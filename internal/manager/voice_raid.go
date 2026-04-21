@@ -249,7 +249,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		if ownerChIn != nil {
 			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn})
 		}
-		wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
+		if guestMode.IsStarTopology() {
+			// Guest star: all sources → relay only; channel mixers fed by registerRelayInputs.
+			wireFanoutOneMany(ctx, sources, destinations, guestChannelMixers, guestRelayMixer, 0)
+		} else {
+			wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
+		}
 		toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
 		startChannelMixers(ctx, destinations, guestChannelMixers)
 		startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
@@ -458,12 +463,28 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	telemetry.SessionsActive.Add(ctx, 1)
 	telemetry.SessionStart.Add(ctx, 1)
 
-	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
+	if mode.IsStarTopology() {
+		wireFanoutOneMany(ctx, sources, destinations, channelMixers, relayMixer, ov.ChannelID())
+	} else {
+		wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
+	}
 
 	// When the host allows guest capture, register host channel mixers as relay
 	// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
+	// In star topology, guest relay only reaches the owner's channel mixer (hub).
 	if mode.AllowGuestCapture() {
-		registerRelayInputs(guildID, allySession, destinations, channelMixers)
+		if mode.IsStarTopology() {
+			ownerDests := make([]*destChannel, 0, 1)
+			for _, d := range destinations {
+				if d.channelID == ov.ChannelID() {
+					ownerDests = append(ownerDests, d)
+					break
+				}
+			}
+			registerRelayInputs(guildID, allySession, ownerDests, channelMixers)
+		} else {
+			registerRelayInputs(guildID, allySession, destinations, channelMixers)
+		}
 	}
 
 	slog.InfoContext(ctx, "voice raid started",
@@ -695,6 +716,102 @@ func wireFanout(ctx context.Context, sources []sourceEntry, dests []*destChannel
 					n, err := dec.Decode(pkt, scratch)
 					if err != nil {
 						slog.Debug("wireFanout: decode failed", slog.Any("err", err))
+						continue
+					}
+					pcm := make([]int16, n*opus.MixerChannels)
+					copy(pcm, scratch[:n*opus.MixerChannels])
+					frame := opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}
+					for _, t := range targets {
+						select {
+						case t <- frame:
+						default:
+						}
+					}
+				}
+			}
+		}(src.ch, fanTargets, removals)
+	}
+}
+
+// wireFanoutOneMany implements a star-topology fanout where the owner channel is
+// the central hub. The owner source fans out to all destination channel mixers
+// (mix-minus), but speaker sources fan out ONLY to the owner's channel mixer —
+// speakers cannot hear each other.
+//
+// ownerChannelID identifies the hub channel. When 0 (guest star mode), ALL
+// sources go to the relay mixer only — no local channel-to-channel routing.
+// The guest's channel mixers receive audio solely via registerRelayInputs
+// (the host's relay), ensuring guest speakers hear only the host owner.
+func wireFanoutOneMany(ctx context.Context, sources []sourceEntry, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer, ownerChannelID snowflake.ID) {
+	for _, src := range sources {
+		var fanTargets []chan opus.Frame
+		var removals []mixerRef
+
+		// All sources always feed the relay mixer.
+		relayCh := make(chan opus.Frame, audioChanBuf)
+		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
+			slog.WarnContext(ctx, "relay mixer: failed to add input", slog.Any("err", err))
+		} else {
+			fanTargets = append(fanTargets, relayCh)
+			removals = append(removals, mixerRef{relayMixer, src.id})
+		}
+
+		if ownerChannelID != 0 {
+			if src.channelID == ownerChannelID {
+				// Owner source → all channel mixers except its own (standard mix-minus).
+				for _, dest := range dests {
+					if dest.channelID == src.channelID {
+						continue
+					}
+					mixCh := make(chan opus.Frame, audioChanBuf)
+					if err := chanMixers[dest.channelID].AddInput(src.id, mixCh); err != nil {
+						slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
+					} else {
+						fanTargets = append(fanTargets, mixCh)
+						removals = append(removals, mixerRef{chanMixers[dest.channelID], src.id})
+					}
+				}
+			} else {
+				// Speaker source → owner channel mixer ONLY (star spoke → hub).
+				if ownerMixer, ok := chanMixers[ownerChannelID]; ok {
+					mixCh := make(chan opus.Frame, audioChanBuf)
+					if err := ownerMixer.AddInput(src.id, mixCh); err != nil {
+						slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
+					} else {
+						fanTargets = append(fanTargets, mixCh)
+						removals = append(removals, mixerRef{ownerMixer, src.id})
+					}
+				}
+			}
+		}
+		// When ownerChannelID == 0 (guest star), sources go to relay only.
+
+		go func(in <-chan []byte, targets []chan opus.Frame, removals []mixerRef) {
+			defer func() {
+				for _, r := range removals {
+					r.mx.RemoveInput(r.id)
+				}
+			}()
+			dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+			if err != nil {
+				slog.ErrorContext(ctx, "wireFanoutOneMany: failed to create decoder", slog.Any("err", err))
+				return
+			}
+			scratch := make([]int16, opus.MixerPCMBuf)
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case pkt, ok := <-in:
+					if !ok {
+						return
+					}
+					if len(pkt) == 0 {
+						continue
+					}
+					n, err := dec.Decode(pkt, scratch)
+					if err != nil {
+						slog.Debug("wireFanoutOneMany: decode failed", slog.Any("err", err))
 						continue
 					}
 					pcm := make([]int16, n*opus.MixerChannels)

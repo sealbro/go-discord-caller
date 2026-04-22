@@ -183,17 +183,22 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			})
 		}
 
-		guestChannelMixers = make(map[snowflake.ID]*opus.Mixer, len(destinations))
-		for _, dest := range destinations {
-			mx, err := opus.NewMixer()
-			if err != nil {
-				setup.speakerCleanup()
-				guestCleanupOwner()
-				m.sessions.RemoveGuest(guestGuildID)
-				endSpanErr(span, err)
-				return guestMode, fmt.Errorf("guest: create channel mixer: %w", err)
+		// Star topology with direct output: channel mixers are not needed — host relay
+		// delivers raw Opus bytes directly to speaker chOuts. Only the relay mixer is
+		// created (for capture → relay direction).
+		if !guestMode.IsDirectOutput() {
+			guestChannelMixers = make(map[snowflake.ID]*opus.Mixer, len(destinations))
+			for _, dest := range destinations {
+				mx, err := opus.NewMixer()
+				if err != nil {
+					setup.speakerCleanup()
+					guestCleanupOwner()
+					m.sessions.RemoveGuest(guestGuildID)
+					endSpanErr(span, err)
+					return guestMode, fmt.Errorf("guest: create channel mixer: %w", err)
+				}
+				guestChannelMixers[dest.channelID] = mx
 			}
-			guestChannelMixers[dest.channelID] = mx
 		}
 
 		guestRelayMixer, err = opus.NewMixer()
@@ -250,14 +255,27 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn})
 		}
 		if guestMode.IsStarTopology() {
-			// Guest star: all sources → relay only; channel mixers fed by registerRelayInputs.
+			// Guest star: all sources → relay only (no local channel routing).
 			wireFanoutOneMany(ctx, sources, destinations, guestChannelMixers, guestRelayMixer, 0)
+
+			// Output: deliver host relay directly to speaker chOuts — no channel
+			// mixers needed. Each guest channel mixer has exactly one input (relay)
+			// and would just passthrough unchanged, so bypass them entirely.
+			allOuts := make([]chan<- []byte, len(setup.outs))
+			copy(allOuts, setup.outs)
+			if ownerChOut != nil {
+				allOuts = append(allOuts, ownerChOut)
+			}
+			allySession.AddGuild(guestGuildID, allOuts)
+			toClose = allOuts
+
+			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		} else {
 			wireFanout(ctx, sources, destinations, guestChannelMixers, guestRelayMixer)
+			toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
+			startChannelMixers(ctx, destinations, guestChannelMixers)
+			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		}
-		toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
-		startChannelMixers(ctx, destinations, guestChannelMixers)
-		startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 	} else {
 		outs := make([]chan<- []byte, len(setup.outs))
 		copy(outs, setup.outs)
@@ -395,6 +413,50 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
 
+	allyCode := m.store.GetOrCreateAllyCode(guildID)
+	allySession := m.sessions.Create(allyCode, guildID, mode)
+
+	span.SetAttributes(
+		attribute.String("relay.code", allyCode),
+		attribute.Int("speaker.count", len(setup.joined)),
+	)
+
+	// Direct passthrough: single source (OneCaller) — skip entire mixer pipeline.
+	// Raw Opus bytes flow directly from chIn to all speaker chOuts and relay session.
+	if mode.IsDirectPassthrough() {
+		session := &guild.Session{
+			GuildID:  guildID,
+			Cancel:   cancelFunc,
+			Cleanup:  setup.speakerCleanup,
+			AllyCode: allyCode,
+			Speakers: setup.speakers,
+			// ChannelMixers intentionally nil: UpdateMixerPause guards for nil already.
+		}
+		if err := m.commitSession(session); err != nil {
+			setup.speakerCleanup()
+			ownerCleanup()
+			ov.Leave(ctx, guildID)
+			m.sessions.RemoveHost(guildID)
+			endSpanErr(span, err)
+			return "", err
+		}
+
+		telemetry.SessionsActive.Add(ctx, 1)
+		telemetry.SessionStart.Add(ctx, 1)
+
+		wireFanoutDirect(ctx, chIn, setup.outs, allySession, guildID)
+		startDirectSessionCleanup(ctx, ownerCleanup, guildID)
+
+		slog.InfoContext(ctx, "voice raid started (direct passthrough)",
+			slog.String("guildID", guildID.String()),
+			slog.String("mode", string(mode)),
+			slog.String("code", allyCode),
+			slog.Int("activeSpeakers", len(setup.joined)),
+		)
+
+		return allyCode, nil
+	}
+
 	sources := buildSources(ctx, m.ownerBotID, ov.ChannelID(), chIn, setup.joined)
 	destinations := buildDestinations(setup.joined)
 
@@ -405,6 +467,91 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 			channelID: ov.ChannelID(),
 			outs:      []chan<- []byte{chOwnerOut},
 		})
+	}
+
+	relayMixer, err := opus.NewMixer()
+	if err != nil {
+		setup.speakerCleanup()
+		ownerCleanup()
+		endSpanErr(span, err)
+		return "", fmt.Errorf("create relay mixer: %w", err)
+	}
+
+	// Star topology: only the hub mixer (owner channel) does real mixing.
+	// Speaker channels have exactly one audio source (owner) so no mixer is needed —
+	// raw Opus bytes go directly to their chOuts via runFanoutOwnerStar.
+	if mode.IsStarTopology() {
+		hubMixer, err := opus.NewMixer()
+		if err != nil {
+			setup.speakerCleanup()
+			ownerCleanup()
+			endSpanErr(span, err)
+			return "", fmt.Errorf("create hub mixer: %w", err)
+		}
+		channelMixers := map[snowflake.ID]*opus.Mixer{ov.ChannelID(): hubMixer}
+		mixerPausers := map[snowflake.ID]guild.MixerPauser{ov.ChannelID(): hubMixer}
+
+		session := &guild.Session{
+			GuildID:       guildID,
+			Cancel:        cancelFunc,
+			Cleanup:       setup.speakerCleanup,
+			AllyCode:      allyCode,
+			Speakers:      setup.speakers,
+			ChannelMixers: mixerPausers,
+		}
+		if err := m.commitSession(session); err != nil {
+			setup.speakerCleanup()
+			ownerCleanup()
+			ov.Leave(ctx, guildID)
+			m.sessions.RemoveHost(guildID)
+			endSpanErr(span, err)
+			return "", err
+		}
+
+		m.syncMixerPauseState(guildID, session)
+		telemetry.SessionsActive.Add(ctx, 1)
+		telemetry.SessionStart.Add(ctx, 1)
+
+		// Collect direct speaker outputs — all destinations except the owner's channel.
+		directSpeakerOuts := make([]chan<- []byte, 0)
+		for _, dest := range destinations {
+			if dest.channelID != ov.ChannelID() {
+				directSpeakerOuts = append(directSpeakerOuts, dest.outs...)
+			}
+		}
+
+		wireFanoutOneManyDirect(ctx, sources, ov.ChannelID(), directSpeakerOuts, channelMixers, relayMixer)
+
+		// Guest relay enters only at the hub mixer.
+		if mode.AllowGuestCapture() {
+			ownerDests := make([]*destChannel, 0, 1)
+			for _, d := range destinations {
+				if d.channelID == ov.ChannelID() {
+					ownerDests = append(ownerDests, d)
+					break
+				}
+			}
+			registerRelayInputs(guildID, allySession, ownerDests, channelMixers)
+		}
+
+		slog.InfoContext(ctx, "voice raid started (star direct)",
+			slog.String("guildID", guildID.String()),
+			slog.String("mode", string(mode)),
+			slog.String("code", allyCode),
+			slog.Int("activeSpeakers", len(setup.joined)),
+		)
+
+		// Start only the hub mixer; speaker chOuts are closed by runFanoutOwnerStar on exit.
+		ownerOnlyDests := make([]*destChannel, 0, 1)
+		for _, d := range destinations {
+			if d.channelID == ov.ChannelID() {
+				ownerOnlyDests = append(ownerOnlyDests, d)
+				break
+			}
+		}
+		startChannelMixers(ctx, ownerOnlyDests, channelMixers)
+		startRelayBroadcast(ctx, relayMixer, allySession, ownerCleanup, guildID)
+		return allyCode, nil
 	}
 
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
@@ -418,22 +565,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		}
 		channelMixers[dest.channelID] = mx
 	}
-
-	relayMixer, err := opus.NewMixer()
-	if err != nil {
-		setup.speakerCleanup()
-		ownerCleanup()
-		endSpanErr(span, err)
-		return "", fmt.Errorf("create relay mixer: %w", err)
-	}
-
-	allyCode := m.store.GetOrCreateAllyCode(guildID)
-	allySession := m.sessions.Create(allyCode, guildID, mode)
-
-	span.SetAttributes(
-		attribute.String("relay.code", allyCode),
-		attribute.Int("speaker.count", len(setup.joined)),
-	)
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers))
 	for chID, mx := range channelMixers {
@@ -463,28 +594,12 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	telemetry.SessionsActive.Add(ctx, 1)
 	telemetry.SessionStart.Add(ctx, 1)
 
-	if mode.IsStarTopology() {
-		wireFanoutOneMany(ctx, sources, destinations, channelMixers, relayMixer, ov.ChannelID())
-	} else {
-		wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
-	}
+	wireFanout(ctx, sources, destinations, channelMixers, relayMixer)
 
 	// When the host allows guest capture, register host channel mixers as relay
 	// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
-	// In star topology, guest relay only reaches the owner's channel mixer (hub).
 	if mode.AllowGuestCapture() {
-		if mode.IsStarTopology() {
-			ownerDests := make([]*destChannel, 0, 1)
-			for _, d := range destinations {
-				if d.channelID == ov.ChannelID() {
-					ownerDests = append(ownerDests, d)
-					break
-				}
-			}
-			registerRelayInputs(guildID, allySession, ownerDests, channelMixers)
-		} else {
-			registerRelayInputs(guildID, allySession, destinations, channelMixers)
-		}
+		registerRelayInputs(guildID, allySession, destinations, channelMixers)
 	}
 
 	slog.InfoContext(ctx, "voice raid started",
@@ -695,13 +810,14 @@ func runFanoutSource(ctx context.Context, in <-chan []byte, targets []chan opus.
 				slog.Debug("fanout: decode failed", slog.Any("err", err))
 				continue
 			}
-			pcm := make([]int16, n*opus.MixerChannels)
-			copy(pcm, scratch[:n*opus.MixerChannels])
-			frame := opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}
+			now := time.Now()
 			for _, t := range targets {
+				pcm := opus.GetPCM()[:n*opus.MixerChannels]
+				copy(pcm, scratch[:n*opus.MixerChannels])
 				select {
-				case t <- frame:
+				case t <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: now}:
 				default:
+					opus.PutPCM(pcm) // channel full — return immediately
 				}
 			}
 		}
@@ -848,75 +964,94 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 	}()
 }
 
+// relayBridgeDrainThreshold is the number of queued Opus packets in the relay
+// input channel above which the bridge goroutine drains to the latest.
+// 3 frames × 20 ms = 60 ms of tolerated relay jitter before drain kicks in.
+const relayBridgeDrainThreshold = 3
+
 // registerRelayInputs wires a guild as a relay receiver in the ally session.
-// For each destination channel it creates:
-//   - an Opus input channel (chan []byte) registered with the ally session, and
-//   - a PCM bridge goroutine that decodes once and forwards []int16 to the channel mixer.
-//
-// The ally session keeps sending Opus packets; the bridge decodes each exactly once
-// before the mixer accumulates it. Returns the Opus input channels so the caller
-// can close them on teardown (closing triggers bridge goroutine exit).
+// A single Opus input channel is registered with the session. One bridge
+// goroutine decodes each incoming packet exactly once and fans the resulting
+// opus.Frame out to every destination channel mixer — mirroring what
+// runFanoutSource does for local sources. Returns the single Opus input channel
+// so the caller can close it on teardown (closing triggers bridge goroutine exit,
+// which then closes all downstream frame channels).
 func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
-	relayIns := make([]chan<- []byte, 0, len(dests))
+	// Register one frame output channel per destination mixer.
+	frameOuts := make([]chan opus.Frame, 0, len(dests))
 	for _, dest := range dests {
-		relayOpusIn := make(chan []byte, audioChanBuf)
-		relayFrameOut := make(chan opus.Frame, audioChanBuf)
-		if err := chanMixers[dest.channelID].AddInput(relayInputID, relayFrameOut); err != nil {
+		frameOut := make(chan opus.Frame, audioChanBuf)
+		if err := chanMixers[dest.channelID].AddInput(relayInputID, frameOut); err != nil {
 			slog.Warn("relay: failed to add input to channel mixer",
 				slog.String("channelID", dest.channelID.String()),
 				slog.Any("err", err))
-			close(relayFrameOut)
+			close(frameOut)
 			continue
 		}
-		// Bridge: decode relay Opus packets once and forward Frame to the mixer.
-		// Both PCM and original Opus bytes are included so the mixer can apply
-		// the single-source passthrough optimisation (point 8).
-		// Exits when relayOpusIn is closed (session teardown closes it via toClose).
-		go func(in <-chan []byte, out chan<- opus.Frame) {
-			defer close(out)
-			dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
-			if err != nil {
-				slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
-				return
+		frameOuts = append(frameOuts, frameOut)
+	}
+	if len(frameOuts) == 0 {
+		return nil
+	}
+
+	// Single Opus input channel shared across all destination mixers.
+	// Bridge: decode once, fan Frame out to every registered mixer input.
+	// Both PCM and original Opus bytes are forwarded so the mixer can apply
+	// the single-source passthrough optimisation when only one source is active.
+	// Exits when relayOpusIn is closed (session teardown closes it via toClose).
+	relayOpusIn := make(chan []byte, audioChanBuf)
+	go func(in <-chan []byte, outs []chan opus.Frame) {
+		defer func() {
+			for _, out := range outs {
+				close(out)
 			}
-			scratch := make([]int16, opus.MixerPCMBuf)
-			for pkt := range in {
-				// Drain to latest relay packet to avoid accumulating latency
-				// across the inter-guild relay hop.
+		}()
+		dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+		if err != nil {
+			slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
+			return
+		}
+		scratch := make([]int16, opus.MixerPCMBuf)
+		for pkt := range in {
+			// Drain to latest relay packet only when a backlog has built up,
+			// avoiding drops under normal jitter where two packets arrive close together.
+			if len(in) > relayBridgeDrainThreshold {
 			drainRelay:
 				for {
 					select {
 					case newer, ok := <-in:
 						if !ok {
-							break drainRelay
+							return
 						}
 						pkt = newer
 					default:
 						break drainRelay
 					}
 				}
-				if len(pkt) == 0 {
-					continue
-				}
-				n, err := dec.Decode(pkt, scratch)
-				if err != nil {
-					slog.Debug("relay bridge: decode failed", slog.Any("err", err))
-					continue
-				}
-				pcm := make([]int16, n*opus.MixerChannels)
+			}
+			if len(pkt) == 0 {
+				continue
+			}
+			n, err := dec.Decode(pkt, scratch)
+			if err != nil {
+				slog.Debug("relay bridge: decode failed", slog.Any("err", err))
+				continue
+			}
+			now := time.Now()
+			for _, out := range outs {
+				pcm := opus.GetPCM()[:n*opus.MixerChannels]
 				copy(pcm, scratch[:n*opus.MixerChannels])
 				select {
-				case out <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}:
+				case out <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: now}:
 				default:
+					opus.PutPCM(pcm) // channel full — return immediately
 				}
 			}
-		}(relayOpusIn, relayFrameOut)
-		relayIns = append(relayIns, relayOpusIn)
-	}
-	if len(relayIns) > 0 {
-		session.AddGuild(guildID, relayIns)
-	}
-	return relayIns
+		}
+	}(relayOpusIn, frameOuts)
+
+	session.AddGuild(guildID, []chan<- []byte{relayOpusIn})
+	return []chan<- []byte{relayOpusIn}
 }
 
 // buildGuestSources returns deduplicated capture sources from speaker joins.
@@ -928,6 +1063,148 @@ func buildGuestSources(ctx context.Context, joined []speakerResult) []sourceEntr
 		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
 	})
 	return sources
+}
+
+// runFanoutOwnerStar handles the owner source in host star topology.
+// Raw Opus bytes are sent directly to directOuts (speaker chOuts — no decode needed,
+// they have exactly one source). Simultaneously, the packet is decoded once and the
+// resulting Frame is forwarded to relayMixCh so the relay mixer can broadcast to guests.
+// Closes directOuts when the source closes or ctx is cancelled.
+func runFanoutOwnerStar(ctx context.Context, in <-chan []byte, directOuts []chan<- []byte, relayMixCh chan opus.Frame, relayMixer *opus.Mixer, srcID snowflake.ID) {
+	defer func() {
+		relayMixer.RemoveInput(srcID)
+		for _, out := range directOuts {
+			close(out)
+		}
+	}()
+	dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
+	if err != nil {
+		slog.ErrorContext(ctx, "owner star fanout: failed to create decoder", slog.Any("err", err))
+		return
+	}
+	scratch := make([]int16, opus.MixerPCMBuf)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case pkt, ok := <-in:
+			if !ok {
+				return
+			}
+			if len(pkt) == 0 {
+				continue
+			}
+			// Raw Opus → speaker channels (single source, no re-encode needed).
+			for _, out := range directOuts {
+				select {
+				case out <- pkt:
+				default:
+				}
+			}
+			// Decode once for relay mixer.
+			n, err := dec.Decode(pkt, scratch)
+			if err != nil {
+				slog.Debug("owner star fanout: decode failed", slog.Any("err", err))
+				continue
+			}
+			pcm := opus.GetPCM()[:n*opus.MixerChannels]
+			copy(pcm, scratch[:n*opus.MixerChannels])
+			select {
+			case relayMixCh <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}:
+			default:
+				opus.PutPCM(pcm)
+			}
+		}
+	}
+}
+
+// wireFanoutOneManyDirect implements host star-topology fanout with direct speaker delivery.
+// The owner source sends raw Opus to directSpeakerOuts (no decode) and a decoded Frame
+// to the relay mixer. Each speaker source decodes once and sends to the hub mixer + relay.
+// No N-1 channel mixers are created; speaker channels receive audio directly from the owner.
+func wireFanoutOneManyDirect(ctx context.Context, sources []sourceEntry, ownerChannelID snowflake.ID, directSpeakerOuts []chan<- []byte, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer) {
+	for _, src := range sources {
+		if src.channelID == ownerChannelID {
+			relayCh := make(chan opus.Frame, audioChanBuf)
+			if err := relayMixer.AddInput(src.id, relayCh); err != nil {
+				slog.WarnContext(ctx, "relay mixer: failed to add owner input", slog.Any("err", err))
+				continue
+			}
+			go runFanoutOwnerStar(ctx, src.ch, directSpeakerOuts, relayCh, relayMixer, src.id)
+		} else {
+			// Speaker source: decode once → hub mixer + relay (star spoke → hub).
+			var fanTargets []chan opus.Frame
+			var removals []mixerRef
+
+			relayCh := make(chan opus.Frame, audioChanBuf)
+			if err := relayMixer.AddInput(src.id, relayCh); err != nil {
+				slog.WarnContext(ctx, "relay mixer: failed to add speaker input", slog.Any("err", err))
+			} else {
+				fanTargets = append(fanTargets, relayCh)
+				removals = append(removals, mixerRef{relayMixer, src.id})
+			}
+
+			if hubMixer, ok := chanMixers[ownerChannelID]; ok {
+				mixCh := make(chan opus.Frame, audioChanBuf)
+				if err := hubMixer.AddInput(src.id, mixCh); err != nil {
+					slog.WarnContext(ctx, "hub mixer: failed to add speaker input", slog.Any("err", err))
+				} else {
+					fanTargets = append(fanTargets, mixCh)
+					removals = append(removals, mixerRef{hubMixer, src.id})
+				}
+			}
+
+			go runFanoutSource(ctx, src.ch, fanTargets, removals)
+		}
+	}
+}
+
+// wireFanoutDirect is the bypass path for RaidModeOneCaller.
+// Raw Opus packets are read from in and copied to every speaker output channel
+// and the relay session without any PCM decode/encode step.
+// The goroutine closes all outs when it exits so VoiceProviders shut down cleanly.
+func wireFanoutDirect(ctx context.Context, in <-chan []byte, outs []chan<- []byte, session *ally.Session, guildID snowflake.ID) {
+	go func() {
+		defer func() {
+			for _, out := range outs {
+				close(out)
+			}
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case pkt, ok := <-in:
+				if !ok {
+					return
+				}
+				if len(pkt) == 0 {
+					continue
+				}
+				for _, out := range outs {
+					select {
+					case out <- pkt:
+					default:
+					}
+				}
+				session.BroadcastFromGuild(guildID, pkt)
+			}
+		}
+	}()
+}
+
+// startDirectSessionCleanup waits for ctx cancellation then runs teardown.
+func startDirectSessionCleanup(ctx context.Context, ownerCleanup func(), guildID snowflake.ID) {
+	go func() {
+		defer func() {
+			ownerCleanup()
+			telemetry.SessionsActive.Add(ctx, -1)
+			telemetry.SessionStop.Add(ctx, 1)
+			trace.SpanFromContext(ctx).End()
+			slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", guildID.String()))
+		}()
+		<-ctx.Done()
+	}()
 }
 
 // startGuestRelayBroadcast runs the guest relay mixer and broadcasts its output

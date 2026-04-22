@@ -103,6 +103,23 @@ func (m RaidMode) IsStarTopology() bool {
 	return m == RaidModeOneManyGuildCaller || m == RaidModeOneManyAllyCaller
 }
 
+// IsDirectPassthrough reports whether this mode can skip the mixer pipeline
+// entirely and relay raw Opus bytes directly from the owner's capture channel
+// to all speaker output channels. True only for RaidModeOneCaller, which has
+// exactly one audio source and requires no PCM decode, mix, or re-encode.
+func (m RaidMode) IsDirectPassthrough() bool {
+	return m == RaidModeOneCaller
+}
+
+// IsDirectOutput reports whether the output path (relay → speaker channels)
+// can bypass channel mixers and deliver raw Opus bytes directly from the ally
+// session. True for OneCaller (full bypass) and OneManyAllyCaller (guest star:
+// all channel mixers have exactly one input so passthrough is always a no-op).
+// RaidModeAllyListener already uses the direct output path implicitly.
+func (m RaidMode) IsDirectOutput() bool {
+	return m == RaidModeOneCaller || m == RaidModeOneManyAllyCaller
+}
+
 // Pretty returns a human-readable label for use in Discord messages.
 func (m RaidMode) Pretty() string {
 	switch m {

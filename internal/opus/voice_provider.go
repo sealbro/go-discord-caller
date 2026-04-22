@@ -11,6 +11,11 @@ type VoiceProvider struct {
 	voice.OpusFrameProvider
 	ch   <-chan []byte
 	done chan struct{}
+	// prev holds the buffer returned by the last ProvideOpusFrame call.
+	// It is recycled via PutEncodedFrame at the start of the next call —
+	// by that point disgo has finished sending the packet over UDP and no
+	// longer holds a reference to the slice.
+	prev []byte
 }
 
 func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
@@ -21,14 +26,22 @@ func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
 }
 
 // providerDrainThreshold is the maximum number of queued frames (beyond the
-// one just read) before the provider drains to the latest. Normal timing
+// one just read) before the provider drains excess frames. Normal timing
 // jitter between the mixer tick and the disgo sender produces 0–2 queued
 // frames; anything above the threshold indicates a stall that accumulated
 // latency beyond an acceptable window.
-// 5 frames × 20 ms = 100 ms of tolerated jitter before drain kicks in.
-const providerDrainThreshold = 5
+// 3 frames × 20 ms = 60 ms of tolerated jitter before drain kicks in.
+const providerDrainThreshold = 3
 
 func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
+	// Return the previous frame's buffer to the pool before blocking.
+	// disgo calls ProvideOpusFrame only after finishing the UDP send for the
+	// previous packet, so v.prev is no longer referenced at this point.
+	// PutEncodedFrame is a no-op for passthrough slices (wrong cap), so this
+	// is safe regardless of whether the frame came from the pool or the receiver.
+	PutEncodedFrame(v.prev)
+	v.prev = nil
+
 	select {
 	case <-v.done:
 		return nil, fmt.Errorf("voice provider is closed")
@@ -36,25 +49,27 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("voice provider channel closed")
 		}
-		// Only drain to latest when the buffer depth exceeds the threshold,
-		// indicating a stall accumulated more than ~100 ms of latency.
-		// Under normal jitter (0–2 frames queued) frames play in order
-		// without drops, producing smooth audio. Unconditional drain-to-latest
-		// drops frames even under mild jitter, causing audible gaps and
-		// perceived speed-up of speech (silence between words is removed).
+		// Drain excess frames when the buffer depth exceeds the threshold,
+		// but keep the last queued frame in the channel so speech is not
+		// cut mid-word. Under normal jitter (0–2 frames queued) frames play
+		// in order without drops, producing smooth audio.
 		if len(v.ch) > providerDrainThreshold {
-			for {
+			for len(v.ch) > 1 {
 				select {
 				case newer, ok := <-v.ch:
 					if !ok {
+						v.prev = data
 						return data, nil
 					}
+					PutEncodedFrame(data) // dropped frame; return to pool
 					data = newer
 				default:
+					v.prev = data
 					return data, nil
 				}
 			}
 		}
+		v.prev = data
 		return data, nil
 	}
 }

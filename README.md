@@ -5,7 +5,8 @@ A Go Discord bot that captures voice audio and relays it live to every bound spe
 If this project is useful to you, please consider giving it a ⭐ on GitHub — it helps others discover the project and motivates continued development.
 
 [![GitHub stars](https://img.shields.io/github/stars/sealbro/go-discord-caller?style=social)](https://github.com/sealbro/go-discord-caller)
-[![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
+[![GitHub release](https://badgen.net/github/release/sealbro/go-discord-caller?icon=github&label=go-discord-caller)](https://github.com/sealbro/go-discord-caller/)
+[![Docker pulls](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
 
 ## How it works
 
@@ -86,6 +87,7 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown in `/status`.
 
 **To start a cross-guild relay:**
+
 1. Guild A runs `/start` (or `/start mode:many`) — its session becomes active; the relay code is visible in `/status`.
 2. Guild B runs `/start code:A3BX7KQP` — its speakers connect in **listener-only** mode and receive all audio from Guild A.
 3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` and Guild B must join with `/start code:A3BX7KQP mode:many`.
@@ -118,6 +120,7 @@ Then open the **Bot** section:
 - **Owner bot only:** enable **Server Members Intent** under *Privileged Gateway Intents*
 
 Add all tokens to your `.env`:
+
 ```env
 DISCORD_OWNER_BOT_TOKEN=your-owner-token
 DISCORD_SPEAKER_BOT_TOKEN_1=your-speaker-1-token
@@ -125,9 +128,11 @@ DISCORD_SPEAKER_BOT_TOKEN_2=your-speaker-2-token
 ```
 
 To invite the **owner bot** to your server, open the **Installation** section, copy the Install Link and append the required scope and permissions:
+
 ```
 https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions=391565762894144
 ```
+
 > The ready-to-use invite URL is also printed to the logs automatically when the bot starts (`owner bot invite URL`).
 
 > Speaker bots do **not** need to be added to the server manually — use the `/setup` command after the bot is running to invite them one by one.

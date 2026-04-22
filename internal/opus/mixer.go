@@ -35,6 +35,24 @@ const (
 	mixerOutputBuf = 10
 )
 
+// pcmPool recycles PCM buffers ([]int16 of length MixerPCMBuf = 1920) used by
+// fanout goroutines and returned by mixer tick after consumption. Using *[]int16
+// avoids interface boxing of the 3-word slice header on every Get/Put.
+var pcmPool = &sync.Pool{
+	New: func() any {
+		s := make([]int16, mixerPCMBuf)
+		return &s
+	},
+}
+
+// GetPCM returns a []int16 of length MixerPCMBuf from the pool.
+// The caller owns the slice until it is returned via PutPCM.
+func GetPCM() []int16 { return *pcmPool.Get().(*[]int16) }
+
+// PutPCM returns a PCM buffer to the pool for reuse.
+// The caller must not access the slice after this call.
+func PutPCM(s []int16) { s = s[:mixerPCMBuf]; pcmPool.Put(&s) }
+
 // Frame carries one audio frame through a mixer input channel.
 // PCM holds the pre-decoded samples used when multiple sources are mixed.
 // Opus holds the original encoded packet used for single-source passthrough
@@ -236,6 +254,9 @@ func (m *Mixer) tick(ctx context.Context) error {
 				select {
 				case f := <-e.ch:
 					if len(f.PCM) > 0 {
+						if hasFrame {
+							PutPCM(latest.PCM) // return superseded frame's buffer
+						}
 						latest = f
 						hasFrame = true
 					}
@@ -253,6 +274,9 @@ func (m *Mixer) tick(ctx context.Context) error {
 	// When paused (no non-bot listeners in the destination channel), skip
 	// mixing/encoding/output entirely. Inputs were already drained above.
 	if paused || len(m.framesBuf) == 0 {
+		for _, f := range m.framesBuf {
+			PutPCM(f.PCM)
+		}
 		return nil
 	}
 
@@ -277,6 +301,7 @@ func (m *Mixer) tick(ctx context.Context) error {
 	// Frame.Opus is already an isolated copy made by the fanout goroutine so no
 	// defensive copy is needed here.
 	if len(m.framesBuf) == 1 {
+		PutPCM(m.framesBuf[0].PCM)
 		select {
 		case m.out <- m.framesBuf[0].Opus:
 		default:
@@ -297,6 +322,9 @@ func (m *Mixer) tick(ctx context.Context) error {
 			m.mixed[i+2] += int32(pcm[i+2])
 			m.mixed[i+3] += int32(pcm[i+3])
 		}
+	}
+	for _, f := range m.framesBuf {
+		PutPCM(f.PCM)
 	}
 
 	// Clamp to int16 range and write into pcm for re-encoding.

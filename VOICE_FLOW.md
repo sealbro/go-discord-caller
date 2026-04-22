@@ -2,15 +2,17 @@
 
 ---
 
-## RaidModeOneCaller — owner capture only
+## RaidModeOneCaller — direct passthrough (no mixer pipeline)
 
 Only the owner bot has a `VoiceReceiver`. Speakers are `VoiceProvider`-only.
-Single source → no mix-minus needed → each `ChannelMixer` has exactly one input.
-`chOwnerOut` is **not** created (owner does not play back audio into its own channel).
+Single source → **entire mixer pipeline is bypassed**. Raw Opus bytes flow directly
+from `chIn` to all speaker `chOut`s and the relay session via `wireFanoutDirect`.
+No PCM decode, no `ChannelMixer`, no `RelayMixer`, no re-encode.
+`chOwnerOut` is not created (owner does not play back audio into its own channel).
 
 ```mermaid
 flowchart TD
-    subgraph HOST_GUILD["Host Guild — RaidModeOneCaller"]
+    subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A (owner)"]
             OwnerVR["Owner VoiceReceiver"]
         end
@@ -24,22 +26,14 @@ flowchart TD
         chIn["chIn (owner capture)"]
         OwnerVR --> chIn
 
-        FanA["Fanout A (goroutine)"]
-        chIn --> FanA
-
-        MixB["ChannelMixer B (1 input)"]
-        MixC["ChannelMixer C (1 input)"]
-        RelayMix["RelayMixer (1 input)"]
-
-        FanA -- "mixCh_B"   --> MixB
-        FanA -- "mixCh_C"   --> MixC
-        FanA -- "relayCh_A" --> RelayMix
+        Direct["wireFanoutDirect (goroutine) no decode · no mixer · no encode"]
+        chIn --> Direct
 
         chOutB["chOut (spk1)"]
         chOutC["chOut (spk2)"]
 
-        MixB -- "Output()" --> chOutB
-        MixC -- "Output()" --> chOutC
+        Direct -- "raw Opus" --> chOutB
+        Direct -- "raw Opus" --> chOutC
 
         chOutB --> Spk1VP
         chOutC --> Spk2VP
@@ -47,10 +41,10 @@ flowchart TD
 
     subgraph RELAY["Inter-Guild Relay"]
         AllySession["ally.Session BroadcastFromGuild()"]
-        RelayMix -- "Output()" --> AllySession
+        Direct -- "raw Opus" --> AllySession
     end
 
-    subgraph GUEST_GUILD["Guest Guild"]
+    subgraph GUEST_GUILD["Guest Guild (AllyListener)"]
         GuestOwnerVP["Guest Owner VoiceProvider"]
         GuestSpkVP["Guest Speaker VoiceProvider(s)"]
         AllySession -- "chOut (owner)"    --> GuestOwnerVP
@@ -59,39 +53,33 @@ flowchart TD
 
     %% link indices:
     %%  0  : OwnerVR → chIn
-    %%  1  : chIn → FanA
-    %%  2  : FanA → MixB
-    %%  3  : FanA → MixC
-    %%  4  : FanA → RelayMix
-    %%  5  : MixB → chOutB
-    %%  6  : MixC → chOutC
-    %%  7  : chOutB → Spk1VP
-    %%  8  : chOutC → Spk2VP
-    %%  9  : RelayMix → AllySession
-    %%  10 : AllySession → GuestOwnerVP
-    %%  11 : AllySession → GuestSpkVP
+    %%  1  : chIn → Direct
+    %%  2  : Direct → chOutB (raw Opus)
+    %%  3  : Direct → chOutC (raw Opus)
+    %%  4  : Direct → AllySession (raw Opus)
+    %%  5  : chOutB → Spk1VP
+    %%  6  : chOutC → Spk2VP
+    %%  7  : AllySession → GuestOwnerVP
+    %%  8  : AllySession → GuestSpkVP
 
     %% Owner capture path — blue shades, dark→light
     linkStyle 0 stroke:#0d47a1,stroke-width:2px
     linkStyle 1 stroke:#1565c0,stroke-width:2px
 
-    %% Fanout → ChannelMixer B — green shades
+    %% Direct → Speaker B — green shades
     linkStyle 2 stroke:#1b5e20,stroke-width:2px
-    linkStyle 5 stroke:#66bb6a,stroke-width:2px
-    linkStyle 7 stroke:#a5d6a7,stroke-width:2px
+    linkStyle 5 stroke:#a5d6a7,stroke-width:2px
 
-    %% Fanout → ChannelMixer C — orange shades
+    %% Direct → Speaker C — orange shades
     linkStyle 3 stroke:#e65100,stroke-width:2px
-    linkStyle 6 stroke:#ffa726,stroke-width:2px
-    linkStyle 8 stroke:#ffcc80,stroke-width:2px
+    linkStyle 6 stroke:#ffcc80,stroke-width:2px
 
     %% Relay path — purple shades
-    linkStyle 4  stroke:#4a148c,stroke-width:2px
-    linkStyle 9  stroke:#ba68c8,stroke-width:2px
+    linkStyle 4 stroke:#4a148c,stroke-width:2px
 
     %% Guest delivery — red shades
-    linkStyle 10 stroke:#b71c1c,stroke-width:2px
-    linkStyle 11 stroke:#e57373,stroke-width:2px
+    linkStyle 7 stroke:#b71c1c,stroke-width:2px
+    linkStyle 8 stroke:#e57373,stroke-width:2px
 ```
 
 ---
@@ -104,7 +92,7 @@ The owner bot also gets `chOwnerOut` so it plays back the mixed audio of other c
 
 ```mermaid
 flowchart TD
-    subgraph HOST_GUILD["Host Guild — RaidModeGuildCaller"]
+    subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A"]
             OwnerVR["Owner VoiceReceiver"]
             OwnerVP["Owner VoiceProvider"]
@@ -245,7 +233,7 @@ many destination channels exist.
 
 ```mermaid
 flowchart TD
-    subgraph HOST["Host Guild — RaidModeGuildCaller"]
+    subgraph HOST["Host Guild"]
         subgraph HChA["Channel A (owner)"]
             HOwnerVR["Owner VoiceReceiver"]
             HOwnerVP["Owner VoiceProvider"]
@@ -290,7 +278,7 @@ flowchart TD
 
     HRelayMix -- "Output()" --> BFGHost
 
-    subgraph GUEST["Guest Guild — RaidModeAllyCaller"]
+    subgraph GUEST["Guest Guild"]
         subgraph GChA["Channel A (owner)"]
             GOwnerVR["Owner VoiceReceiver"]
             GOwnerVP["Owner VoiceProvider"]
@@ -429,14 +417,15 @@ flowchart TD
 
 ## RaidModeOneManyGuildCaller — star topology (host)
 
-Star topology: the owner is the central hub. Speakers capture audio but each
-speaker's fanout targets **only the owner's ChannelMixer** — speakers cannot
-hear each other. The owner's fanout uses standard mix-minus (all channels
-except its own). Guest relay inputs also target only the owner's ChannelMixer.
+Star topology: the owner is the central hub. Only **one** `ChannelMixer` is created —
+for the owner's channel (the hub). Speaker channels receive the owner's raw Opus bytes
+directly (`runFanoutOwnerStar`) with no mixer in between, because the owner is their
+only audio source. Speaker sources still decode and feed the hub mixer so the owner
+hears all speakers mixed together. Guest relay inputs also target only the hub mixer.
 
 ```mermaid
 flowchart TD
-    subgraph HOST_GUILD["Host Guild — RaidModeOneManyGuildCaller"]
+    subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A (owner = hub)"]
             OwnerVR["Owner VoiceReceiver"]
             OwnerVP["Owner VoiceProvider"]
@@ -458,7 +447,7 @@ flowchart TD
         Spk1VR --> chCaptureB
         Spk2VR --> chCaptureC
 
-        FanA["Fanout A (goroutine)"]
+        FanA["runFanoutOwnerStar (goroutine)<br/>raw Opus → spk chOuts · Frame → relay"]
         FanB["Fanout B (goroutine)"]
         FanC["Fanout C (goroutine)"]
 
@@ -467,24 +456,22 @@ flowchart TD
         chCaptureC --> FanC
 
         MixA["ChannelMixer A (hub — all spk sources)"]
-        MixB["ChannelMixer B (owner only)"]
-        MixC["ChannelMixer C (owner only)"]
         RelayMix["RelayMixer (all sources)"]
 
-        %% Owner fanout → all channel mixers except A (mix-minus) + relay
-        FanA -- "mixCh_B" --> MixB
-        FanA -- "mixCh_C" --> MixC
-        FanA -- "relayCh_A" --> RelayMix
+        %% Owner fanout → speaker chOuts directly (raw Opus) + relay mixer (decoded)
+        FanA -- "raw Opus" --> chOutB
+        FanA -- "raw Opus" --> chOutC
+        FanA -- "relayCh_A (Frame)" --> RelayMix
 
-        %% Speaker B fanout → owner mixer A ONLY (star spoke → hub) + relay
+        %% Speaker B fanout → owner hub mixer ONLY + relay
         FanB -- "mixCh_A" --> MixA
         FanB -- "relayCh_B" --> RelayMix
 
-        %% Speaker C fanout → owner mixer A ONLY (star spoke → hub) + relay
+        %% Speaker C fanout → owner hub mixer ONLY + relay
         FanC -- "mixCh_A" --> MixA
         FanC -- "relayCh_C" --> RelayMix
 
-        HRelayInA["relayIn A (guest → owner only)"]
+        HRelayInA["relayIn A (guest → hub only)"]
         HRelayInA --> MixA
 
         chOwnerOut["chOwnerOut"]
@@ -492,8 +479,6 @@ flowchart TD
         chOutC["chOut (spk2)"]
 
         MixA -- "Output()" --> chOwnerOut
-        MixB -- "Output()" --> chOutB
-        MixC -- "Output()" --> chOutC
 
         chOwnerOut --> OwnerVP
         chOutB     --> Spk1VP
@@ -515,17 +500,20 @@ flowchart TD
     %% link indices:
     %%  0-2   : VoiceReceiver → capture channel
     %%  3-5   : capture channel → fanout
-    %%  6,7   : FanA → MixB, MixC (owner → speakers, mix-minus)
-    %%  8     : FanA → RelayMix
-    %%  9     : FanB → MixA (spk1 → owner ONLY)
+    %%  6     : FanA → chOutB (raw Opus, direct)
+    %%  7     : FanA → chOutC (raw Opus, direct)
+    %%  8     : FanA → RelayMix (Frame)
+    %%  9     : FanB → MixA (spk1 → hub ONLY)
     %%  10    : FanB → RelayMix
-    %%  11    : FanC → MixA (spk2 → owner ONLY)
+    %%  11    : FanC → MixA (spk2 → hub ONLY)
     %%  12    : FanC → RelayMix
     %%  13    : HRelayInA → MixA
-    %%  14-16 : MixA/B/C → chOut
-    %%  17-19 : chOut → VoiceProvider
-    %%  20    : RelayMix → AllySession
-    %%  21-22 : AllySession → Guest VoiceProviders
+    %%  14    : MixA → chOwnerOut
+    %%  15    : chOwnerOut → OwnerVP
+    %%  16    : chOutB → Spk1VP
+    %%  17    : chOutC → Spk2VP
+    %%  18    : RelayMix → AllySession
+    %%  19-20 : AllySession → Guest VoiceProviders
 
     %% Channel A (Owner hub) — blue shades
     linkStyle 0  stroke:#0d47a1,stroke-width:2px
@@ -534,31 +522,29 @@ flowchart TD
     linkStyle 11 stroke:#1e88e5,stroke-width:2px
     linkStyle 13 stroke:#2196f3,stroke-width:2px
     linkStyle 14 stroke:#42a5f5,stroke-width:2px
-    linkStyle 17 stroke:#90caf9,stroke-width:2px
+    linkStyle 15 stroke:#90caf9,stroke-width:2px
 
     %% Channel B (Speaker1) — green shades
     linkStyle 1  stroke:#1b5e20,stroke-width:2px
     linkStyle 4  stroke:#2e7d32,stroke-width:2px
     linkStyle 6  stroke:#388e3c,stroke-width:2px
-    linkStyle 15 stroke:#66bb6a,stroke-width:2px
-    linkStyle 18 stroke:#a5d6a7,stroke-width:2px
+    linkStyle 16 stroke:#a5d6a7,stroke-width:2px
 
     %% Channel C (Speaker2) — orange shades
     linkStyle 2  stroke:#e65100,stroke-width:2px
     linkStyle 5  stroke:#ef6c00,stroke-width:2px
     linkStyle 7  stroke:#f57c00,stroke-width:2px
-    linkStyle 16 stroke:#ffa726,stroke-width:2px
-    linkStyle 19 stroke:#ffcc80,stroke-width:2px
+    linkStyle 17 stroke:#ffcc80,stroke-width:2px
 
     %% Relay path — purple shades
     linkStyle 8  stroke:#4a148c,stroke-width:2px
     linkStyle 10 stroke:#6a1b9a,stroke-width:2px
     linkStyle 12 stroke:#8e24aa,stroke-width:2px
-    linkStyle 20 stroke:#ba68c8,stroke-width:2px
+    linkStyle 18 stroke:#ba68c8,stroke-width:2px
 
     %% Guest delivery — red shades
-    linkStyle 21 stroke:#b71c1c,stroke-width:2px
-    linkStyle 22 stroke:#e57373,stroke-width:2px
+    linkStyle 19 stroke:#b71c1c,stroke-width:2px
+    linkStyle 20 stroke:#e57373,stroke-width:2px
 ```
 
 ---
@@ -570,12 +556,12 @@ Both guilds use the star topology. The host owner is the central hub across guil
 - **Host**: Owner hears all local speakers + guest relay. Speakers hear only the owner.
   Guest relay input is wired to the owner's ChannelMixer only.
 - **Guest**: All captures go to relay only (no local cross-channel mixing). Channel mixers
-  receive audio solely from `registerRelayInputs` (host's relay), so guest speakers
-  hear only the host owner — not each other.
+  are **not created** — host relay is delivered directly to speaker `chOut`s (direct output).
+  Guest speakers hear only the host owner's relayed audio.
 
 ```mermaid
 flowchart TD
-    subgraph HOST["Host Guild — RaidModeOneManyGuildCaller"]
+    subgraph HOST["Host Guild"]
         subgraph HChA["Channel A (owner = hub)"]
             HOwnerVR["Owner VoiceReceiver"]
             HOwnerVP["Owner VoiceProvider"]
@@ -587,10 +573,9 @@ flowchart TD
 
         HchIn["chIn"]
         HchCap["chCapture"]
-        HFanA["Fanout A"]
+        HFanA["runFanoutOwnerStar<br/>raw Opus → spk chOuts · Frame → relay"]
         HFanB["Fanout B"]
         HMixA["ChannelMixer A (hub)"]
-        HMixB["ChannelMixer B (owner only)"]
         HRelayMix["RelayMixer"]
         HchOwnerOut["chOwnerOut"]
         HchOut["chOut (spk)"]
@@ -600,11 +585,11 @@ flowchart TD
         HOwnerVR --> HchIn  --> HFanA
         HSpkVR   --> HchCap --> HFanB
 
-        %% Owner → speaker channel (mix-minus)
-        HFanA -- "mixCh_B"   --> HMixB
+        %% Owner → speaker chOut directly (raw Opus) + relay (Frame, decoded)
+        HFanA -- "raw Opus"  --> HchOut
         HFanA -- "relayCh_A" --> HRelayMix
 
-        %% Speaker → owner channel ONLY (star spoke → hub)
+        %% Speaker → owner hub ONLY (star spoke → hub)
         HFanB -- "mixCh_A"   --> HMixA
         HFanB -- "relayCh_B" --> HRelayMix
 
@@ -613,7 +598,7 @@ flowchart TD
         HBridge -- "Frame" --> HMixA
 
         HMixA -- "Output()" --> HchOwnerOut --> HOwnerVP
-        HMixB -- "Output()" --> HchOut      --> HSpkVP
+        HchOut --> HSpkVP
     end
 
     subgraph SESSION["ally.Session"]
@@ -623,7 +608,7 @@ flowchart TD
 
     HRelayMix -- "Output()" --> BFGHost
 
-    subgraph GUEST["Guest Guild — RaidModeOneManyAllyCaller"]
+    subgraph GUEST["Guest Guild"]
         subgraph GChA["Channel A (owner)"]
             GOwnerVR["Owner VoiceReceiver"]
             GOwnerVP["Owner VoiceProvider"]
@@ -637,33 +622,26 @@ flowchart TD
         GchCap["chCapture"]
         GFanA["Fanout A"]
         GFanB["Fanout B"]
-        GMixA["ChannelMixer A (relay only)"]
-        GMixB["ChannelMixer B (relay only)"]
         GRelayMix["RelayMixer"]
         GchOwnerOut["chOwnerOut"]
         GchOut["chOut (spk)"]
-        GRelayIn["relayOpusIn (guest)"]
-        GBridge["Bridge (decode once)"]
 
         GOwnerVR --> GchIn  --> GFanA
         GSpkVR   --> GchCap --> GFanB
 
-        %% Guest star: ALL sources → relay ONLY (no local channel-to-channel)
+        %% Guest star: ALL sources → relay ONLY (no local channel-to-channel, no channel mixers)
         GFanA -- "relayCh_A" --> GRelayMix
         GFanB -- "relayCh_B" --> GRelayMix
 
-        %% Host relay → all guest channel mixers via single bridge
-        GRelayIn --> GBridge
-        GBridge -- "Frame A" --> GMixA
-        GBridge -- "Frame B" --> GMixB
-
-        GMixA -- "Output()" --> GchOwnerOut --> GOwnerVP
-        GMixB -- "Output()" --> GchOut      --> GSpkVP
+        %% Host relay → speaker chOuts directly (no bridge, no channel mixer)
+        GchOwnerOut --> GOwnerVP
+        GchOut      --> GSpkVP
     end
 
     GRelayMix -- "Output()" --> BFGGuest
 
-    BFGHost  --> GRelayIn
+    BFGHost  -- "raw Opus → chOwnerOut" --> GchOwnerOut
+    BFGHost  -- "raw Opus → chOut"      --> GchOut
     BFGGuest --> HRelayIn
 
     %% link indices:
@@ -671,33 +649,28 @@ flowchart TD
     %%  1  : HchIn → HFanA
     %%  2  : HSpkVR → HchCap
     %%  3  : HchCap → HFanB
-    %%  4  : HFanA → HMixB (owner → spk, mix-minus)
-    %%  5  : HFanA → HRelayMix
-    %%  6  : HFanB → HMixA (spk → owner ONLY)
+    %%  4  : HFanA → HchOut (raw Opus, direct — no HMixB)
+    %%  5  : HFanA → HRelayMix (Frame, decoded)
+    %%  6  : HFanB → HMixA (spk → hub ONLY)
     %%  7  : HFanB → HRelayMix
     %%  8  : HRelayIn → HBridge
-    %%  9  : HBridge → HMixA (Frame, owner only)
+    %%  9  : HBridge → HMixA (Frame)
     %%  10 : HMixA → HchOwnerOut
     %%  11 : HchOwnerOut → HOwnerVP
-    %%  12 : HMixB → HchOut
-    %%  13 : HchOut → HSpkVP
-    %%  14 : HRelayMix → BFGHost
-    %%  15 : GOwnerVR → GchIn
-    %%  16 : GchIn → GFanA
-    %%  17 : GSpkVR → GchCap
-    %%  18 : GchCap → GFanB
-    %%  19 : GFanA → GRelayMix (relay only!)
-    %%  20 : GFanB → GRelayMix (relay only!)
-    %%  21 : GRelayIn → GBridge
-    %%  22 : GBridge → GMixA (Frame A)
-    %%  23 : GBridge → GMixB (Frame B)
-    %%  24 : GMixA → GchOwnerOut
-    %%  25 : GchOwnerOut → GOwnerVP
-    %%  26 : GMixB → GchOut
-    %%  27 : GchOut → GSpkVP
-    %%  28 : GRelayMix → BFGGuest
-    %%  29 : BFGHost → GRelayIn
-    %%  30 : BFGGuest → HRelayIn
+    %%  12 : HchOut → HSpkVP
+    %%  13 : HRelayMix → BFGHost
+    %%  14 : GOwnerVR → GchIn
+    %%  15 : GchIn → GFanA
+    %%  16 : GSpkVR → GchCap
+    %%  17 : GchCap → GFanB
+    %%  18 : GFanA → GRelayMix (relay only!)
+    %%  19 : GFanB → GRelayMix (relay only!)
+    %%  20 : GchOwnerOut → GOwnerVP
+    %%  21 : GchOut → GSpkVP
+    %%  22 : GRelayMix → BFGGuest
+    %%  23 : BFGHost → GchOwnerOut (raw Opus, direct)
+    %%  24 : BFGHost → GchOut (raw Opus, direct)
+    %%  25 : BFGGuest → HRelayIn
 
     %% Host Ch A (owner hub) — blue shades
     linkStyle 0  stroke:#0d47a1,stroke-width:2px
@@ -708,47 +681,40 @@ flowchart TD
     linkStyle 10 stroke:#42a5f5,stroke-width:2px
     linkStyle 11 stroke:#90caf9,stroke-width:2px
 
-    %% Host Ch B (speaker) — green shades
+    %% Host Ch B (speaker, direct raw Opus) — green shades
     linkStyle 2  stroke:#1b5e20,stroke-width:2px
     linkStyle 3  stroke:#2e7d32,stroke-width:2px
     linkStyle 4  stroke:#388e3c,stroke-width:2px
-    linkStyle 12 stroke:#66bb6a,stroke-width:2px
-    linkStyle 13 stroke:#a5d6a7,stroke-width:2px
+    linkStyle 12 stroke:#a5d6a7,stroke-width:2px
 
     %% Host relay — purple shades
     linkStyle 5  stroke:#4a148c,stroke-width:2px
     linkStyle 7  stroke:#6a1b9a,stroke-width:2px
-    linkStyle 14 stroke:#ba68c8,stroke-width:2px
+    linkStyle 13 stroke:#ba68c8,stroke-width:2px
 
     %% Guest capture — cyan/orange shades
-    linkStyle 15 stroke:#006064,stroke-width:2px
-    linkStyle 16 stroke:#00838f,stroke-width:2px
-    linkStyle 17 stroke:#e65100,stroke-width:2px
-    linkStyle 18 stroke:#ef6c00,stroke-width:2px
+    linkStyle 14 stroke:#006064,stroke-width:2px
+    linkStyle 15 stroke:#00838f,stroke-width:2px
+    linkStyle 16 stroke:#e65100,stroke-width:2px
+    linkStyle 17 stroke:#ef6c00,stroke-width:2px
 
     %% Guest sources → relay ONLY — teal
-    linkStyle 19 stroke:#00695c,stroke-width:2px
-    linkStyle 20 stroke:#26a69a,stroke-width:2px
+    linkStyle 18 stroke:#00695c,stroke-width:2px
+    linkStyle 19 stroke:#26a69a,stroke-width:2px
 
-    %% Guest relay bridge — cyan
-    linkStyle 21 stroke:#00acc1,stroke-width:2px
-
-    %% Guest channel output (from relay) — red/pink shades
-    linkStyle 22 stroke:#b71c1c,stroke-width:2px
-    linkStyle 23 stroke:#880e4f,stroke-width:2px
-    linkStyle 24 stroke:#e53935,stroke-width:2px
-    linkStyle 25 stroke:#e57373,stroke-width:2px
-    linkStyle 26 stroke:#c2185b,stroke-width:2px
-    linkStyle 27 stroke:#f06292,stroke-width:2px
+    %% Guest output (from host relay, direct) — red/pink shades
+    linkStyle 20 stroke:#e57373,stroke-width:2px
+    linkStyle 21 stroke:#f06292,stroke-width:2px
 
     %% Guest relay out — purple
-    linkStyle 28 stroke:#ce93d8,stroke-width:2px
+    linkStyle 22 stroke:#ce93d8,stroke-width:2px
 
-    %% Host → Guest relay delivery — teal
-    linkStyle 29 stroke:#00695c,stroke-width:2px
+    %% Host → Guest relay delivery (direct) — teal
+    linkStyle 23 stroke:#00695c,stroke-width:2px
+    linkStyle 24 stroke:#26a69a,stroke-width:2px
 
-    %% Guest → Host relay delivery — gold (owner mixer only)
-    linkStyle 30 stroke:#f57f17,stroke-width:2px
+    %% Guest → Host relay delivery — gold (hub mixer only)
+    linkStyle 25 stroke:#f57f17,stroke-width:2px
 ```
 
 ---
@@ -763,18 +729,20 @@ This prevents echo: users in channel X would otherwise hear their own audio play
 In star mode the mix-minus rule is tightened: speaker channel mixers receive audio **only from the
 owner channel** (not from other speakers). The owner's channel mixer receives all speaker sources
 (standard mix-minus still applies — it skips its own channel). Guest star mode goes further: sources
-feed the relay mixer only, and channel mixers receive audio exclusively from `registerRelayInputs`.
+feed the relay mixer only, and **channel mixers are not created at all** — host relay arrives as raw
+Opus bytes delivered directly to speaker `chOut` channels (direct output, same as `AllyListener`).
 
 ## Data flow summary
 
 | Stage            | Component                              | Description                                                                                           |
 |------------------|----------------------------------------|-------------------------------------------------------------------------------------------------------|
 | Capture          | `VoiceReceiver` → `chIn` / `chCapture`| Role-filtered Opus frames from Discord                                                                |
-| Fanout           | goroutine per source                   | Decodes Opus once, distributes `Frame{PCM, Opus}` to all mixer input channels                        |
+| Direct fanout    | `wireFanoutDirect` goroutine           | **OneCaller only**: raw Opus forwarded to speaker chOuts + relay with zero decode/encode              |
+| Fanout           | goroutine per source                   | Decodes Opus once, distributes `Frame{PCM, Opus}` to all mixer input channels (pool-allocated PCM)   |
 | Per-channel mix  | `ChannelMixer[X]`                      | Mixes all foreign sources; single-source passthrough forwards `Frame.Opus` directly (no copy/re-encode)|
 | Relay mix        | `RelayMixer`                           | Mixes all sources; output is broadcast to every attached guest guild                                  |
 | Relay bridge     | one goroutine per guild                | Decodes relay Opus **once**, fans `Frame{PCM, Opus}` to all dest `ChannelMixer` inputs               |
-| Guest delivery   | `ally.Session.BroadcastFromGuild`      | Sends one Opus channel per guest guild; bridge decodes and distributes to N mixers locally            |
+| Guest delivery   | `ally.Session.BroadcastFromGuild`      | Sends one Opus channel per guest guild; direct to chOuts (OneManyAllyCaller) or bridge → mixers      |
 
 ## Latency control — drain-to-latest
 

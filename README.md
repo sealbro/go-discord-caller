@@ -2,6 +2,9 @@
 
 A Go Discord bot that captures voice audio and relays it live to every bound speaker bot — across one or multiple Discord servers simultaneously. Supports single-caller broadcast and full multi-channel conference modes with mix-minus audio mixing.
 
+If this project is useful to you, please consider giving it a ⭐ on GitHub — it helps others discover the project and motivates continued development.
+
+[![GitHub stars](https://img.shields.io/github/stars/sealbro/go-discord-caller?style=social)](https://github.com/sealbro/go-discord-caller)
 [![Hub](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
 
 ## How it works

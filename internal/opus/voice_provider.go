@@ -11,6 +11,11 @@ type VoiceProvider struct {
 	voice.OpusFrameProvider
 	ch   <-chan []byte
 	done chan struct{}
+	// prev holds the buffer returned by the last ProvideOpusFrame call.
+	// It is recycled via PutEncodedFrame at the start of the next call —
+	// by that point disgo has finished sending the packet over UDP and no
+	// longer holds a reference to the slice.
+	prev []byte
 }
 
 func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
@@ -29,6 +34,14 @@ func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
 const providerDrainThreshold = 3
 
 func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
+	// Return the previous frame's buffer to the pool before blocking.
+	// disgo calls ProvideOpusFrame only after finishing the UDP send for the
+	// previous packet, so v.prev is no longer referenced at this point.
+	// PutEncodedFrame is a no-op for passthrough slices (wrong cap), so this
+	// is safe regardless of whether the frame came from the pool or the receiver.
+	PutEncodedFrame(v.prev)
+	v.prev = nil
+
 	select {
 	case <-v.done:
 		return nil, fmt.Errorf("voice provider is closed")
@@ -45,14 +58,18 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 				select {
 				case newer, ok := <-v.ch:
 					if !ok {
+						v.prev = data
 						return data, nil
 					}
+					PutEncodedFrame(data) // dropped frame; return to pool
 					data = newer
 				default:
+					v.prev = data
 					return data, nil
 				}
 			}
 		}
+		v.prev = data
 		return data, nil
 	}
 }

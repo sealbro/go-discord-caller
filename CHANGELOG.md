@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-04-22
+
+### Added
+- **Direct passthrough for `OneCaller` mode**: raw Opus bytes flow from the owner capture channel straight to all speaker outputs and the relay session — the entire mixer pipeline (decode, mix, encode) is skipped; zero CPU overhead for the single-caller case
+- **Star topology direct output for `OneManyGuildCaller`**: owner Opus is forwarded raw to each speaker channel (no re-encode); decode happens only once for the relay mixer; per-speaker-channel mixers are eliminated
+- **Guest direct output for `OneManyAllyCaller`**: guest `JoinSession` skips per-channel mixer creation and delivers relay audio directly to speaker outputs
+
+### Changed
+- **PCM buffer pool** (`GetPCM`/`PutPCM`): fanout goroutines and mixer tick now recycle `[]int16` PCM buffers via `sync.Pool`; superseded frames during drain and paused-mixer frames are returned immediately
+- **Encoded frame pool** (`getEncodedFrame`/`PutEncodedFrame`): re-encoded Opus output buffers are recycled via `sync.Pool`; `VoiceProvider` returns each buffer before blocking for the next frame, eliminating ~50–200 allocations/sec across active mixers; pool capacity derived from `mixerBitrate` and `mixerFrameSize` (4× nominal CBR frame size)
+- **Single-source passthrough copy removed**: `Mixer.tick` forwards `Frame.Opus` directly to the output channel instead of making a defensive copy — the fanout goroutine already produces an isolated copy per frame
+- **Relay bridge consolidated**: `registerRelayInputs` now registers one shared Opus input channel and decodes each packet once, fanning the resulting `Frame` to all destination mixers; previously one decoder goroutine per destination channel
+- **Relay bridge drain threshold** (`relayBridgeDrainThreshold = 3`): drain-to-latest only activates when > 3 packets are queued; previously always drained unconditionally
+- **Buffer depths reduced**: `audioChanBuf` 50 → 10, `mixerOutputBuf` 50 → 10, `mixerInputDrainThreshold` 20 → 4, `providerDrainThreshold` 5 → 3 — all aligned to drain thresholds so latency caps at ~200 ms instead of accumulating silently
+- **Provider drain preserves last frame**: `VoiceProvider` drain loop stops at `len(ch) > 1` (keeps one queued frame) instead of draining to empty, preventing mid-word audio cuts
+
 ## [0.7.0] - 2026-04-21
 
 ### Added

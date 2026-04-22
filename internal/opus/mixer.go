@@ -29,6 +29,7 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
+	mixerBitrate    = 16000 // bits per second sent to Opus encoder
 	// mixerOutputBuf is the output channel buffer depth (10 frames × 20 ms = 200 ms).
 	// Frames are dropped silently when the consumer falls more than 200 ms behind.
 	// Increase this if guest guilds experience frequent audio gaps under load.
@@ -52,6 +53,43 @@ func GetPCM() []int16 { return *pcmPool.Get().(*[]int16) }
 // PutPCM returns a PCM buffer to the pool for reuse.
 // The caller must not access the slice after this call.
 func PutPCM(s []int16) { s = s[:mixerPCMBuf]; pcmPool.Put(&s) }
+
+// encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
+// calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
+// Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
+//
+//	= 16000 × 20 / 1000 / 8 = 40 bytes  →  pool cap = 160 bytes.
+//
+// frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
+const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
+
+var encodedFramePool = &sync.Pool{
+	New: func() any {
+		return new(make([]byte, encodedFrameCap))
+	},
+}
+
+// getEncodedFrame returns a []byte of length n from the pool.
+// Falls back to a fresh allocation when n exceeds encodedFrameCap (rare).
+func getEncodedFrame(n int) []byte {
+	if n > encodedFrameCap {
+		return make([]byte, n)
+	}
+	return (*encodedFramePool.Get().(*[]byte))[:n]
+}
+
+// PutEncodedFrame returns a buffer to the pool.
+// Buffers not allocated by getEncodedFrame — identified by a capacity other than
+// encodedFrameCap (e.g. raw Opus passthrough slices from the receiver) — are
+// silently dropped; the GC reclaims them.
+// The caller must not access the slice after this call.
+func PutEncodedFrame(b []byte) {
+	if cap(b) != encodedFrameCap {
+		return
+	}
+	b = b[:encodedFrameCap]
+	encodedFramePool.Put(&b)
+}
 
 // Frame carries one audio frame through a mixer input channel.
 // PCM holds the pre-decoded samples used when multiple sources are mixed.
@@ -120,7 +158,7 @@ func NewMixer() (*Mixer, error) {
 	}
 	// 16 kbps is sufficient for voice relay; default (~32 kbps) produces larger
 	// frames than needed and wastes channel buffer space.
-	if err := enc.SetBitrate(16000); err != nil {
+	if err := enc.SetBitrate(mixerBitrate); err != nil {
 		return nil, fmt.Errorf("mixer: set bitrate: %w", err)
 	}
 	// In-band FEC embeds redundancy so the receiver can reconstruct a lost packet
@@ -342,8 +380,9 @@ func (m *Mixer) tick(ctx context.Context) error {
 		return fmt.Errorf("encode: %w", err)
 	}
 
-	// Copy the encoded frame so each consumer gets its own slice; encodeBuf is reused next tick.
-	out := make([]byte, n)
+	// Copy the encoded frame into a pooled buffer; encodeBuf is reused next tick.
+	// VoiceProvider returns this buffer via PutEncodedFrame before blocking for the next frame.
+	out := getEncodedFrame(n)
 	copy(out, m.encodeBuf[:n])
 
 	select {

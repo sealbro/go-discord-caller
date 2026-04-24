@@ -16,6 +16,10 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // audioChanBuf is the buffer size for Opus frame channels between the voice
@@ -49,6 +53,50 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		test:        test,
 		sessions:    ally.NewManager(),
 	}
+}
+
+// StartMetrics registers OTel observable metric callbacks.
+// Call once after the speaker pool is connected, alongside StartWatchdog.
+func (m *Service) StartMetrics() {
+	meter := otel.Meter("go-discord-caller")
+	if _, err := meter.RegisterCallback(m.observeBotOnline, telemetry.BotOnline); err != nil {
+		slog.Error("manager: failed to register bot_online metric callback", slog.Any("err", err))
+	}
+}
+
+// observeBotOnline is an OTel observable callback that emits gdc_bot_online
+// for every bot (owner + pool speakers) × every known guild at metric collection time.
+// Value is 1 when the bot is a registered member of that guild, 0 when not.
+func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
+	speakerIDs := m.poolSvc.GetIDs()
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for guildID, st := range m.statuses {
+		// Owner bot is always online in every guild it manages.
+		o.ObserveInt64(telemetry.BotOnline, 1,
+			metric.WithAttributes(
+				attribute.String("user_id", m.ownerBotID.String()),
+				attribute.String("guild_id", guildID.String()),
+			),
+		)
+
+		// Speaker bots: 1 if registered in this guild, 0 if not.
+		for _, botID := range speakerIDs {
+			value := int64(0)
+			if _, inGuild := st.Speakers[botID]; inGuild {
+				value = 1
+			}
+			o.ObserveInt64(telemetry.BotOnline, value,
+				metric.WithAttributes(
+					attribute.String("user_id", botID.String()),
+					attribute.String("guild_id", guildID.String()),
+				),
+			)
+		}
+	}
+	return nil
 }
 
 // ownerVoice returns a GuildVoice for the owner bot in guildID, bound to its

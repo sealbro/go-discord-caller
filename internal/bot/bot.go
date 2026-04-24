@@ -63,8 +63,9 @@ type SeedManager interface {
 	RemoveSpeaker(guildID, userID snowflake.ID)
 }
 
-// LifecycleManager handles graceful shutdown.
+// LifecycleManager handles startup hooks and graceful shutdown.
 type LifecycleManager interface {
+	StartMetrics()
 	Shutdown(ctx context.Context)
 }
 
@@ -152,6 +153,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		return err
 	}
 	b.poolSvc.StartWatchdog(ctx, 30*time.Second)
+	b.manager.StartMetrics()
 
 	if err := b.client.OpenGateway(ctx); err != nil {
 		return err

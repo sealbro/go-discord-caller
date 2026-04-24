@@ -75,7 +75,7 @@
         "kind": "QueryVariable",
         "spec": {
           "name": "guild_id",
-          "label": "Guild ID",
+          "label": "Guild",
           "hide": "dontHide",
           "refresh": "onTimeRangeChanged",
           "datasource": {
@@ -87,10 +87,10 @@
             "group": "",
             "version": "",
             "spec": {
-              "expr": "label_values(gdc_command_total{job=~\"$job\"}, guild_id)"
+              "expr": "query_result(gdc_discord_guild{job=~\"$job\"})"
             }
           },
-          "regex": "",
+          "regex": "/guild_name=\"(?P<text>[^\"]+)\".*guild_id=\"(?P<value>[^\"]+)\"/",
           "sort": "alphabeticalAsc",
           "multi": true,
           "includeAll": true,

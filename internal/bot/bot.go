@@ -21,6 +21,8 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel"
 )
 
 // SessionManager handles voice raid session lifecycle.
@@ -30,6 +32,7 @@ type SessionManager interface {
 	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
 	HasActiveSession(guildID snowflake.ID) bool
 	UpdateMixerPause(guildID snowflake.ID)
+	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
 }
 
 // BindingManager handles channel and role bindings.
@@ -63,8 +66,9 @@ type SeedManager interface {
 	RemoveSpeaker(guildID, userID snowflake.ID)
 }
 
-// LifecycleManager handles graceful shutdown.
+// LifecycleManager handles startup hooks and graceful shutdown.
 type LifecycleManager interface {
+	StartMetrics()
 	Shutdown(ctx context.Context)
 }
 
@@ -126,14 +130,20 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
 	}
 
-	poolSvc := pool.NewService()
-	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test)
+	// Metrics — must be created after telemetry.Setup so the OTel SDK is initialised.
+	metrics, err := telemetry.NewMetrics(otel.Meter(telemetry.ServiceName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to init metrics: %w", err)
+	}
+
+	poolSvc := pool.NewService(&metrics.Pool)
+	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
 
 	// Wire command handlers.
-	cmdHandlers := NewCommandHandlers(managerSvc)
+	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot)
 	cmdHandlers.Register(r)
 
-	client.AddEventListeners(eventListeners(managerSvc)...)
+	client.AddEventListeners(eventListeners(managerSvc, &metrics.Bot)...)
 
 	return &Bot{
 		client:        client,
@@ -152,6 +162,8 @@ func (b *Bot) Run(ctx context.Context) error {
 		return err
 	}
 	b.poolSvc.StartWatchdog(ctx, 30*time.Second)
+	b.poolSvc.StartMetrics()
+	b.manager.StartMetrics()
 
 	if err := b.client.OpenGateway(ctx); err != nil {
 		return err
@@ -181,6 +193,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		slog.InfoContext(ctx, "owner bot invite URL",
 			slog.String("url", installOwnerURL(selfUser.ID)),
 		)
+		b.poolSvc.RegisterBot(selfUser.ID, selfUser.Username)
 	}
 
 	slog.InfoContext(ctx, "bot is running. Press Ctrl+C to stop.")

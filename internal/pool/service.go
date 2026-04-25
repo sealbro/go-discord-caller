@@ -14,6 +14,8 @@ import (
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // PoolService is the interface for speaker pool operations used by dependent packages.
@@ -26,16 +28,30 @@ type PoolService interface {
 
 // Service manages the lifecycle of the pool of speaker bot gateways.
 // poolClients maps bot user ID → client for speaker bots only.
+// extraBots holds bots (e.g. the owner bot) that are tracked for the info
+// metric but not managed by the pool lifecycle.
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client
+	extraBots   map[snowflake.ID]string // id → username
+	metrics     *telemetry.PoolMetrics
 }
 
 // NewService creates a new speaker Service.
-func NewService() *Service {
+func NewService(metrics *telemetry.PoolMetrics) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
+		extraBots:   make(map[snowflake.ID]string),
+		metrics:     metrics,
 	}
+}
+
+// RegisterBot adds a bot to the info metric that is not part of the speaker pool
+// (e.g. the owner bot). Safe to call concurrently.
+func (s *Service) RegisterBot(id snowflake.ID, name string) {
+	s.mu.Lock()
+	s.extraBots[id] = name
+	s.mu.Unlock()
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
@@ -115,6 +131,43 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 	s.mu.Unlock()
 }
 
+// StartMetrics registers OTel observable callbacks for pool health gauges.
+// Call once after the pool is connected, alongside StartWatchdog.
+func (s *Service) StartMetrics() {
+	if err := s.metrics.RegisterObservers(s.observePoolBots); err != nil {
+		slog.Error("pool: failed to register pool metrics callback", slog.Any("err", err))
+	}
+}
+
+func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
+	s.mu.RLock()
+	total := int64(len(s.poolClients))
+	connected := int64(0)
+	for id, c := range s.poolClients {
+		botName := ""
+		if c != nil {
+			if self, ok := c.Caches.SelfUser(); ok {
+				botName = self.Username
+			}
+		}
+		s.metrics.ObserveBotInfo(o, id.String(), botName)
+
+		if isConnected(c) {
+			connected++
+			// Emit per-bot gateway heartbeat RTT.
+			// Latency() returns 0 until the first heartbeat ACK is received.
+			latMs := float64(c.Gateway.Latency().Milliseconds())
+			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+		}
+	}
+	for id, name := range s.extraBots {
+		s.metrics.ObserveBotInfo(o, id.String(), name)
+	}
+	s.mu.RUnlock()
+	s.metrics.ObservePoolBots(o, total, connected)
+	return nil
+}
+
 // Reconnect attempts to open the gateway for a bot whose connection failed.
 // It reads the token from the stored client.Token field. If the bot already has
 // a connected gateway it is a no-op and returns true.
@@ -139,12 +192,15 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 		return false
 	}
 
+	s.metrics.ReconnectAttempt(ctx, botUserID)
+
 	newClient, err := newPoolClient(token)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
+		s.metrics.ReconnectFailed(ctx, botUserID)
 		return false
 	}
 	if err = newClient.OpenGateway(ctx); err != nil {
@@ -152,6 +208,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
+		s.metrics.ReconnectFailed(ctx, botUserID)
 		return false
 	}
 

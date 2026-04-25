@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
@@ -30,7 +31,15 @@ func (h levelHandler) Enabled(ctx context.Context, l slog.Level) bool {
 	return l >= h.level.Level() && h.Handler.Enabled(ctx, l)
 }
 
-const serviceName = "go-discord-caller"
+func (h levelHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return levelHandler{level: h.level, Handler: h.Handler.WithAttrs(attrs)}
+}
+
+func (h levelHandler) WithGroup(name string) slog.Handler {
+	return levelHandler{level: h.level, Handler: h.Handler.WithGroup(name)}
+}
+
+const ServiceName = "go-discord-caller"
 
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.
 // All three signals are exported via OTLP gRPC to a single endpoint.
@@ -38,6 +47,10 @@ const serviceName = "go-discord-caller"
 // When endpoint is empty, no-op providers are used and nil shutdown is returned.
 func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), error) {
 	if endpoint == "" {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			AddSource: true,
+			Level:     level,
+		})))
 		return func() {}, nil
 	}
 
@@ -54,7 +67,7 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 	}()
 
 	res, err := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceName(serviceName)),
+		resource.WithAttributes(semconv.ServiceName(ServiceName)),
 	)
 	if err != nil {
 		setupErr = err
@@ -99,7 +112,7 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 
 	// Replace default slog with OTel bridge so all slog calls export via OTLP
 	// and automatically inject trace_id/span_id when context is provided.
-	otelHandler := otelslog.NewHandler(serviceName,
+	otelHandler := otelslog.NewHandler(ServiceName,
 		otelslog.WithLoggerProvider(lp),
 		otelslog.WithSource(true),
 	)

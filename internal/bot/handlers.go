@@ -1,25 +1,34 @@
 package bot
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // eventListeners returns all event listeners to register with the client.
-func eventListeners(managerSvc ManagerService) []bot.EventListener {
+func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
-		bot.NewListenerFunc(onGuildJoin(managerSvc)),
+		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),
+		bot.NewListenerFunc(onGuildJoin(managerSvc, metrics)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate),
-		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
-		bot.NewListenerFunc(onVoiceLeave(managerSvc)),
+		bot.NewListenerFunc(onVoiceJoin(managerSvc, metrics)),
+		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceMove(managerSvc)),
 	}
+}
+
+// recordGuildInfo records the guild info metric. Uses context.Background() because
+// disgo event handlers do not carry a request-scoped context.
+func recordGuildInfo(metrics *telemetry.BotMetrics, guildID snowflake.ID, guildName string) {
+	metrics.RecordGuildInfo(context.Background(), guildID.String(), guildName)
 }
 
 // onReady is called when the bot has connected and is ready.
@@ -37,10 +46,39 @@ func onReady(m ManagerService) func(*events.Ready) {
 	}
 }
 
+// onGuildAvailable is called for each guild that becomes available after the
+// initial Ready handshake. It records the guild info metric and initialises
+// VoiceCallers from the current voice states so the counter is accurate after
+// a bot restart (users already in voice channels emit no new join events).
+func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildAvailable) {
+	return func(e *events.GuildAvailable) {
+		recordGuildInfo(metrics, e.GuildID, e.Guild.Name)
+
+		// Seed VoiceCallers from voice states present in the GUILD_CREATE payload.
+		counts := make(map[snowflake.ID]int64) // channelID → caller count
+		for _, vs := range e.Guild.VoiceStates {
+			if vs.ChannelID == nil {
+				continue
+			}
+			member, ok := e.Client().Caches.Member(e.GuildID, vs.UserID)
+			if !ok || member.User.Bot {
+				continue
+			}
+			if m.HasCallerRole(e.GuildID, member.RoleIDs) {
+				counts[*vs.ChannelID]++
+			}
+		}
+		for channelID, count := range counts {
+			metrics.VoiceCallerAdd(context.Background(), count, e.GuildID.String(), channelID.String())
+		}
+	}
+}
+
 // onGuildJoin is called when the owner bot is added to a new guild.
 // It seeds speakers and ensures the guild has a persistent relay code.
-func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
+func onGuildJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
+		recordGuildInfo(metrics, e.GuildID, e.Guild.Name)
 		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
 	}
 }
@@ -85,7 +123,7 @@ func onGuildMemberUpdate(e *events.GuildMemberUpdate) {
 // It refreshes the member cache with the full member object from the event
 // (VOICE_STATE_UPDATE payloads can carry partial members without RoleIDs, so
 // we overwrite whatever disgo stored with the authoritative data from this event).
-func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
+func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
 		if e.Member.User.Bot {
 			return
@@ -103,25 +141,34 @@ func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 			slog.Bool("allowedToSpeak", allowed),
 		)
 
+		if allowed {
+			metrics.VoiceCallerAdd(context.Background(), 1, guildID.String(), e.VoiceState.ChannelID.String())
+		}
+
 		// A non-bot user appeared — resume the mixer for this channel if paused.
 		m.UpdateMixerPause(guildID)
 	}
 }
 
 // onVoiceLeave is called whenever a user leaves a voice channel.
-func onVoiceLeave(m ManagerService) func(*events.GuildVoiceLeave) {
+func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceLeave) {
 	return func(e *events.GuildVoiceLeave) {
 		if e.Member.User.Bot {
 			return
 		}
 
+		guildID := e.VoiceState.GuildID
 		slog.Info("user left voice channel",
 			slog.String("userID", e.Member.User.ID.String()),
-			slog.String("guildID", e.VoiceState.GuildID.String()),
+			slog.String("guildID", guildID.String()),
 		)
 
+		if m.HasCallerRole(guildID, e.Member.RoleIDs) {
+			metrics.VoiceCallerAdd(context.Background(), -1, guildID.String(), e.OldVoiceState.ChannelID.String())
+		}
+
 		// A non-bot user left — pause the mixer if this was the last listener.
-		m.UpdateMixerPause(e.VoiceState.GuildID)
+		m.UpdateMixerPause(guildID)
 	}
 }
 

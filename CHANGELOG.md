@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-04-25
+
+### Added
+- **Bot channel access check before raid start**: `/start` now verifies that every enabled, bound bot has `ViewChannel + Connect + Speak` permissions in its target channel before connecting; a formatted warning message listing the offending bot and channel is sent and the raid is aborted if any permission is missing
+- **Startup cache warmup per guild**: channels and bot members (owner + all pool speakers) are fetched via REST at startup and populated into the owner bot's cache so permission checks are fully cache-based with no per-call REST round-trips
+- **Gateway latency metric** (`gdc.pool.gateway.latency`): round-trip latency for each speaker bot gateway connection exported as an OTel histogram
+- **`gdc_bot_online` metric**: observable gauge emitted for each bot that is an active guild member; owner bot is always included, speaker bots only when registered in the guild — keeps cardinality bounded
+- **Grafana dashboard**: initial dashboard for go-discord-caller covering pool bots, session speakers, guild metrics, and audio pipeline telemetry; dashboard file moved to `misc/dashboards/`
+
+### Changed
+- **Session metrics on voice state events**: active session speaker count is updated on `VOICE_STATE_UPDATE` in addition to session start/stop
+- **`disgo` log level from config**: the disgo internal logger now honours `LOG_LEVEL` env var instead of always using the default level
+
+### Fixed
+- **`ViewChannel` permission not checked**: previous access check only verified `Connect + Speak`; denying "View Channel" in the Discord UI was silently ignored; all three permissions are now required
+
 ## [0.7.1] - 2026-04-22
 
 ### Added

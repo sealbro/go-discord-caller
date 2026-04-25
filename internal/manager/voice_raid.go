@@ -56,7 +56,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
-		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider()
+		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
 			ownerSetup.WithVoiceReceiver(allowUser)
@@ -181,7 +181,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		} else {
 			wireFanout(ctx, guestGuildID, sources, destinations, guestChannelMixers, guestRelayMixer, &m.metrics.Session)
 			toClose = registerRelayInputs(ctx, guestGuildID, allySession, destinations, guestChannelMixers, &m.metrics.Session)
-			startChannelMixers(ctx, destinations, guestChannelMixers)
+			startChannelMixers(ctx, destinations, guestChannelMixers, guestGuildID, &m.metrics.Session)
 			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		}
 	} else {
@@ -292,7 +292,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	var chOwnerOut chan []byte
 	if mode.WithCapture() {
 		chOwnerOut = make(chan []byte, audioChanBuf)
-		ownerSetup.WithVoiceProvider()
+		ownerSetup.WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider))
 	}
 	chIn, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
 	if err != nil {
@@ -406,7 +406,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 			slog.Int("activeSpeakers", len(setup.joined)),
 		)
 		// Start only the hub mixer; speaker chOuts are closed by runFanoutOwnerStar on exit.
-		startChannelMixers(ctx, ownerDests, channelMixers)
+		startChannelMixers(ctx, ownerDests, channelMixers, guildID, &m.metrics.Session)
 		startRelayBroadcast(ctx, relayMixer, allySession, ownerCleanup, guildID, &m.metrics.Session)
 		return allyCode, nil
 	}
@@ -456,7 +456,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		slog.String("code", allyCode),
 		slog.Int("activeSpeakers", len(setup.joined)),
 	)
-	startChannelMixers(ctx, destinations, channelMixers)
+	startChannelMixers(ctx, destinations, channelMixers, guildID, &m.metrics.Session)
 	startRelayBroadcast(ctx, relayMixer, allySession, ownerCleanup, guildID, &m.metrics.Session)
 	return allyCode, nil
 }

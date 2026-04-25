@@ -9,8 +9,9 @@ import (
 // VoiceProvider streams Opus frames from a channel into a voice connection.
 type VoiceProvider struct {
 	voice.OpusFrameProvider
-	ch   <-chan []byte
-	done chan struct{}
+	ch     <-chan []byte
+	done   chan struct{}
+	onDrop func() // called once per frame silently discarded by the drain loop; nil = no-op
 	// prev holds the buffer returned by the last ProvideOpusFrame call.
 	// It is recycled via PutEncodedFrame at the start of the next call —
 	// by that point disgo has finished sending the packet over UDP and no
@@ -18,10 +19,11 @@ type VoiceProvider struct {
 	prev []byte
 }
 
-func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
+func NewVoiceProvider(ch <-chan []byte, onDrop func()) *VoiceProvider {
 	return &VoiceProvider{
-		ch:   ch,
-		done: make(chan struct{}),
+		ch:     ch,
+		done:   make(chan struct{}),
+		onDrop: onDrop,
 	}
 }
 
@@ -62,6 +64,9 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 						return data, nil
 					}
 					PutEncodedFrame(data) // dropped frame; return to pool
+					if v.onDrop != nil {
+						v.onDrop()
+					}
 					data = newer
 				default:
 					v.prev = data

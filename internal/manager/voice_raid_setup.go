@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -74,7 +75,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
 			}
 			chOut := make(chan []byte, audioChanBuf)
-			chCapture, cleanup, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture, allowUser)
+			chCapture, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
@@ -113,12 +114,12 @@ func (m *Service) commitSession(session *guild.Session) error {
 // returned channel receives frames captured from the speaker's channel, filtered
 // by allowUser (shared filter built once at session start).
 // The caller is responsible for calling the returned cleanup function.
-func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
+func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
 	session := NewVoiceConnSetup(speakerID)
 	if m.test.IsTestBot(speakerID) {
 		session.WithFileProvider(m.test.FileDCA)
 	} else {
-		session.WithVoiceProvider()
+		session.WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider))
 	}
 
 	if withCapture {

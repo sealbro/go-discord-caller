@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"sync"
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
@@ -11,18 +12,37 @@ import (
 // and slash command observability.
 type BotMetrics struct {
 	meter        metric.Meter // retained for RegisterBotOnline
-	guildInfo    metric.Int64Gauge
+	guildInfo    metric.Int64ObservableGauge
 	botOnline    metric.Int64ObservableGauge
 	voiceCallers metric.Int64UpDownCounter
 	cmdCount     metric.Int64Counter
 	cmdDuration  metric.Float64Histogram
+
+	guildMu sync.RWMutex
+	guilds  map[string]string // guildID → guildName
 }
 
 func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	b.meter = meter
-	if b.guildInfo, err = meter.Int64Gauge("gdc.discord.guild",
+	b.guilds = make(map[string]string)
+	if b.guildInfo, err = meter.Int64ObservableGauge("gdc.discord.guild",
 		metric.WithDescription("Info gauge for known guilds; value is always 1. Labels: guild_id, guild_name."),
 	); err != nil {
+		return
+	}
+	if _, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		b.guildMu.RLock()
+		defer b.guildMu.RUnlock()
+		for guildID, guildName := range b.guilds {
+			o.ObserveInt64(b.guildInfo, 1,
+				metric.WithAttributes(
+					attribute.String("guild_id", guildID),
+					attribute.String("guild_name", guildName),
+				),
+			)
+		}
+		return nil
+	}, b.guildInfo); err != nil {
 		return
 	}
 	if b.botOnline, err = meter.Int64ObservableGauge("gdc.bot.online",
@@ -66,14 +86,11 @@ func (b *BotMetrics) ObserveBotOnline(o metric.Observer, userID, guildID string)
 	)
 }
 
-// RecordGuildInfo emits the guild info gauge for a known guild.
-func (b *BotMetrics) RecordGuildInfo(ctx context.Context, guildID, guildName string) {
-	b.guildInfo.Record(ctx, 1,
-		metric.WithAttributes(
-			attribute.String("guild_id", guildID),
-			attribute.String("guild_name", guildName),
-		),
-	)
+// RecordGuildInfo registers guildID/guildName so the observable gauge emits it on every scrape.
+func (b *BotMetrics) RecordGuildInfo(guildID, guildName string) {
+	b.guildMu.Lock()
+	defer b.guildMu.Unlock()
+	b.guilds[guildID] = guildName
 }
 
 // VoiceCallerAdd adjusts the voice caller counter for a guild/channel by delta.

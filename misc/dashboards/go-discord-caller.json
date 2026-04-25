@@ -1881,7 +1881,7 @@
                       "kind": "DataQuery",
                       "version": "",
                       "spec": {
-                        "expr": "rate(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[1m])",
+                        "expr": "rate(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])",
                         "instant": false,
                         "legendFormat": "{{path}} \u2013 {{guild_id}}",
                         "range": true
@@ -2164,7 +2164,7 @@
                       "group": "",
                       "version": "",
                       "spec": {
-                        "expr": "gdc_bot_gateway_latency_milliseconds{job=~\"$job\"}",
+                        "expr": "gdc_bot_gateway_latency_milliseconds{job=~\"$job\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{job=~\"$job\"}",
                         "legendFormat": "{{bot_name}}",
                         "instant": false,
                         "range": true

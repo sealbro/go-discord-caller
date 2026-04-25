@@ -38,9 +38,10 @@ func (v *VoiceConnSetup) WithFileProvider(path string) *VoiceConnSetup {
 }
 
 // WithVoiceProvider reads opus frames from chIn and plays them.
-func (v *VoiceConnSetup) WithVoiceProvider() *VoiceConnSetup {
+// onDrop is called once per frame discarded by the provider's drain loop; pass nil to disable.
+func (v *VoiceConnSetup) WithVoiceProvider(onDrop func()) *VoiceConnSetup {
 	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.NewVoiceProvider(chIn), nil
+		return opus.NewVoiceProvider(chIn, onDrop), nil
 	}
 	return v
 }

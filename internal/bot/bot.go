@@ -21,6 +21,8 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel"
 )
 
 // SessionManager handles voice raid session lifecycle.
@@ -127,14 +129,20 @@ func New(cfg *config.Config) (*Bot, error) {
 		return nil, fmt.Errorf("failed to open yaml store %q: %w", cfg.StorePath, err)
 	}
 
-	poolSvc := pool.NewService()
-	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test)
+	// Metrics — must be created after telemetry.Setup so the OTel SDK is initialised.
+	metrics, err := telemetry.NewMetrics(otel.Meter(telemetry.ServiceName))
+	if err != nil {
+		return nil, fmt.Errorf("failed to init metrics: %w", err)
+	}
+
+	poolSvc := pool.NewService(&metrics.Pool)
+	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
 
 	// Wire command handlers.
-	cmdHandlers := NewCommandHandlers(managerSvc)
+	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot)
 	cmdHandlers.Register(r)
 
-	client.AddEventListeners(eventListeners(managerSvc)...)
+	client.AddEventListeners(eventListeners(managerSvc, &metrics.Bot)...)
 
 	return &Bot{
 		client:        client,

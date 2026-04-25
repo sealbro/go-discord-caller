@@ -1,0 +1,66 @@
+package telemetry
+
+import (
+	"context"
+
+	"github.com/disgoorg/snowflake/v2"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+)
+
+// PoolMetrics tracks speaker pool connectivity and reconnect health.
+type PoolMetrics struct {
+	meter             metric.Meter // retained for RegisterObservers
+	botsTotal         metric.Int64ObservableGauge
+	botsConnected     metric.Int64ObservableGauge
+	reconnectAttempts metric.Int64Counter
+	reconnectFailures metric.Int64Counter
+}
+
+func (p *PoolMetrics) init(meter metric.Meter) (err error) {
+	p.meter = meter
+	if p.botsTotal, err = meter.Int64ObservableGauge("gdc.pool.bots.total",
+		metric.WithDescription("Total speaker bots registered in the pool."),
+	); err != nil {
+		return
+	}
+	if p.botsConnected, err = meter.Int64ObservableGauge("gdc.pool.bots.connected",
+		metric.WithDescription("Speaker bots with a healthy gateway connection."),
+	); err != nil {
+		return
+	}
+	if p.reconnectAttempts, err = meter.Int64Counter("gdc.pool.reconnect.attempts.total",
+		metric.WithDescription("Watchdog gateway reconnect attempts."),
+	); err != nil {
+		return
+	}
+	if p.reconnectFailures, err = meter.Int64Counter("gdc.pool.reconnect.failures.total",
+		metric.WithDescription("Watchdog gateway reconnect failures."),
+	); err != nil {
+		return
+	}
+	return nil
+}
+
+// RegisterObservers registers cb as the observable callback for pool bot gauges.
+func (p *PoolMetrics) RegisterObservers(cb metric.Callback) error {
+	_, err := p.meter.RegisterCallback(cb, p.botsTotal, p.botsConnected)
+	return err
+}
+
+// ObservePoolBots reports current total and connected bot counts via o.
+// Call inside the callback registered with RegisterObservers.
+func (p *PoolMetrics) ObservePoolBots(o metric.Observer, total, connected int64) {
+	o.ObserveInt64(p.botsTotal, total)
+	o.ObserveInt64(p.botsConnected, connected)
+}
+
+// ReconnectAttempt records one watchdog reconnect attempt for botID.
+func (p *PoolMetrics) ReconnectAttempt(ctx context.Context, botID snowflake.ID) {
+	p.reconnectAttempts.Add(ctx, 1, metric.WithAttributes(attribute.String("bot_id", botID.String())))
+}
+
+// ReconnectFailed records one failed watchdog reconnect attempt for botID.
+func (p *PoolMetrics) ReconnectFailed(ctx context.Context, botID snowflake.ID) {
+	p.reconnectFailures.Add(ctx, 1, metric.WithAttributes(attribute.String("bot_id", botID.String())))
+}

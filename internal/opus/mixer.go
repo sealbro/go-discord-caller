@@ -118,9 +118,10 @@ type inputEntry struct {
 // non-bot users). While paused, tick still drains input channels to prevent
 // upstream backpressure, but skips mixing, encoding, and output — saving CPU.
 type Mixer struct {
-	mu     sync.Mutex
-	inputs map[snowflake.ID]*inputEntry
-	paused atomic.Bool
+	mu      sync.Mutex
+	inputs  map[snowflake.ID]*inputEntry
+	paused  atomic.Bool
+	metrics *telemetry.MixerMetrics
 
 	out chan []byte
 	enc *hraban.Encoder
@@ -145,7 +146,9 @@ const mixerComplexity = 3
 const mixerInputDrainThreshold = 4
 
 // NewMixer creates a Mixer ready to accept inputs and run.
-func NewMixer() (*Mixer, error) {
+// metrics is used to record tick duration and pipeline latency; pass a zero-value
+// MixerMetrics (or nil pointer fields) when metrics are not needed.
+func NewMixer(metrics *telemetry.MixerMetrics) (*Mixer, error) {
 	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppVoIP)
 	if err != nil {
 		return nil, fmt.Errorf("mixer: new encoder: %w", err)
@@ -174,6 +177,7 @@ func NewMixer() (*Mixer, error) {
 		inputs:    make(map[snowflake.ID]*inputEntry),
 		out:       make(chan []byte, mixerOutputBuf),
 		enc:       enc,
+		metrics:   metrics,
 		mixed:     make([]int32, mixerPCMBuf),
 		pcm:       make([]int16, mixerPCMBuf),
 		encodeBuf: make([]byte, 4096),
@@ -238,7 +242,7 @@ func (m *Mixer) Run(ctx context.Context) {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
 			elapsed := time.Since(start)
-			telemetry.MixerTickDuration.Record(ctx, float64(elapsed.Microseconds())/1000)
+			m.metrics.RecordTick(ctx, float64(elapsed.Microseconds())/1000)
 			// Subtract processing time so the next tick fires closer to 20 ms
 			// after the previous one started, not 20 ms after it finished.
 			next := mixerFrameDur - elapsed
@@ -327,7 +331,7 @@ func (m *Mixer) tick(ctx context.Context) error {
 		}
 	}
 	if !oldest.IsZero() {
-		telemetry.MixerPipelineLatency.Record(ctx,
+		m.metrics.RecordPipelineLatency(ctx,
 			float64(now.Sub(oldest).Microseconds())/1000)
 	}
 

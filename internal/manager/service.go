@@ -17,8 +17,6 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
-	"go.opentelemetry.io/otel"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -40,10 +38,11 @@ type Service struct {
 	ownerBotID  snowflake.ID
 	test        config.TestConfig
 	sessions    *ally.Manager
+	metrics     *telemetry.Metrics
 }
 
 // NewService creates a new manager Service.
-func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig) *Service {
+func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig, metrics *telemetry.Metrics) *Service {
 	return &Service{
 		statuses:    make(map[snowflake.ID]*guild.Status),
 		store:       st,
@@ -52,14 +51,14 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		ownerBotID:  ownerID,
 		test:        test,
 		sessions:    ally.NewManager(),
+		metrics:     metrics,
 	}
 }
 
 // StartMetrics registers OTel observable metric callbacks.
 // Call once after the speaker pool is connected, alongside StartWatchdog.
 func (m *Service) StartMetrics() {
-	meter := otel.Meter(telemetry.ServiceName)
-	if _, err := meter.RegisterCallback(m.observeBotOnline, telemetry.BotOnline); err != nil {
+	if err := m.metrics.Bot.RegisterBotOnline(m.observeBotOnline); err != nil {
 		slog.Error("manager: failed to register bot_online metric callback", slog.Any("err", err))
 	}
 }
@@ -76,22 +75,12 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 
 	for guildID, st := range m.statuses {
 		// Owner bot is always a member of every guild it manages.
-		o.ObserveInt64(telemetry.BotOnline, 1,
-			metric.WithAttributes(
-				attribute.String("user_id", m.ownerBotID.String()),
-				attribute.String("guild_id", guildID.String()),
-			),
-		)
+		m.metrics.Bot.ObserveBotOnline(o, m.ownerBotID.String(), guildID.String())
 
 		// Speaker bots: emit only when registered in this guild.
 		for _, botID := range speakerIDs {
 			if _, inGuild := st.Speakers[botID]; inGuild {
-				o.ObserveInt64(telemetry.BotOnline, 1,
-					metric.WithAttributes(
-						attribute.String("user_id", botID.String()),
-						attribute.String("guild_id", guildID.String()),
-					),
-				)
+				m.metrics.Bot.ObserveBotOnline(o, botID.String(), guildID.String())
 			}
 		}
 	}

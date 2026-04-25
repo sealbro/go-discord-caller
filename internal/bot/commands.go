@@ -16,7 +16,6 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
-	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -90,11 +89,12 @@ func permPtr(p discord.Permissions) omit.Omit[*discord.Permissions] {
 // CommandHandlers wires all slash command and component routes to the manager service.
 type CommandHandlers struct {
 	manager ManagerService
+	metrics *telemetry.BotMetrics
 }
 
 // NewCommandHandlers creates a new CommandHandlers.
-func NewCommandHandlers(m ManagerService) *CommandHandlers {
-	return &CommandHandlers{manager: m}
+func NewCommandHandlers(m ManagerService, metrics *telemetry.BotMetrics) *CommandHandlers {
+	return &CommandHandlers{manager: m, metrics: metrics}
 }
 
 // Register attaches all routes to the given router.
@@ -164,12 +164,7 @@ func (h *CommandHandlers) withGuild(fn guildCommandHandler) func(discord.SlashCo
 		err := fn(guildID, data, e)
 		duration := time.Since(start).Seconds()
 
-		attrs := metric.WithAttributes(
-			attribute.String("command", data.CommandName()),
-			attribute.String("guild.id", guildID.String()),
-		)
-		telemetry.CommandCount.Add(ctx, 1, attrs)
-		telemetry.CommandDuration.Record(ctx, duration, attrs)
+		h.metrics.RecordCommand(ctx, data.CommandName(), guildID.String(), duration)
 
 		if err != nil {
 			span.RecordError(err)

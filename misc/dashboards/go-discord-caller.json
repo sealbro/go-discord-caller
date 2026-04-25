@@ -1937,6 +1937,359 @@
           }
         }
       },
+      "stat-voice-callers": {
+        "kind": "Panel",
+        "spec": {
+          "id": 21,
+          "title": "Active Voice Callers",
+          "description": "Users with the caller role currently in a voice channel, per guild",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum(gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"})",
+                        "legendFormat": "Callers",
+                        "instant": true,
+                        "range": false
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "stat",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+                "textMode": "auto"
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "thresholds" },
+                  "mappings": [],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "green", "value": null },
+                      { "color": "yellow", "value": 5 },
+                      { "color": "red", "value": 10 }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "ts-voice-callers": {
+        "kind": "Panel",
+        "spec": {
+          "id": 22,
+          "title": "Voice Callers Over Time",
+          "description": "Users with the caller role in a voice channel, per guild",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"}",
+                        "legendFormat": "{{guild_id}}",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "timeseries",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": ["lastNotNull", "max"],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": { "mode": "multi", "sort": "desc" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "fillOpacity": 20,
+                    "spanNulls": false,
+                    "showPoints": "auto"
+                  },
+                  "min": 0,
+                  "unit": "short"
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "stat-bot-gateway-latency": {
+        "kind": "Panel",
+        "spec": {
+          "id": 23,
+          "title": "Gateway Latency (avg)",
+          "description": "Average Discord gateway WebSocket heartbeat RTT across all bots",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "avg(gdc_bot_gateway_latency_milliseconds{job=~\"$job\"})",
+                        "legendFormat": "avg",
+                        "instant": true,
+                        "range": false
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "stat",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+                "textMode": "auto"
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "thresholds" },
+                  "mappings": [],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "green", "value": null },
+                      { "color": "yellow", "value": 50 },
+                      { "color": "red", "value": 100 }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "ts-bot-gateway-latency": {
+        "kind": "Panel",
+        "spec": {
+          "id": 24,
+          "title": "Bot Gateway Latency",
+          "description": "Discord gateway WebSocket heartbeat RTT per bot",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "gdc_bot_gateway_latency_milliseconds{job=~\"$job\"}",
+                        "legendFormat": "{{bot_name}}",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "timeseries",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": ["lastNotNull", "max"],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": { "mode": "multi", "sort": "desc" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "fillOpacity": 10,
+                    "spanNulls": false,
+                    "showPoints": "auto",
+                    "thresholdsStyle": { "mode": "line" }
+                  },
+                  "min": 0,
+                  "unit": "ms",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "green", "value": null },
+                      { "color": "yellow", "value": 50 },
+                      { "color": "red", "value": 100 }
+                    ]
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "ts-bot-online": {
+        "kind": "Panel",
+        "spec": {
+          "id": 25,
+          "title": "Bots Online per Guild",
+          "description": "1 when a bot is a registered member of the guild; emitted only for bots present in the guild",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum by (bot_id) (gdc_bot_online{job=~\"$job\", guild_id=~\"$guild_id\"})",
+                        "legendFormat": "{{bot_id}}",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "timeseries",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": ["lastNotNull"],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": { "mode": "multi", "sort": "desc" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "fillOpacity": 20,
+                    "spanNulls": false,
+                    "showPoints": "auto"
+                  },
+                  "min": 0,
+                  "max": 1,
+                  "unit": "short"
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
       "ts-reconnect": {
         "kind": "Panel",
         "spec": {
@@ -2299,6 +2652,56 @@
               "x": 0,
               "y": 60,
               "width": 24,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "stat-voice-callers" },
+              "x": 0,
+              "y": 68,
+              "width": 6,
+              "height": 4
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "ts-voice-callers" },
+              "x": 6,
+              "y": 68,
+              "width": 18,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "stat-bot-gateway-latency" },
+              "x": 0,
+              "y": 72,
+              "width": 6,
+              "height": 4
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "ts-bot-gateway-latency" },
+              "x": 0,
+              "y": 76,
+              "width": 12,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "ts-bot-online" },
+              "x": 12,
+              "y": 76,
+              "width": 12,
               "height": 8
             }
           }

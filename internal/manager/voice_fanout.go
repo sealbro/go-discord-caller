@@ -234,11 +234,10 @@ func wireFanoutOneManyDirect(ctx context.Context, guildID snowflake.ID, sources 
 			}
 			go runFanoutOwnerStar(ctx, src.ch, directSpeakerOuts, relayCh, relayMixer, src.id)
 		} else {
-			// Speaker source: decode once → hub mixer + relay (star spoke → hub).
+			// Speaker source: decode once → hub mixer only (star spoke → hub).
+			// Speaker audio is NOT relayed to guests — only the owner/caller's audio is.
 			var fanTargets []chan opus.Frame
 			var removals []mixerRef
-
-			tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", &fanTargets, &removals)
 
 			if hubMixer, ok := chanMixers[ownerChannelID]; ok {
 				tryAddMixerInput(ctx, hubMixer, src.id, "hub mixer", &fanTargets, &removals)

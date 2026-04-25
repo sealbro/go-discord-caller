@@ -101,7 +101,7 @@ func init() {
 	must(err)
 
 	BotOnline, err = meter.Int64ObservableGauge("gdc.bot.online",
-		metric.WithDescription("1 while a speaker bot gateway is connected in the guild, 0 when disconnected."),
+		metric.WithDescription("1 when the bot is a registered member of the guild, absent otherwise."),
 	)
 	must(err)
 
@@ -131,7 +131,7 @@ func init() {
 	must(err)
 
 	FanoutFramesDropped, err = meter.Int64Counter("gdc.fanout.frames.dropped.total",
-		metric.WithDescription("Opus frames dropped due to full channels in the fanout/relay pipeline. Labels: guild_id, path."),
+		metric.WithDescription("Opus frames dropped due to full channels in the fanout/relay pipeline."),
 	)
 	must(err)
 }

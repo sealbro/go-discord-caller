@@ -65,8 +65,9 @@ func (m *Service) StartMetrics() {
 }
 
 // observeBotOnline is an OTel observable callback that emits gdc_bot_online
-// for every bot (owner + pool speakers) × every known guild at metric collection time.
-// Value is 1 when the bot is a registered member of that guild, 0 when not.
+// for every bot that is a registered guild member at metric collection time.
+// Only emits when value is 1 (bot present in guild) — absent bots produce no
+// series rather than a 0, keeping cardinality bounded as pool/guild count grows.
 func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 	speakerIDs := m.poolSvc.GetIDs()
 
@@ -74,7 +75,7 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 	defer m.mu.RUnlock()
 
 	for guildID, st := range m.statuses {
-		// Owner bot is always online in every guild it manages.
+		// Owner bot is always a member of every guild it manages.
 		o.ObserveInt64(telemetry.BotOnline, 1,
 			metric.WithAttributes(
 				attribute.String("user_id", m.ownerBotID.String()),
@@ -82,18 +83,16 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 			),
 		)
 
-		// Speaker bots: 1 if registered in this guild, 0 if not.
+		// Speaker bots: emit only when registered in this guild.
 		for _, botID := range speakerIDs {
-			value := int64(0)
 			if _, inGuild := st.Speakers[botID]; inGuild {
-				value = 1
+				o.ObserveInt64(telemetry.BotOnline, 1,
+					metric.WithAttributes(
+						attribute.String("user_id", botID.String()),
+						attribute.String("guild_id", guildID.String()),
+					),
+				)
 			}
-			o.ObserveInt64(telemetry.BotOnline, value,
-				metric.WithAttributes(
-					attribute.String("user_id", botID.String()),
-					attribute.String("guild_id", guildID.String()),
-				),
-			)
 		}
 	}
 	return nil

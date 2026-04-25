@@ -273,7 +273,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		} else {
 			wireFanout(ctx, guestGuildID, sources, destinations, guestChannelMixers, guestRelayMixer)
-			toClose = registerRelayInputs(guestGuildID, allySession, destinations, guestChannelMixers)
+			toClose = registerRelayInputs(ctx, guestGuildID, allySession, destinations, guestChannelMixers)
 			startChannelMixers(ctx, destinations, guestChannelMixers)
 			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		}
@@ -319,6 +319,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				st.Session = nil
 			}
 			m.mu.Unlock()
+			telemetry.SessionSpeakers.Record(ctx, 0,
+				metric.WithAttributes(attribute.String("guild_id", guestGuildID.String())),
+			)
 			telemetry.SessionsActive.Add(ctx, -1)
 			telemetry.SessionStop.Add(ctx, 1)
 			span.End()
@@ -538,7 +541,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 					break
 				}
 			}
-			registerRelayInputs(guildID, allySession, ownerDests, channelMixers)
+			registerRelayInputs(ctx, guildID, allySession, ownerDests, channelMixers)
 		}
 
 		telemetry.SessionSpeakers.Record(ctx, int64(len(setup.joined)),
@@ -609,7 +612,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// When the host allows guest capture, register host channel mixers as relay
 	// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
 	if mode.AllowGuestCapture() {
-		registerRelayInputs(guildID, allySession, destinations, channelMixers)
+		registerRelayInputs(ctx, guildID, allySession, destinations, channelMixers)
 	}
 
 	telemetry.SessionSpeakers.Record(ctx, int64(len(setup.joined)),
@@ -806,6 +809,11 @@ func runFanoutSource(ctx context.Context, guildID snowflake.ID, in <-chan []byte
 		slog.ErrorContext(ctx, "fanout: failed to create decoder", slog.Any("err", err))
 		return
 	}
+	// Pre-compute drop attribute once to avoid per-frame allocations on the hot path.
+	dropAttr := metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("path", "mixer"),
+	)
 	scratch := make([]int16, opus.MixerPCMBuf)
 	for {
 		select {
@@ -831,12 +839,7 @@ func runFanoutSource(ctx context.Context, guildID snowflake.ID, in <-chan []byte
 				case t <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: now}:
 				default:
 					opus.PutPCM(pcm) // channel full — drop frame
-					telemetry.FanoutFramesDropped.Add(ctx, 1,
-						metric.WithAttributes(
-							attribute.String("guild_id", guildID.String()),
-							attribute.String("path", "mixer"),
-						),
-					)
+					telemetry.FanoutFramesDropped.Add(ctx, 1, dropAttr)
 				}
 			}
 		}
@@ -969,6 +972,9 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 	go func() {
 		defer func() {
 			ownerCleanup()
+			telemetry.SessionSpeakers.Record(ctx, 0,
+				metric.WithAttributes(attribute.String("guild_id", guildID.String())),
+			)
 			telemetry.SessionsActive.Add(ctx, -1)
 			telemetry.SessionStop.Add(ctx, 1)
 			trace.SpanFromContext(ctx).End()
@@ -995,7 +1001,7 @@ const relayBridgeDrainThreshold = 3
 // runFanoutSource does for local sources. Returns the single Opus input channel
 // so the caller can close it on teardown (closing triggers bridge goroutine exit,
 // which then closes all downstream frame channels).
-func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
+func registerRelayInputs(ctx context.Context, guildID snowflake.ID, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
 	// Register one frame output channel per destination mixer.
 	frameOuts := make([]chan opus.Frame, 0, len(dests))
 	for _, dest := range dests {
@@ -1018,8 +1024,13 @@ func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*d
 	// Both PCM and original Opus bytes are forwarded so the mixer can apply
 	// the single-source passthrough optimisation when only one source is active.
 	// Exits when relayOpusIn is closed (session teardown closes it via toClose).
+	// Pre-compute drop attribute once to avoid per-frame allocations on the hot path.
+	relayDropAttr := metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("path", "relay_bridge"),
+	)
 	relayOpusIn := make(chan []byte, audioChanBuf)
-	go func(in <-chan []byte, outs []chan opus.Frame) {
+	go func(ctx context.Context, in <-chan []byte, outs []chan opus.Frame) {
 		defer func() {
 			for _, out := range outs {
 				close(out)
@@ -1063,17 +1074,12 @@ func registerRelayInputs(guildID snowflake.ID, session *ally.Session, dests []*d
 				select {
 				case out <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: now}:
 				default:
-					opus.PutPCM(pcm) // channel full — return immediately
-					telemetry.FanoutFramesDropped.Add(context.Background(), 1,
-						metric.WithAttributes(
-							attribute.String("guild_id", guildID.String()),
-							attribute.String("path", "relay_bridge"),
-						),
-					)
+					opus.PutPCM(pcm) // channel full — drop frame
+					telemetry.FanoutFramesDropped.Add(ctx, 1, relayDropAttr)
 				}
 			}
 		}
-	}(relayOpusIn, frameOuts)
+	}(ctx, relayOpusIn, frameOuts)
 
 	session.AddGuild(guildID, []chan<- []byte{relayOpusIn})
 	return []chan<- []byte{relayOpusIn}
@@ -1189,6 +1195,11 @@ func wireFanoutOneManyDirect(ctx context.Context, guildID snowflake.ID, sources 
 // and the relay session without any PCM decode/encode step.
 // The goroutine closes all outs when it exits so VoiceProviders shut down cleanly.
 func wireFanoutDirect(ctx context.Context, in <-chan []byte, outs []chan<- []byte, session *ally.Session, guildID snowflake.ID) {
+	// Pre-compute drop attribute once to avoid per-frame allocations on the hot path.
+	dropAttr := metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("path", "direct"),
+	)
 	go func() {
 		defer func() {
 			for _, out := range outs {
@@ -1210,12 +1221,7 @@ func wireFanoutDirect(ctx context.Context, in <-chan []byte, outs []chan<- []byt
 					select {
 					case out <- pkt:
 					default:
-						telemetry.FanoutFramesDropped.Add(ctx, 1,
-							metric.WithAttributes(
-								attribute.String("guild_id", guildID.String()),
-								attribute.String("path", "direct"),
-							),
-						)
+						telemetry.FanoutFramesDropped.Add(ctx, 1, dropAttr)
 					}
 				}
 				session.BroadcastFromGuild(guildID, pkt)
@@ -1229,6 +1235,9 @@ func startDirectSessionCleanup(ctx context.Context, ownerCleanup func(), guildID
 	go func() {
 		defer func() {
 			ownerCleanup()
+			telemetry.SessionSpeakers.Record(ctx, 0,
+				metric.WithAttributes(attribute.String("guild_id", guildID.String())),
+			)
 			telemetry.SessionsActive.Add(ctx, -1)
 			telemetry.SessionStop.Add(ctx, 1)
 			trace.SpanFromContext(ctx).End()

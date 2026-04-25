@@ -16,7 +16,7 @@ import (
 func eventListeners(managerSvc ManagerService) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
-		bot.NewListenerFunc(onGuildAvailable),
+		bot.NewListenerFunc(onGuildAvailable(managerSvc)),
 		bot.NewListenerFunc(onGuildJoin(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
@@ -52,10 +52,36 @@ func onReady(m ManagerService) func(*events.Ready) {
 }
 
 // onGuildAvailable is called for each guild that becomes available after the
-// initial Ready handshake. It records the guild info metric so dashboards can
-// join guild_id to a human-readable guild_name.
-func onGuildAvailable(e *events.GuildAvailable) {
-	recordGuildInfo(e.GuildID, e.Guild.Name)
+// initial Ready handshake. It records the guild info metric and initialises
+// VoiceCallers from the current voice states so the counter is accurate after
+// a bot restart (users already in voice channels emit no new join events).
+func onGuildAvailable(m ManagerService) func(*events.GuildAvailable) {
+	return func(e *events.GuildAvailable) {
+		recordGuildInfo(e.GuildID, e.Guild.Name)
+
+		// Seed VoiceCallers from voice states present in the GUILD_CREATE payload.
+		counts := make(map[snowflake.ID]int64) // channelID → caller count
+		for _, vs := range e.Guild.VoiceStates {
+			if vs.ChannelID == nil {
+				continue
+			}
+			member, ok := e.Client().Caches.Member(e.GuildID, vs.UserID)
+			if !ok || member.User.Bot {
+				continue
+			}
+			if m.HasCallerRole(e.GuildID, member.RoleIDs) {
+				counts[*vs.ChannelID]++
+			}
+		}
+		for channelID, count := range counts {
+			telemetry.VoiceCallers.Add(context.Background(), count,
+				metric.WithAttributes(
+					attribute.String("guild_id", e.GuildID.String()),
+					attribute.String("channel_id", channelID.String()),
+				),
+			)
+		}
+	}
 }
 
 // onGuildJoin is called when the owner bot is added to a new guild.

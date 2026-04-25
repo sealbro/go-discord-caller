@@ -16,6 +16,7 @@ import (
 func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 	for _, guildID := range guildIDs {
 		m.seedGuildSpeakers(guildID, m.ownerBotID)
+		m.warmGuildCache(guildID)
 	}
 }
 

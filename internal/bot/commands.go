@@ -12,6 +12,7 @@ import (
 	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -432,6 +433,11 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 		cmdCtx := e.Ctx
 		ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 		go func() {
+			if warnings := h.manager.CheckGuildChannelAccess(guildID); len(warnings) > 0 {
+				cancelFunc()
+				h.followUp(e, "❌ Cannot join relay session: fix bot permissions first."+formatAccessWarnings(warnings))
+				return
+			}
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
 				cancelFunc()
@@ -461,6 +467,11 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, data discor
 	cmdCtx := e.Ctx
 	ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 	go func() {
+		if warnings := h.manager.CheckGuildChannelAccess(guildID); len(warnings) > 0 {
+			cancelFunc()
+			h.followUp(e, "❌ Cannot start voice raid: fix bot permissions first."+formatAccessWarnings(warnings))
+			return
+		}
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
@@ -759,6 +770,19 @@ func (h *CommandHandlers) followUp(e *handler.CommandEvent, content string) {
 	if _, err := e.CreateFollowupMessage(ephemeral(content)); err != nil {
 		slog.Warn("failed to send follow-up message", slog.Any("err", err))
 	}
+}
+
+// formatAccessWarnings builds a Discord-formatted warning block from the access check
+// results. Returns "" when there are no warnings.
+func formatAccessWarnings(warnings []manager.ChannelAccessWarning) string {
+	if len(warnings) == 0 {
+		return ""
+	}
+	msg := "\n\n⚠️ **Some bots cannot access their channel (Connect/Speak permission missing):**"
+	for _, w := range warnings {
+		msg += fmt.Sprintf("\n- <@%s> → <#%s>", w.BotID, w.ChannelID)
+	}
+	return msg
 }
 
 func installOwnerURL(clientID snowflake.ID) string {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -92,18 +93,6 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
 	channelID, _ := m.store.GetBoundChannel(guildID, m.ownerBotID)
 	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID)
-}
-
-// speakerVoice returns a GuildVoice for a speaker bot in guildID, bound to its
-// configured channel. Use Join/Leave on the result to manage the connection.
-// Returns false if the bot is not in the pool or its gateway is not connected.
-func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice, bool) {
-	client, ok := m.poolSvc.GetClientByID(botUserID)
-	if !ok {
-		return pool.GuildVoice{}, false
-	}
-	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
-	return pool.NewGuildVoice(client.VoiceManager, channelID), true
 }
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
@@ -242,8 +231,7 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 	snap := *st
 	snap.Speakers = make(map[snowflake.ID]*guild.Speaker, len(st.Speakers))
 	for k, v := range st.Speakers {
-		cp := *v
-		snap.Speakers[k] = &cp
+		snap.Speakers[k] = new(*v)
 	}
 	snap.BoundChannels = make(map[snowflake.ID]snowflake.ID, len(st.BoundChannels))
 	maps.Copy(snap.BoundChannels, st.BoundChannels)
@@ -259,6 +247,112 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 		snap.Session = &sessionCopy
 	}
 	return snap
+}
+
+// speakerVoice returns a GuildVoice for a speaker bot in guildID, bound to its
+// configured channel. Use Join/Leave on the result to manage the connection.
+// Returns false if the bot is not in the pool or its gateway is not connected.
+func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice, bool) {
+	client, ok := m.poolSvc.GetClientByID(botUserID)
+	if !ok {
+		return pool.GuildVoice{}, false
+	}
+	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
+	return pool.NewGuildVoice(client.VoiceManager, channelID), true
+}
+
+// CheckGuildChannelAccess checks Connect+Speak permissions for the owner bot and
+// all enabled, bound speaker bots in guildID. Returns one ChannelAccessWarning for
+// each bot whose permissions are definitively denied. Relies on the cache pre-warmed
+// by warmGuildCache at startup; bots or channels not yet cached are skipped silently.
+func (m *Service) CheckGuildChannelAccess(guildID snowflake.ID) []ChannelAccessWarning {
+	speakers, err := m.snapshotSpeakers(guildID)
+	if err != nil {
+		return nil
+	}
+
+	var warnings []ChannelAccessWarning
+
+	// Owner bot.
+	if ownerChID, ok := m.store.GetBoundChannel(guildID, m.ownerBotID); ok {
+		if w, denied := m.botChannelWarning(m.ownerBotID, guildID, ownerChID); denied {
+			warnings = append(warnings, w)
+		}
+	}
+
+	// Speaker bots.
+	for _, sp := range speakers {
+		if !sp.Enabled {
+			continue
+		}
+		chID, ok := m.store.GetBoundChannel(guildID, sp.ID)
+		if !ok {
+			continue
+		}
+		if w, denied := m.botChannelWarning(sp.ID, guildID, chID); denied {
+			warnings = append(warnings, w)
+		}
+	}
+	return warnings
+}
+
+// warmGuildCache fetches channels and bot members for guildID via REST and populates
+// the owner bot's cache. Call once per guild at startup so that CheckGuildChannelAccess
+// can be fully cache-based without per-call REST lookups.
+func (m *Service) warmGuildCache(guildID snowflake.ID) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	channels, err := m.ownerClient.Rest.GetGuildChannels(guildID, rest.WithCtx(ctx))
+	if err != nil {
+		slog.Warn("warmGuildCache: failed to fetch guild channels",
+			slog.String("guildID", guildID.String()),
+			slog.Any("err", err),
+		)
+	} else {
+		for _, ch := range channels {
+			m.ownerClient.Caches.AddChannel(ch)
+		}
+		slog.Debug("warmGuildCache: populated channel cache",
+			slog.String("guildID", guildID.String()),
+			slog.Int("count", len(channels)),
+		)
+	}
+
+	// Warm member cache for owner bot and all pool speaker bots in this guild.
+	botIDs := append([]snowflake.ID{m.ownerBotID}, m.poolSvc.GetIDs()...)
+	for _, botID := range botIDs {
+		if _, ok := m.ownerClient.Caches.Member(guildID, botID); ok {
+			continue // already cached
+		}
+		member, err := m.ownerClient.Rest.GetMember(guildID, botID, rest.WithCtx(ctx))
+		if err != nil {
+			continue // bot not in this guild; skip silently
+		}
+		m.ownerClient.Caches.AddMember(*member)
+	}
+}
+
+// botChannelWarning checks whether botUserID has ViewChannel+Connect+Speak in channelID using
+// the owner bot's cache (it has full guild data via IntentGuilds + FlagsAll).
+// Both channel and member caches are pre-warmed at startup by warmGuildCache.
+func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) (ChannelAccessWarning, bool) {
+	channel, ok := m.ownerClient.Caches.Channel(channelID)
+	if !ok {
+		return ChannelAccessWarning{}, false
+	}
+	member, ok := m.ownerClient.Caches.Member(guildID, botUserID)
+	if !ok {
+		return ChannelAccessWarning{}, false
+	}
+	perms := m.ownerClient.Caches.MemberPermissionsInChannel(channel, member)
+	if !perms.Has(discord.PermissionViewChannel) || !perms.Has(discord.PermissionConnect) || !perms.Has(discord.PermissionSpeak) {
+		return ChannelAccessWarning{
+			BotID:     botUserID,
+			ChannelID: channelID,
+		}, true
+	}
+	return ChannelAccessWarning{}, false
 }
 
 func (m *Service) newSpeaker(botUserID snowflake.ID) (*guild.Speaker, error) {

@@ -36,3 +36,8 @@ store.yaml
 
 # OS
 .DS_Store
+
+# AI tools
+AGENTS.md
+CLAUDE.md
+.claude/

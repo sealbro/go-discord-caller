@@ -30,7 +30,7 @@ func (h levelHandler) Enabled(ctx context.Context, l slog.Level) bool {
 	return l >= h.level.Level() && h.Handler.Enabled(ctx, l)
 }
 
-const serviceName = "go-discord-caller"
+const ServiceName = "go-discord-caller"
 
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.
 // All three signals are exported via OTLP gRPC to a single endpoint.
@@ -54,7 +54,7 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 	}()
 
 	res, err := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceName(serviceName)),
+		resource.WithAttributes(semconv.ServiceName(ServiceName)),
 	)
 	if err != nil {
 		setupErr = err
@@ -99,7 +99,7 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 
 	// Replace default slog with OTel bridge so all slog calls export via OTLP
 	// and automatically inject trace_id/span_id when context is provided.
-	otelHandler := otelslog.NewHandler(serviceName,
+	otelHandler := otelslog.NewHandler(ServiceName,
 		otelslog.WithLoggerProvider(lp),
 		otelslog.WithSource(true),
 	)

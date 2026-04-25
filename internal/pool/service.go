@@ -14,6 +14,10 @@ import (
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
 // PoolService is the interface for speaker pool operations used by dependent packages.
@@ -115,6 +119,30 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 	s.mu.Unlock()
 }
 
+// StartMetrics registers OTel observable callbacks for pool health gauges.
+// Call once after the pool is connected, alongside StartWatchdog.
+func (s *Service) StartMetrics() {
+	meter := otel.Meter(telemetry.ServiceName)
+	if _, err := meter.RegisterCallback(s.observePoolBots, telemetry.PoolBotsTotal, telemetry.PoolBotsConnected); err != nil {
+		slog.Error("pool: failed to register pool metrics callback", slog.Any("err", err))
+	}
+}
+
+func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
+	s.mu.RLock()
+	total := int64(len(s.poolClients))
+	connected := int64(0)
+	for _, c := range s.poolClients {
+		if isConnected(c) {
+			connected++
+		}
+	}
+	s.mu.RUnlock()
+	o.ObserveInt64(telemetry.PoolBotsTotal, total)
+	o.ObserveInt64(telemetry.PoolBotsConnected, connected)
+	return nil
+}
+
 // Reconnect attempts to open the gateway for a bot whose connection failed.
 // It reads the token from the stored client.Token field. If the bot already has
 // a connected gateway it is a no-op and returns true.
@@ -139,12 +167,16 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 		return false
 	}
 
+	botAttr := metric.WithAttributes(attribute.String("bot_id", botUserID.String()))
+	telemetry.PoolReconnectAttempts.Add(ctx, 1, botAttr)
+
 	newClient, err := newPoolClient(token)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
+		telemetry.PoolReconnectFailures.Add(ctx, 1, botAttr)
 		return false
 	}
 	if err = newClient.OpenGateway(ctx); err != nil {
@@ -152,6 +184,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
+		telemetry.PoolReconnectFailures.Add(ctx, 1, botAttr)
 		return false
 	}
 

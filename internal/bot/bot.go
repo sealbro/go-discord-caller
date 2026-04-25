@@ -153,6 +153,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		return err
 	}
 	b.poolSvc.StartWatchdog(ctx, 30*time.Second)
+	b.poolSvc.StartMetrics()
 	b.manager.StartMetrics()
 
 	if err := b.client.OpenGateway(ctx); err != nil {

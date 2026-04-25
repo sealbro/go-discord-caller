@@ -58,7 +58,7 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 // StartMetrics registers OTel observable metric callbacks.
 // Call once after the speaker pool is connected, alongside StartWatchdog.
 func (m *Service) StartMetrics() {
-	meter := otel.Meter("go-discord-caller")
+	meter := otel.Meter(telemetry.ServiceName)
 	if _, err := meter.RegisterCallback(m.observeBotOnline, telemetry.BotOnline); err != nil {
 		slog.Error("manager: failed to register bot_online metric callback", slog.Any("err", err))
 	}

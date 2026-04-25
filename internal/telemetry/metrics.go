@@ -5,7 +5,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-var meter = otel.Meter(serviceName)
+var meter = otel.Meter(ServiceName)
 
 // Command metrics
 var (
@@ -31,6 +31,20 @@ var (
 var (
 	GuildInfo metric.Int64Gauge
 	BotOnline metric.Int64ObservableGauge
+)
+
+// Pool metrics
+var (
+	PoolBotsTotal         metric.Int64ObservableGauge
+	PoolBotsConnected     metric.Int64ObservableGauge
+	PoolReconnectAttempts metric.Int64Counter
+	PoolReconnectFailures metric.Int64Counter
+)
+
+// Session metrics
+var (
+	SessionSpeakers     metric.Int64Gauge
+	FanoutFramesDropped metric.Int64Counter
 )
 
 func init() {
@@ -88,6 +102,36 @@ func init() {
 
 	BotOnline, err = meter.Int64ObservableGauge("gdc.bot.online",
 		metric.WithDescription("1 while a speaker bot gateway is connected in the guild, 0 when disconnected."),
+	)
+	must(err)
+
+	PoolBotsTotal, err = meter.Int64ObservableGauge("gdc.pool.bots.total",
+		metric.WithDescription("Total speaker bots registered in the pool."),
+	)
+	must(err)
+
+	PoolBotsConnected, err = meter.Int64ObservableGauge("gdc.pool.bots.connected",
+		metric.WithDescription("Speaker bots with a healthy gateway connection."),
+	)
+	must(err)
+
+	PoolReconnectAttempts, err = meter.Int64Counter("gdc.pool.reconnect.attempts.total",
+		metric.WithDescription("Watchdog gateway reconnect attempts."),
+	)
+	must(err)
+
+	PoolReconnectFailures, err = meter.Int64Counter("gdc.pool.reconnect.failures.total",
+		metric.WithDescription("Watchdog gateway reconnect failures."),
+	)
+	must(err)
+
+	SessionSpeakers, err = meter.Int64Gauge("gdc.session.speakers",
+		metric.WithDescription("Number of speaker bots that joined the active voice raid session."),
+	)
+	must(err)
+
+	FanoutFramesDropped, err = meter.Int64Counter("gdc.fanout.frames.dropped.total",
+		metric.WithDescription("Opus frames dropped due to full channels in the fanout/relay pipeline. Labels: guild_id, path."),
 	)
 	must(err)
 }

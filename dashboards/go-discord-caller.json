@@ -1570,6 +1570,472 @@
             }
           }
         }
+      },
+      "stat-pool-bots": {
+        "kind": "Panel",
+        "spec": {
+          "id": 16,
+          "title": "Pool Bots",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_total{job=~\"$job\"})",
+                        "instant": true,
+                        "legendFormat": "Total",
+                        "range": false
+                      }
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_connected{job=~\"$job\"})",
+                        "instant": true,
+                        "legendFormat": "Connected",
+                        "range": false
+                      }
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "vizConfig": {
+            "group": "",
+            "kind": "stat",
+            "version": "",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "mappings": [],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "red",
+                        "value": null
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 1
+                      },
+                      {
+                        "color": "green",
+                        "value": 2
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "textMode": "auto"
+              }
+            }
+          }
+        }
+      },
+      "ts-pool-bots": {
+        "kind": "Panel",
+        "spec": {
+          "id": 17,
+          "title": "Pool Bots Over Time",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_total{job=~\"$job\"})",
+                        "instant": false,
+                        "legendFormat": "Total",
+                        "range": true
+                      }
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_connected{job=~\"$job\"})",
+                        "instant": false,
+                        "legendFormat": "Connected",
+                        "range": true
+                      }
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "vizConfig": {
+            "group": "",
+            "kind": "timeseries",
+            "version": "",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "showPoints": "auto",
+                    "spanNulls": false
+                  },
+                  "min": 0,
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ts-session-speakers": {
+        "kind": "Panel",
+        "spec": {
+          "id": 18,
+          "title": "Session Speakers",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "gdc_session_speakers{job=~\"$job\", guild_id=~\"$guild_id\"}",
+                        "instant": false,
+                        "legendFormat": "{{guild_id}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "vizConfig": {
+            "group": "",
+            "kind": "timeseries",
+            "version": "",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "showPoints": "auto",
+                    "spanNulls": false
+                  },
+                  "min": 0,
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ts-fanout-drops": {
+        "kind": "Panel",
+        "spec": {
+          "id": 19,
+          "title": "Fanout Frames Dropped",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "rate(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[1m])",
+                        "instant": false,
+                        "legendFormat": "{{path}} \u2013 {{guild_id}}",
+                        "range": true
+                      }
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "vizConfig": {
+            "group": "",
+            "kind": "timeseries",
+            "version": "",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "showPoints": "auto",
+                    "spanNulls": false
+                  },
+                  "min": 0,
+                  "unit": "cps"
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            }
+          }
+        }
+      },
+      "ts-reconnect": {
+        "kind": "Panel",
+        "spec": {
+          "id": 20,
+          "title": "Pool Reconnect Attempts / Failures",
+          "description": "",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "rate(gdc_pool_reconnect_attempts_total{job=~\"$job\"}[5m])",
+                        "instant": false,
+                        "legendFormat": "Attempts/s",
+                        "range": true
+                      }
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "datasource": {
+                      "type": "prometheus"
+                    },
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "version": "",
+                      "spec": {
+                        "expr": "rate(gdc_pool_reconnect_failures_total{job=~\"$job\"}[5m])",
+                        "instant": false,
+                        "legendFormat": "Failures/s",
+                        "range": true
+                      }
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "vizConfig": {
+            "group": "",
+            "kind": "timeseries",
+            "version": "",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "showPoints": "auto",
+                    "spanNulls": false
+                  },
+                  "min": 0,
+                  "unit": "cps"
+                },
+                "overrides": []
+              },
+              "options": {
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "layout": {
@@ -1768,6 +2234,71 @@
               "x": 12,
               "y": 36,
               "width": 12,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "stat-pool-bots"
+              },
+              "x": 0,
+              "y": 44,
+              "width": 6,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "ts-pool-bots"
+              },
+              "x": 6,
+              "y": 44,
+              "width": 18,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "ts-session-speakers"
+              },
+              "x": 0,
+              "y": 52,
+              "width": 12,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "ts-fanout-drops"
+              },
+              "x": 12,
+              "y": 52,
+              "width": 12,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "ts-reconnect"
+              },
+              "x": 0,
+              "y": 60,
+              "width": 24,
               "height": 8
             }
           }

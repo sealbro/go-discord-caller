@@ -131,9 +131,13 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 	s.mu.RLock()
 	total := int64(len(s.poolClients))
 	connected := int64(0)
-	for _, c := range s.poolClients {
+	for id, c := range s.poolClients {
 		if isConnected(c) {
 			connected++
+			// Emit per-bot gateway heartbeat RTT.
+			// Latency() returns 0 until the first heartbeat ACK is received.
+			latMs := float64(c.Gateway.Latency().Milliseconds())
+			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
 		}
 	}
 	s.mu.RUnlock()

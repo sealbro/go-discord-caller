@@ -13,6 +13,7 @@ type PoolMetrics struct {
 	meter             metric.Meter // retained for RegisterObservers
 	botsTotal         metric.Int64ObservableGauge
 	botsConnected     metric.Int64ObservableGauge
+	gatewayLatency    metric.Float64ObservableGauge
 	reconnectAttempts metric.Int64Counter
 	reconnectFailures metric.Int64Counter
 }
@@ -26,6 +27,12 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 	}
 	if p.botsConnected, err = meter.Int64ObservableGauge("gdc.pool.bots.connected",
 		metric.WithDescription("Speaker bots with a healthy gateway connection."),
+	); err != nil {
+		return
+	}
+	if p.gatewayLatency, err = meter.Float64ObservableGauge("gdc.bot.gateway.latency",
+		metric.WithDescription("Discord gateway WebSocket heartbeat RTT per bot. Zero until the first heartbeat ACK is received."),
+		metric.WithUnit("ms"),
 	); err != nil {
 		return
 	}
@@ -44,7 +51,7 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 
 // RegisterObservers registers cb as the observable callback for pool bot gauges.
 func (p *PoolMetrics) RegisterObservers(cb metric.Callback) error {
-	_, err := p.meter.RegisterCallback(cb, p.botsTotal, p.botsConnected)
+	_, err := p.meter.RegisterCallback(cb, p.botsTotal, p.botsConnected, p.gatewayLatency)
 	return err
 }
 
@@ -53,6 +60,14 @@ func (p *PoolMetrics) RegisterObservers(cb metric.Callback) error {
 func (p *PoolMetrics) ObservePoolBots(o metric.Observer, total, connected int64) {
 	o.ObserveInt64(p.botsTotal, total)
 	o.ObserveInt64(p.botsConnected, connected)
+}
+
+// ObserveGatewayLatency reports the heartbeat RTT for one bot via o.
+// Call inside the callback registered with RegisterObservers.
+func (p *PoolMetrics) ObserveGatewayLatency(o metric.Observer, botID string, ms float64) {
+	o.ObserveFloat64(p.gatewayLatency, ms,
+		metric.WithAttributes(attribute.String("bot_id", botID)),
+	)
 }
 
 // ReconnectAttempt records one watchdog reconnect attempt for botID.

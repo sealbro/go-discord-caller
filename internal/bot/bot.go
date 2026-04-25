@@ -192,6 +192,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		slog.InfoContext(ctx, "owner bot invite URL",
 			slog.String("url", installOwnerURL(selfUser.ID)),
 		)
+		b.poolSvc.RegisterBot(selfUser.ID, selfUser.Username)
 	}
 
 	slog.InfoContext(ctx, "bot is running. Press Ctrl+C to stop.")

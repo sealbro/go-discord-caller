@@ -28,9 +28,12 @@ type PoolService interface {
 
 // Service manages the lifecycle of the pool of speaker bot gateways.
 // poolClients maps bot user ID → client for speaker bots only.
+// extraBots holds bots (e.g. the owner bot) that are tracked for the info
+// metric but not managed by the pool lifecycle.
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client
+	extraBots   map[snowflake.ID]string // id → username
 	metrics     *telemetry.PoolMetrics
 }
 
@@ -38,8 +41,17 @@ type Service struct {
 func NewService(metrics *telemetry.PoolMetrics) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
+		extraBots:   make(map[snowflake.ID]string),
 		metrics:     metrics,
 	}
+}
+
+// RegisterBot adds a bot to the info metric that is not part of the speaker pool
+// (e.g. the owner bot). Safe to call concurrently.
+func (s *Service) RegisterBot(id snowflake.ID, name string) {
+	s.mu.Lock()
+	s.extraBots[id] = name
+	s.mu.Unlock()
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
@@ -132,6 +144,14 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 	total := int64(len(s.poolClients))
 	connected := int64(0)
 	for id, c := range s.poolClients {
+		botName := ""
+		if c != nil {
+			if self, ok := c.Caches.SelfUser(); ok {
+				botName = self.Username
+			}
+		}
+		s.metrics.ObserveBotInfo(o, id.String(), botName)
+
 		if isConnected(c) {
 			connected++
 			// Emit per-bot gateway heartbeat RTT.
@@ -139,6 +159,9 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 			latMs := float64(c.Gateway.Latency().Milliseconds())
 			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
 		}
+	}
+	for id, name := range s.extraBots {
+		s.metrics.ObserveBotInfo(o, id.String(), name)
 	}
 	s.mu.RUnlock()
 	s.metrics.ObservePoolBots(o, total, connected)

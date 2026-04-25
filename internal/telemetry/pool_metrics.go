@@ -11,6 +11,7 @@ import (
 // PoolMetrics tracks speaker pool connectivity and reconnect health.
 type PoolMetrics struct {
 	meter             metric.Meter // retained for RegisterObservers
+	botInfo           metric.Int64ObservableGauge
 	botsTotal         metric.Int64ObservableGauge
 	botsConnected     metric.Int64ObservableGauge
 	gatewayLatency    metric.Float64ObservableGauge
@@ -20,6 +21,11 @@ type PoolMetrics struct {
 
 func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 	p.meter = meter
+	if p.botInfo, err = meter.Int64ObservableGauge("gdc.discord.bot",
+		metric.WithDescription("Info gauge for known bots; value is always 1. Labels: bot_id, bot_name."),
+	); err != nil {
+		return
+	}
 	if p.botsTotal, err = meter.Int64ObservableGauge("gdc.pool.bots.total",
 		metric.WithDescription("Total speaker bots registered in the pool."),
 	); err != nil {
@@ -51,8 +57,19 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 
 // RegisterObservers registers cb as the observable callback for pool bot gauges.
 func (p *PoolMetrics) RegisterObservers(cb metric.Callback) error {
-	_, err := p.meter.RegisterCallback(cb, p.botsTotal, p.botsConnected, p.gatewayLatency)
+	_, err := p.meter.RegisterCallback(cb, p.botInfo, p.botsTotal, p.botsConnected, p.gatewayLatency)
 	return err
+}
+
+// ObserveBotInfo emits a value of 1 for the given botID/botName pair via o.
+// Call inside the callback registered with RegisterObservers.
+func (p *PoolMetrics) ObserveBotInfo(o metric.Observer, botID, botName string) {
+	o.ObserveInt64(p.botInfo, 1,
+		metric.WithAttributes(
+			attribute.String("bot_id", botID),
+			attribute.String("bot_name", botName),
+		),
+	)
 }
 
 // ObservePoolBots reports current total and connected bot counts via o.

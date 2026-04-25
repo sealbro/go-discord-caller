@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"log/slog"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/contrib/bridges/otelslog"
@@ -30,6 +31,14 @@ func (h levelHandler) Enabled(ctx context.Context, l slog.Level) bool {
 	return l >= h.level.Level() && h.Handler.Enabled(ctx, l)
 }
 
+func (h levelHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return levelHandler{level: h.level, Handler: h.Handler.WithAttrs(attrs)}
+}
+
+func (h levelHandler) WithGroup(name string) slog.Handler {
+	return levelHandler{level: h.level, Handler: h.Handler.WithGroup(name)}
+}
+
 const ServiceName = "go-discord-caller"
 
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.
@@ -38,6 +47,10 @@ const ServiceName = "go-discord-caller"
 // When endpoint is empty, no-op providers are used and nil shutdown is returned.
 func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), error) {
 	if endpoint == "" {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			AddSource: true,
+			Level:     level,
+		})))
 		return func() {}, nil
 	}
 

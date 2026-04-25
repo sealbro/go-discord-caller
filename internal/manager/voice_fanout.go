@@ -25,6 +25,30 @@ type mixerRef struct {
 	id snowflake.ID
 }
 
+// tryAddMixerInput creates a buffered frame channel and registers it as an input
+// on mx for id. On success the channel and a removal entry are appended to
+// *fanTargets and *removals. On failure a warning is logged with label as the
+// component prefix (e.g. "relay mixer", "channel mixer").
+func tryAddMixerInput(ctx context.Context, mx *opus.Mixer, id snowflake.ID, label string, fanTargets *[]chan opus.Frame, removals *[]mixerRef) {
+	ch := make(chan opus.Frame, audioChanBuf)
+	if err := mx.AddInput(id, ch); err != nil {
+		slog.WarnContext(ctx, label+": failed to add input", slog.Any("err", err))
+		return
+	}
+	*fanTargets = append(*fanTargets, ch)
+	*removals = append(*removals, mixerRef{mx, id})
+}
+
+// endSession runs the common host session teardown: invokes ownerCleanup, records
+// the stop metric, ends the tracing span, and logs the session end.
+// Intended to be called as a deferred statement inside session goroutines.
+func endSession(ctx context.Context, ownerCleanup func(), guildID snowflake.ID, sm *telemetry.SessionMetrics) {
+	ownerCleanup()
+	sm.SessionStopped(ctx, guildID)
+	trace.SpanFromContext(ctx).End()
+	slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", guildID.String()))
+}
+
 // runFanoutSource is the shared goroutine body for wireFanout and wireFanoutOneMany.
 // It decodes each incoming Opus packet exactly once and distributes the resulting
 // Frame to all mixer input channels in targets. When the source channel closes or
@@ -91,25 +115,13 @@ func wireFanout(ctx context.Context, guildID snowflake.ID, sources []sourceEntry
 		var fanTargets []chan opus.Frame
 		var removals []mixerRef
 
-		relayCh := make(chan opus.Frame, audioChanBuf)
-		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
-			slog.WarnContext(ctx, "relay mixer: failed to add input", slog.Any("err", err))
-		} else {
-			fanTargets = append(fanTargets, relayCh)
-			removals = append(removals, mixerRef{relayMixer, src.id})
-		}
+		tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", &fanTargets, &removals)
 
 		for _, dest := range dests {
 			if dest.channelID == src.channelID {
 				continue // mix-minus: don't relay audio back to its origin channel
 			}
-			mixCh := make(chan opus.Frame, audioChanBuf)
-			if err := chanMixers[dest.channelID].AddInput(src.id, mixCh); err != nil {
-				slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
-			} else {
-				fanTargets = append(fanTargets, mixCh)
-				removals = append(removals, mixerRef{chanMixers[dest.channelID], src.id})
-			}
+			tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", &fanTargets, &removals)
 		}
 
 		go runFanoutSource(ctx, guildID, src.ch, fanTargets, removals, sm)
@@ -131,13 +143,7 @@ func wireFanoutOneMany(ctx context.Context, guildID snowflake.ID, sources []sour
 		var removals []mixerRef
 
 		// All sources always feed the relay mixer.
-		relayCh := make(chan opus.Frame, audioChanBuf)
-		if err := relayMixer.AddInput(src.id, relayCh); err != nil {
-			slog.WarnContext(ctx, "relay mixer: failed to add input", slog.Any("err", err))
-		} else {
-			fanTargets = append(fanTargets, relayCh)
-			removals = append(removals, mixerRef{relayMixer, src.id})
-		}
+		tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", &fanTargets, &removals)
 
 		if ownerChannelID != 0 {
 			if src.channelID == ownerChannelID {
@@ -146,24 +152,12 @@ func wireFanoutOneMany(ctx context.Context, guildID snowflake.ID, sources []sour
 					if dest.channelID == src.channelID {
 						continue
 					}
-					mixCh := make(chan opus.Frame, audioChanBuf)
-					if err := chanMixers[dest.channelID].AddInput(src.id, mixCh); err != nil {
-						slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
-					} else {
-						fanTargets = append(fanTargets, mixCh)
-						removals = append(removals, mixerRef{chanMixers[dest.channelID], src.id})
-					}
+					tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", &fanTargets, &removals)
 				}
 			} else {
 				// Speaker source → owner channel mixer ONLY (star spoke → hub).
 				if ownerMixer, ok := chanMixers[ownerChannelID]; ok {
-					mixCh := make(chan opus.Frame, audioChanBuf)
-					if err := ownerMixer.AddInput(src.id, mixCh); err != nil {
-						slog.WarnContext(ctx, "channel mixer: failed to add input", slog.Any("err", err))
-					} else {
-						fanTargets = append(fanTargets, mixCh)
-						removals = append(removals, mixerRef{ownerMixer, src.id})
-					}
+					tryAddMixerInput(ctx, ownerMixer, src.id, "channel mixer", &fanTargets, &removals)
 				}
 			}
 		}
@@ -244,22 +238,10 @@ func wireFanoutOneManyDirect(ctx context.Context, guildID snowflake.ID, sources 
 			var fanTargets []chan opus.Frame
 			var removals []mixerRef
 
-			relayCh := make(chan opus.Frame, audioChanBuf)
-			if err := relayMixer.AddInput(src.id, relayCh); err != nil {
-				slog.WarnContext(ctx, "relay mixer: failed to add speaker input", slog.Any("err", err))
-			} else {
-				fanTargets = append(fanTargets, relayCh)
-				removals = append(removals, mixerRef{relayMixer, src.id})
-			}
+			tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", &fanTargets, &removals)
 
 			if hubMixer, ok := chanMixers[ownerChannelID]; ok {
-				mixCh := make(chan opus.Frame, audioChanBuf)
-				if err := hubMixer.AddInput(src.id, mixCh); err != nil {
-					slog.WarnContext(ctx, "hub mixer: failed to add speaker input", slog.Any("err", err))
-				} else {
-					fanTargets = append(fanTargets, mixCh)
-					removals = append(removals, mixerRef{hubMixer, src.id})
-				}
+				tryAddMixerInput(ctx, hubMixer, src.id, "hub mixer", &fanTargets, &removals)
 			}
 
 			go runFanoutSource(ctx, guildID, src.ch, fanTargets, removals, sm)
@@ -267,11 +249,11 @@ func wireFanoutOneManyDirect(ctx context.Context, guildID snowflake.ID, sources 
 	}
 }
 
-// wireFanoutDirect is the bypass path for RaidModeOneCaller.
+// startFanoutDirect is the bypass path for RaidModeOneCaller.
 // Raw Opus packets are read from in and copied to every speaker output channel
 // and the relay session without any PCM decode/encode step.
 // The goroutine closes all outs when it exits so VoiceProviders shut down cleanly.
-func wireFanoutDirect(ctx context.Context, in <-chan []byte, outs []chan<- []byte, session *ally.Session, guildID snowflake.ID, sm *telemetry.SessionMetrics) {
+func startFanoutDirect(ctx context.Context, in <-chan []byte, outs []chan<- []byte, session *ally.Session, guildID snowflake.ID, sm *telemetry.SessionMetrics) {
 	// Pre-compute drop option once to avoid per-frame allocations on the hot path.
 	dropOpt := sm.DropOption(guildID, "direct")
 	go func() {
@@ -330,16 +312,11 @@ func startChannelMixers(ctx context.Context, dests []*destChannel, chanMixers ma
 }
 
 // startRelayBroadcast runs the relay mixer and broadcasts its output to all guest guilds.
-// Calls ownerCleanup only after the mixer has fully stopped and its output channel is closed,
+// Calls endSession only after the mixer has fully stopped and its output channel is closed,
 // ensuring no in-flight frames are lost and cleanup is ordered after the last broadcast.
 func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func(), guildID snowflake.ID, sm *telemetry.SessionMetrics) {
 	go func() {
-		defer func() {
-			ownerCleanup()
-			sm.SessionStopped(ctx, guildID)
-			trace.SpanFromContext(ctx).End()
-			slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", guildID.String()))
-		}()
+		defer endSession(ctx, ownerCleanup, guildID, sm)
 		go relayMixer.Run(ctx)
 		// Range blocks until the mixer closes its output channel (on ctx cancel),
 		// guaranteeing all queued frames are broadcast before cleanup runs.
@@ -352,12 +329,7 @@ func startRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, relaySessi
 // startDirectSessionCleanup waits for ctx cancellation then runs teardown.
 func startDirectSessionCleanup(ctx context.Context, ownerCleanup func(), guildID snowflake.ID, sm *telemetry.SessionMetrics) {
 	go func() {
-		defer func() {
-			ownerCleanup()
-			sm.SessionStopped(ctx, guildID)
-			trace.SpanFromContext(ctx).End()
-			slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", guildID.String()))
-		}()
+		defer endSession(ctx, ownerCleanup, guildID, sm)
 		<-ctx.Done()
 	}()
 }

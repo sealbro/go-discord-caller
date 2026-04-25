@@ -50,8 +50,8 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 // start total, and sets the speaker gauge for guildID.
 func (s *SessionMetrics) SessionStarted(ctx context.Context, guildID snowflake.ID, speakerCount int) {
 	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
-	s.active.Add(ctx, 1)
-	s.starts.Add(ctx, 1)
+	s.active.Add(ctx, 1, attrs)
+	s.starts.Add(ctx, 1, attrs)
 	s.speakers.Record(ctx, int64(speakerCount), attrs)
 }
 
@@ -60,8 +60,8 @@ func (s *SessionMetrics) SessionStarted(ctx context.Context, guildID snowflake.I
 func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.ID) {
 	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
 	s.speakers.Record(ctx, 0, attrs)
-	s.active.Add(ctx, -1)
-	s.stops.Add(ctx, 1)
+	s.active.Add(ctx, -1, attrs)
+	s.stops.Add(ctx, 1, attrs)
 }
 
 // DropOption pre-computes a MeasurementOption for FrameDropped.

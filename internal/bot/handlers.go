@@ -25,6 +25,8 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 	}
 }
 
+// recordGuildInfo records the guild info metric. Uses context.Background() because
+// disgo event handlers do not carry a request-scoped context.
 func recordGuildInfo(metrics *telemetry.BotMetrics, guildID snowflake.ID, guildName string) {
 	metrics.RecordGuildInfo(context.Background(), guildID.String(), guildName)
 }

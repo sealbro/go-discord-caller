@@ -21,7 +21,7 @@ type BotMetrics struct {
 func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	b.meter = meter
 	if b.guildInfo, err = meter.Int64Gauge("gdc.discord.guild",
-		metric.WithDescription("Known guilds; always 1. Labels: guild_id, guild_name."),
+		metric.WithDescription("Info gauge for known guilds; value is always 1. Labels: guild_id, guild_name."),
 	); err != nil {
 		return
 	}

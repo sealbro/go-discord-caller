@@ -326,7 +326,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 			return "", err
 		}
 		m.metrics.Session.SessionStarted(ctx, guildID, len(setup.joined))
-		wireFanoutDirect(ctx, chIn, setup.outs, allySession, guildID, &m.metrics.Session)
+		startFanoutDirect(ctx, chIn, setup.outs, allySession, guildID, &m.metrics.Session)
 		startDirectSessionCleanup(ctx, ownerCleanup, guildID, &m.metrics.Session)
 		slog.InfoContext(ctx, "voice raid started (direct passthrough)",
 			slog.String("guildID", guildID.String()),
@@ -384,23 +384,19 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		}
 		m.syncMixerPauseState(guildID, session)
 		m.metrics.Session.SessionStarted(ctx, guildID, len(setup.joined))
-		// Collect direct speaker outputs — all destinations except the owner's channel.
-		directSpeakerOuts := make([]chan<- []byte, 0)
+		// Partition destinations into the owner hub and direct speaker outputs in one pass.
+		var ownerDests []*destChannel
+		var directSpeakerOuts []chan<- []byte
 		for _, dest := range destinations {
-			if dest.channelID != ov.ChannelID() {
+			if dest.channelID == ov.ChannelID() {
+				ownerDests = append(ownerDests, dest)
+			} else {
 				directSpeakerOuts = append(directSpeakerOuts, dest.outs...)
 			}
 		}
 		wireFanoutOneManyDirect(ctx, guildID, sources, ov.ChannelID(), directSpeakerOuts, channelMixers, relayMixer, &m.metrics.Session)
 		// Guest relay enters only at the hub mixer.
 		if mode.AllowGuestCapture() {
-			ownerDests := make([]*destChannel, 0, 1)
-			for _, d := range destinations {
-				if d.channelID == ov.ChannelID() {
-					ownerDests = append(ownerDests, d)
-					break
-				}
-			}
 			registerRelayInputs(ctx, guildID, allySession, ownerDests, channelMixers, &m.metrics.Session)
 		}
 		slog.InfoContext(ctx, "voice raid started (star direct)",
@@ -410,14 +406,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 			slog.Int("activeSpeakers", len(setup.joined)),
 		)
 		// Start only the hub mixer; speaker chOuts are closed by runFanoutOwnerStar on exit.
-		ownerOnlyDests := make([]*destChannel, 0, 1)
-		for _, d := range destinations {
-			if d.channelID == ov.ChannelID() {
-				ownerOnlyDests = append(ownerOnlyDests, d)
-				break
-			}
-		}
-		startChannelMixers(ctx, ownerOnlyDests, channelMixers)
+		startChannelMixers(ctx, ownerDests, channelMixers)
 		startRelayBroadcast(ctx, relayMixer, allySession, ownerCleanup, guildID, &m.metrics.Session)
 		return allyCode, nil
 	}

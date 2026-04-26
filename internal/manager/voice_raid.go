@@ -69,7 +69,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		} else {
 			ownerCleanup = cleanup
 			ownerChIn = chIn
-			m.storeApplier(guestGuildID, m.ownerBotID, m.buildOwnerApplier(ctx, guestGuildID, ownerChIn, ownerChOut, allowUser))
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildOwnerApplier(guestGuildID, ownerChIn, ownerChOut, allowUser))
 		}
 	}
 	// guestCleanupOwner consolidates owner teardown used in both error paths and deferred teardown.
@@ -305,7 +305,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		endSpanErr(span, err)
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
-	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(ctx, guildID, chIn, chOwnerOut, allowUser))
+	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(guildID, chIn, chOwnerOut, allowUser))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(

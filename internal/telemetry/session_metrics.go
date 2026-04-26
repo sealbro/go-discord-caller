@@ -81,10 +81,13 @@ const (
 // a zero-argument function that records one dropped frame.
 // Call once before a hot loop and invoke the returned func on each drop — this
 // avoids per-frame attribute allocations on the hot path.
-func (s *SessionMetrics) FrameDropper(ctx context.Context, guildID snowflake.ID, path DropPath) func() {
+// context.Background() is used deliberately: counter increments are fire-and-forget
+// and must not be tied to the session span (which may be cancelled before the
+// goroutine exits, causing exporters to silently drop the metric).
+func (s *SessionMetrics) FrameDropper(_ context.Context, guildID snowflake.ID, path DropPath) func() {
 	opt := metric.WithAttributes(
 		attribute.String("guild_id", guildID.String()),
 		attribute.String("path", string(path)),
 	)
-	return func() { s.dropped.Add(ctx, 1, opt) }
+	return func() { s.dropped.Add(context.Background(), 1, opt) }
 }

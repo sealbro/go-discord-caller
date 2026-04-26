@@ -306,8 +306,10 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 		return
 	}
 	// Re-apply voice provider/receiver to the new conn so audio flows again.
+	// Pass ctx (the reconnect context) so the applier's FrameDroppers use a live,
+	// uncancelled context rather than the stale session-start context.
 	if applier, ok := m.loadApplier(guildID, botUserID); ok {
-		applier(conn)
+		applier(ctx, conn)
 	}
 	slog.InfoContext(ctx, "reconnect: bot rejoined bound channel",
 		slog.String("guildID", guildID.String()),
@@ -346,21 +348,20 @@ func (m *Service) clearAppliers(guildID snowflake.ID) {
 // A new VoiceReceiver is always created because disgo closes the old one on kick.
 // The VoiceProvider is created fresh so two audioSender goroutines don't compete
 // on the same channel (the old one is stopped; creating new is cleaner).
-func (m *Service) buildSpeakerApplier(ctx context.Context, guildID, botID snowflake.ID, chOut <-chan []byte, withCapture bool, chCapture chan []byte, allowUser func(snowflake.ID) bool) reconnectApplier {
-	var makeProvider func() voice.OpusFrameProvider
-	if m.test.IsTestBot(botID) {
-		makeProvider = func() voice.OpusFrameProvider {
+// FrameDropper is created inside the closure using the call-time ctx (the reconnect
+// context) so metrics are never attached to the stale session-start span.
+func (m *Service) buildSpeakerApplier(guildID, botID snowflake.ID, chOut <-chan []byte, withCapture bool, chCapture chan []byte, allowUser func(snowflake.ID) bool) reconnectApplier {
+	isTest := m.test.IsTestBot(botID)
+	return func(ctx context.Context, conn voice.Conn) {
+		var provider voice.OpusFrameProvider
+		if isTest {
 			p, _ := opus.NewFileVoiceProvider(m.test.FileDCA)
-			return p
+			provider = p
+		} else {
+			onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
+			provider = opus.NewVoiceProvider(chOut, onDrop)
 		}
-	} else {
-		onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
-		makeProvider = func() voice.OpusFrameProvider {
-			return opus.NewVoiceProvider(chOut, onDrop)
-		}
-	}
-	return func(conn voice.Conn) {
-		conn.SetOpusFrameProvider(makeProvider())
+		conn.SetOpusFrameProvider(provider)
 		if withCapture && chCapture != nil {
 			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, botID, allowUser))
 		} else {
@@ -371,20 +372,19 @@ func (m *Service) buildSpeakerApplier(ctx context.Context, guildID, botID snowfl
 
 // buildOwnerApplier returns a reconnectApplier for the owner bot.
 // chOut is nil when the session mode does not play back audio into the owner's channel.
-func (m *Service) buildOwnerApplier(ctx context.Context, guildID snowflake.ID, chCapture chan []byte, chOut <-chan []byte, allowUser func(snowflake.ID) bool) reconnectApplier {
-	var makeProvider func() voice.OpusFrameProvider
-	if chOut != nil {
-		onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
-		makeProvider = func() voice.OpusFrameProvider {
-			return opus.NewVoiceProvider(chOut, onDrop)
+// FrameDropper is created inside the closure using the call-time ctx (the reconnect
+// context) so metrics are never attached to the stale session-start span.
+func (m *Service) buildOwnerApplier(guildID snowflake.ID, chCapture chan []byte, chOut <-chan []byte, allowUser func(snowflake.ID) bool) reconnectApplier {
+	hasOut := chOut != nil
+	return func(ctx context.Context, conn voice.Conn) {
+		var provider voice.OpusFrameProvider
+		if hasOut {
+			onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
+			provider = opus.NewVoiceProvider(chOut, onDrop)
+		} else {
+			provider = opus.NewEmptyVoiceProvider()
 		}
-	} else {
-		makeProvider = func() voice.OpusFrameProvider {
-			return opus.NewEmptyVoiceProvider()
-		}
-	}
-	return func(conn voice.Conn) {
-		conn.SetOpusFrameProvider(makeProvider())
+		conn.SetOpusFrameProvider(provider)
 		if chCapture != nil {
 			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, m.ownerBotID, allowUser))
 		} else {

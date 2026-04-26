@@ -81,7 +81,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				gv.Leave(ctx, guildID)
 				return
 			}
-			m.storeApplier(guildID, sp.ID, m.buildSpeakerApplier(ctx, guildID, sp.ID, chOut, withCapture, chCapture, allowUser))
+			m.storeApplier(guildID, sp.ID, m.buildSpeakerApplier(guildID, sp.ID, chOut, withCapture, chCapture, allowUser))
 			resultCh <- speakerResult{sp, chOut, chCapture, gv, cleanup}
 		}(sp)
 	}

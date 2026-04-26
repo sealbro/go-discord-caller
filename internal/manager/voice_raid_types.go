@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
@@ -12,7 +13,9 @@ import (
 // reconnectApplier re-applies voice provider/receiver to a freshly opened conn
 // after a bot reconnects to its bound channel mid-session. It creates new
 // provider/receiver objects from the same channels so the mixer graph stays connected.
-type reconnectApplier func(conn voice.Conn)
+// ctx is the reconnect context (not the original session context) so that metric
+// recording and speaking-flag ops use a live, uncancelled context.
+type reconnectApplier func(ctx context.Context, conn voice.Conn)
 
 // ChannelAccessWarning describes a bot that cannot connect or speak in its bound channel.
 type ChannelAccessWarning struct {

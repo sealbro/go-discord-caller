@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-04-27
+
+### Added
+- **`AllowFilter` permission cache**: per-user allow decisions are cached in a `sync.Map` and updated from `VOICE_STATE_UPDATE` / `onGuildMemberUpdate` events; the hot path performs a single atomic load instead of a disgo cache mutex read on every Opus frame
+- **Voice pipeline metrics** (`gdc.opus.*`, `gdc.mixer.*`): OTel histograms for `ReceiveOpusFrame` duration, `ProvideOpusFrame` drain path, `allowUser` filter latency, mixer tick duration, and end-to-end pipeline latency; all instruments carry a pre-baked `guild_id` attribute to keep cardinality bounded
+- **Voice raid pipeline topologies**: `voice_raid_pipeline.go` introduces explicit pipeline builders for `OneCaller`, `OneManyGuildCaller`, and `OneManyAllyCaller` topologies; each topology is wired at session start rather than decided per-frame, reducing branching on the audio hot path
+- **Bot voice channel movement detection**: owner and speaker bots now detect when Discord moves them to a different channel mid-session and reconnect automatically, preventing silent audio loss
+
+### Changed
+- **Async metrics recording in `VoiceReceiver`**: `RecordReceive` is no longer called inline on the Opus hot path; duration samples are sent non-blocking to a buffered `chan float64` and drained by a background goroutine — eliminates OTel histogram mutex contention as a source of multi-millisecond latency spikes
+- **Pool buffers use fixed-size array pointers**: `recvFramePool`, `encodedFramePool`, and `pcmPool` now store `*[N]T` instead of `*[]T`; each pool miss is one heap allocation instead of two (backing array + slice header), and `PutEncodedFrame` / `PutPCM` avoid escaping the slice header to the heap on every return
+- **`MixerMetrics` replaced by `OpusMetrics`**: metrics are now created once per session with the guild ID pre-baked via `OpusMetrics.For(guildID)`, removing per-call attribute allocation from every `Record` call
+- **`mixerOutputBuf` reduced from 10 to 5**: output channel depth lowered to 100 ms; together with the drain-on-threshold logic in `VoiceProvider` this keeps end-to-end audio latency tighter
+
+### Fixed
+- **Only caller audio relayed to guest guilds**: speaker bot audio was incorrectly included in the inter-guild relay stream; relay mixer now receives frames exclusively from the owner capture path
+- **`gdc_fanout_frames_dropped_total` and `gdc_discord_guild` metrics**: counters were not wired up to their instruments correctly and reported zero; label sets and registration now match the instruments
+- **Reconnect logic used stale context**: `FrameDroppers` and metrics recorders were rebuilt with a cancelled context on reconnect; they now receive the live session context so cleanup fires correctly on next stop
+- **Buffer management for encoded frames**: `PutEncodedFrame` now correctly identifies and returns both `encodedFrameCap` and `recvFrameCap` buffers to their respective pools; previously some buffers were silently dropped, reducing pool hit rate under load
+
 ## [0.7.2] - 2026-04-25
 
 ### Added

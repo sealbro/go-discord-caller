@@ -33,26 +33,25 @@ const (
 	// mixerOutputBuf is the output channel buffer depth (10 frames × 20 ms = 200 ms).
 	// Frames are dropped silently when the consumer falls more than 200 ms behind.
 	// Increase this if guest guilds experience frequent audio gaps under load.
-	mixerOutputBuf = 10
+	mixerOutputBuf = 5
 )
 
+// pcmBuf is a fixed-size array backing PCM pool entries (single allocation on miss).
+type pcmBuf [mixerPCMBuf]int16
+
 // pcmPool recycles PCM buffers ([]int16 of length MixerPCMBuf = 1920) used by
-// fanout goroutines and returned by mixer tick after consumption. Using *[]int16
-// avoids interface boxing of the 3-word slice header on every Get/Put.
+// fanout goroutines and returned by mixer tick after consumption.
 var pcmPool = &sync.Pool{
-	New: func() any {
-		s := make([]int16, mixerPCMBuf)
-		return &s
-	},
+	New: func() any { return new(pcmBuf) },
 }
 
 // GetPCM returns a []int16 of length MixerPCMBuf from the pool.
 // The caller owns the slice until it is returned via PutPCM.
-func GetPCM() []int16 { return *pcmPool.Get().(*[]int16) }
+func GetPCM() []int16 { return pcmPool.Get().(*pcmBuf)[:] }
 
 // PutPCM returns a PCM buffer to the pool for reuse.
 // The caller must not access the slice after this call.
-func PutPCM(s []int16) { s = s[:mixerPCMBuf]; pcmPool.Put(&s) }
+func PutPCM(s []int16) { pcmPool.Put((*pcmBuf)(s[:mixerPCMBuf])) }
 
 // encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
 // calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
@@ -63,10 +62,11 @@ func PutPCM(s []int16) { s = s[:mixerPCMBuf]; pcmPool.Put(&s) }
 // frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
 const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
 
+// encodedBuf is a fixed-size array backing encoded-frame pool entries (single allocation on miss).
+type encodedBuf [encodedFrameCap]byte
+
 var encodedFramePool = &sync.Pool{
-	New: func() any {
-		return new(make([]byte, encodedFrameCap))
-	},
+	New: func() any { return new(encodedBuf) },
 }
 
 // getEncodedFrame returns a []byte of length n from the pool.
@@ -75,7 +75,7 @@ func getEncodedFrame(n int) []byte {
 	if n > encodedFrameCap {
 		return make([]byte, n)
 	}
-	return (*encodedFramePool.Get().(*[]byte))[:n]
+	return encodedFramePool.Get().(*encodedBuf)[:n]
 }
 
 // PutEncodedFrame returns a buffer to the appropriate pool based on its capacity.
@@ -86,11 +86,9 @@ func getEncodedFrame(n int) []byte {
 func PutEncodedFrame(b []byte) {
 	switch cap(b) {
 	case encodedFrameCap:
-		b = b[:encodedFrameCap]
-		encodedFramePool.Put(&b)
+		encodedFramePool.Put((*encodedBuf)(b[:encodedFrameCap]))
 	case recvFrameCap:
-		b = b[:recvFrameCap]
-		recvFramePool.Put(&b)
+		recvFramePool.Put((*recvBuf)(b[:recvFrameCap]))
 	}
 }
 
@@ -146,7 +144,7 @@ const mixerComplexity = 3
 // mixerInputDrainThreshold is the maximum number of queued frames per input
 // (beyond the one just read) before the mixer drains to the latest.
 // 4 frames × 20 ms = 80 ms of tolerated jitter before drain kicks in.
-const mixerInputDrainThreshold = 4
+const mixerInputDrainThreshold = 3
 
 // NewMixer creates a Mixer ready to accept inputs and run.
 // metrics is a pre-baked recorder (guild_id already embedded); obtain one via

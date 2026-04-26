@@ -25,7 +25,7 @@ import (
 // receiver/provider and the relay fan-out goroutines.
 // 10 frames × 20 ms = 200 ms max buffer depth; drain thresholds handle jitter
 // without accumulating large silent latency.
-const audioChanBuf = 10
+const audioChanBuf = 5
 
 // Service orchestrates speaker bots and voice raid sessions.
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.

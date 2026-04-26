@@ -20,21 +20,21 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 	if o.receiveDuration, err = meter.Float64Histogram("gdc.opus.receive.duration",
 		metric.WithDescription("ReceiveOpusFrame execution duration (excluding time blocked waiting for channel)"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+		metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.25, 1, 2, 5, 10),
 	); err != nil {
 		return
 	}
 	if o.provideDuration, err = meter.Float64Histogram("gdc.opus.provide.duration",
 		metric.WithDescription("ProvideOpusFrame execution duration (excluding time blocked waiting for a frame)"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5),
+		metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.25, 1, 2, 5, 10),
 	); err != nil {
 		return
 	}
 	if o.allowUserDuration, err = meter.Float64Histogram("gdc.opus.allow_user.duration",
 		metric.WithDescription("allowUser filter execution duration per evaluated frame"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1),
+		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 5, 10),
 	); err != nil {
 		return
 	}
@@ -70,6 +70,9 @@ func (o *OpusMetrics) For(guildID string) OpusRecorder {
 		attr: metric.WithAttributes(attribute.String("guild_id", guildID)),
 	}
 }
+
+// Active reports whether this recorder has an underlying meter (non-zero value).
+func (r OpusRecorder) Active() bool { return r.m != nil }
 
 // RecordReceive records the execution duration of one ReceiveOpusFrame call.
 func (r OpusRecorder) RecordReceive(ms float64) {

@@ -27,6 +27,7 @@ type pipelineParams struct {
 	ownerCleanup func()      // closes owner provider/receiver; called on teardown or build error
 	ov           pool.GuildVoice
 	metrics      *telemetry.Metrics
+	allowFilter  *AllowFilter
 }
 
 // hostPipeline builds the audio wiring for one topology and returns the
@@ -54,11 +55,12 @@ type directPipeline struct{}
 
 func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
 	session := &guild.Session{
-		GuildID:  p.guildID,
-		Cancel:   p.cancelFunc,
-		Cleanup:  p.setup.speakerCleanup,
-		AllyCode: p.allyCode,
-		Speakers: p.setup.speakers,
+		GuildID:     p.guildID,
+		Cancel:      p.cancelFunc,
+		Cleanup:     p.setup.speakerCleanup,
+		AllyCode:    p.allyCode,
+		Speakers:    p.setup.speakers,
+		AllowFilter: p.allowFilter,
 		// ChannelMixers intentionally nil: UpdateMixerPause guards for nil.
 	}
 	start := func() {
@@ -98,6 +100,7 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 		AllyCode:      p.allyCode,
 		Speakers:      p.setup.speakers,
 		ChannelMixers: mixerPausers,
+		AllowFilter:   p.allowFilter,
 	}
 	// Partition destinations: owner hub gets mixed output; all other channels
 	// get raw Opus directly from the fanout goroutine (no mixing needed).
@@ -157,6 +160,7 @@ func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Ses
 		AllyCode:      p.allyCode,
 		Speakers:      p.setup.speakers,
 		ChannelMixers: mixerPausers,
+		AllowFilter:   p.allowFilter,
 	}
 	start := func() {
 		wireFanout(ctx, p.guildID, sources, destinations, channelMixers, relayMixer, &p.metrics.Session)

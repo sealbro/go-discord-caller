@@ -16,10 +16,13 @@ import (
 // bitrates and Opus FEC padding with headroom.
 const recvFrameCap = 256
 
+// recvBuf is a fixed-size array backing receive pool entries.
+// Using *[N]byte instead of *[]byte means pool.New performs one allocation
+// (the array itself) rather than two (backing array + slice header pointer).
+type recvBuf [recvFrameCap]byte
+
 var recvFramePool = &sync.Pool{
-	New: func() any {
-		return new(make([]byte, recvFrameCap))
-	},
+	New: func() any { return new(recvBuf) },
 }
 
 // getRecvFrame returns a []byte of length n from the receive pool.
@@ -28,28 +31,60 @@ func getRecvFrame(n int) []byte {
 	if n > recvFrameCap {
 		return make([]byte, n)
 	}
-	return (*recvFramePool.Get().(*[]byte))[:n]
+	return recvFramePool.Get().(*recvBuf)[:n]
 }
+
+// metricsBufCap is the capacity of the async metrics drain channel.
+// At 20 ms/frame and up to ~50 active users the hot path produces ≤2500 samples/s;
+// 128 slots absorbs bursts without back-pressure while staying small.
+const metricsBufCap = 128
 
 // VoiceReceiver forwards incoming Opus frames into a channel.
 type VoiceReceiver struct {
 	voice.OpusFrameReceiver
-	ch        chan<- []byte
-	done      chan struct{}
-	botID     snowflake.ID
-	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
-	onDrop    func()                  // called once per frame dropped due to full channel; nil = no-op
-	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op)
+	ch         chan<- []byte
+	done       chan struct{}
+	botID      snowflake.ID
+	allowUser  func(snowflake.ID) bool // optional; nil means allow all non-bot users
+	onDrop     func()                  // called once per frame dropped due to full channel; nil = no-op
+	metrics    telemetry.OpusRecorder  // zero-value is safe (no-op)
+	metricsBuf chan float64            // async drain; nil when metrics is zero-value
 }
 
 func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, onDrop func(), metrics telemetry.OpusRecorder) *VoiceReceiver {
-	return &VoiceReceiver{
+	v := &VoiceReceiver{
 		ch:        ch,
 		done:      make(chan struct{}),
 		botID:     botID,
 		allowUser: allowUser,
 		onDrop:    onDrop,
 		metrics:   metrics,
+	}
+	if metrics.Active() {
+		v.metricsBuf = make(chan float64, metricsBufCap)
+		go v.drainMetrics()
+	}
+	return v
+}
+
+// drainMetrics runs in a background goroutine, recording buffered durations
+// so the hot path never blocks on the OTel histogram mutex.
+func (v *VoiceReceiver) drainMetrics() {
+	for {
+		select {
+		case ms := <-v.metricsBuf:
+			v.metrics.RecordReceive(ms)
+		case <-v.done:
+			// Flush remaining samples before exiting.
+			for {
+				select {
+				case ms := <-v.metricsBuf:
+					v.metrics.RecordReceive(ms)
+				default:
+					return
+				}
+			}
+		}
 	}
 }
 
@@ -95,7 +130,13 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		}
 	}
 
-	v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
+	if v.metricsBuf != nil {
+		ms := float64(time.Since(start).Microseconds()) / 1000.0
+		select {
+		case v.metricsBuf <- ms:
+		default: // drop sample rather than block
+		}
+	}
 	return nil
 }
 

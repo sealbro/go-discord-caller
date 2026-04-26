@@ -30,6 +30,13 @@ RUN mkdir -p /runtime-libs && \
 
 FROM gcr.io/distroless/base as runtime
 
+LABEL org.opencontainers.image.title="go-discord-caller" \
+      org.opencontainers.image.description="Go Discord bot that captures voice audio and relays it live to every bound speaker bot — across one or multiple Discord servers simultaneously." \
+      org.opencontainers.image.url="https://github.com/sealbro/go-discord-caller" \
+      org.opencontainers.image.source="https://github.com/sealbro/go-discord-caller" \
+      org.opencontainers.image.authors="sealbro <8067559+sealbro@users.noreply.github.com>" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 COPY --from=builder /bin/runner /
 COPY --from=builder /runtime-libs/ /usr/local/lib/
 COPY samples/ /samples/

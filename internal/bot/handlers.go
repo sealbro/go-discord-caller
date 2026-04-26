@@ -182,13 +182,9 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 		guildID := e.VoiceState.GuildID
 
 		if e.Member.User.Bot {
-			// Move the bot back to its bound channel if it was moved away during an active session.
-			if m.HasActiveSession(guildID) {
-				boundChID, ok := m.GetBoundChannel(guildID, e.Member.User.ID)
-				if ok && (e.VoiceState.ChannelID == nil || *e.VoiceState.ChannelID != boundChID) {
-					go m.ReconnectBotChannel(context.Background(), guildID, e.Member.User.ID)
-				}
-			}
+			// Delegate bot-move business logic to the manager: it checks whether the
+			// bot was displaced from its bound channel and reconnects if needed.
+			m.OnBotVoiceMove(context.Background(), guildID, e.Member.User.ID, e.VoiceState.ChannelID)
 			return
 		}
 

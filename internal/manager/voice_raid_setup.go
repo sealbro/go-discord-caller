@@ -25,7 +25,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 
 	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture(), allowUser)
 	if len(joined) == 0 {
-		return nil, fmt.Errorf("no speakers joined: verify speaker channels are bound and bots are online in this guild")
+		return nil, ErrNoSpeakers
 	}
 
 	outs := make([]chan<- []byte, 0, len(joined))
@@ -104,7 +104,7 @@ func (m *Service) commitSession(session *guild.Session) error {
 		return fmt.Errorf("guild status disappeared before session could be stored")
 	}
 	if st.HasActiveSession() {
-		return fmt.Errorf("a voice raid is already active in this server")
+		return ErrSessionExists
 	}
 	st.Session = session
 	return nil
@@ -230,10 +230,10 @@ func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]guild.Speaker, error
 	defer m.mu.RUnlock()
 	st := m.statuses[guildID]
 	if st == nil {
-		return nil, fmt.Errorf("no guild status found — seed the guild first")
+		return nil, ErrNoGuildStatus
 	}
 	if st.Session != nil {
-		return nil, fmt.Errorf("a voice raid is already active in this server")
+		return nil, ErrSessionExists
 	}
 	speakers := make([]guild.Speaker, 0, len(st.Speakers))
 	for _, v := range st.Speakers {

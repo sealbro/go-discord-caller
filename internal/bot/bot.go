@@ -34,6 +34,7 @@ type SessionManager interface {
 	UpdateMixerPause(guildID snowflake.ID)
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
 	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
+	OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID)
 }
 
 // BindingManager handles channel and role bindings.

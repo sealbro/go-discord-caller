@@ -242,7 +242,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	status := m.statuses[guildID]
 	if status == nil || !status.HasActiveSession() {
 		m.mu.Unlock()
-		return fmt.Errorf("no active voice raid in this server")
+		return ErrNoActiveSession
 	}
 	session := status.Session
 	status.Session = nil

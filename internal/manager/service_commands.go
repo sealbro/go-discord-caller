@@ -251,6 +251,24 @@ func (m *Service) HasActiveSession(guildID snowflake.ID) bool {
 	return st != nil && st.HasActiveSession()
 }
 
+// OnBotVoiceMove is called when a bot is moved to a different voice channel.
+// It reconnects the bot to its bound channel if the new channel differs, so that
+// bots cannot be permanently displaced during an active session.
+// No-op when there is no active session or the bot is already in its bound channel.
+func (m *Service) OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID) {
+	if !m.HasActiveSession(guildID) {
+		return
+	}
+	boundChID, ok := m.store.GetBoundChannel(guildID, botUserID)
+	if !ok {
+		return
+	}
+	if currentChannelID != nil && *currentChannelID == boundChID {
+		return // already in the right channel
+	}
+	go m.ReconnectBotChannel(ctx, guildID, botUserID)
+}
+
 // ReconnectBotChannel reconnects a bot to its bound voice channel in the given guild.
 // Called when a bot's voice connection drops or is moved away during an active session.
 // No-op if there is no active session, the bot has no bound channel, or a reconnect
@@ -258,12 +276,11 @@ func (m *Service) HasActiveSession(guildID snowflake.ID) bool {
 func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID) {
 	// Guard: one reconnect attempt per (guild, bot) at a time.
 	// Calling Leave below fires another GuildVoiceLeave which would re-enter here;
-	// the LoadOrStore makes that second call a no-op.
-	key := botKey{guildID, botUserID}
-	if _, loaded := m.reconnecting.LoadOrStore(key, struct{}{}); loaded {
+	// tryLock makes that second call a no-op.
+	if !m.reconnect.tryLock(guildID, botUserID) {
 		return
 	}
-	defer m.reconnecting.Delete(key)
+	defer m.reconnect.unlock(guildID, botUserID)
 
 	if !m.HasActiveSession(guildID) {
 		return
@@ -327,7 +344,7 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 	// Re-apply voice provider/receiver to the new conn so audio flows again.
 	// Pass ctx (the reconnect context) so the applier's FrameDroppers use a live,
 	// uncancelled context rather than the stale session-start context.
-	if applier, ok := m.loadApplier(guildID, botUserID); ok {
+	if applier, ok := m.reconnect.loadApplier(guildID, botUserID); ok {
 		applier(ctx, conn)
 	}
 	slog.InfoContext(ctx, "reconnect: bot rejoined bound channel",
@@ -339,26 +356,12 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 
 // storeApplier saves a reconnectApplier for the given guild+bot pair.
 func (m *Service) storeApplier(guildID, botUserID snowflake.ID, a reconnectApplier) {
-	m.reconnectAppliers.Store(botKey{guildID, botUserID}, a)
-}
-
-// loadApplier retrieves the reconnectApplier for the given guild+bot pair.
-func (m *Service) loadApplier(guildID, botUserID snowflake.ID) (reconnectApplier, bool) {
-	v, ok := m.reconnectAppliers.Load(botKey{guildID, botUserID})
-	if !ok {
-		return nil, false
-	}
-	return v.(reconnectApplier), true
+	m.reconnect.storeApplier(guildID, botUserID, a)
 }
 
 // clearAppliers removes all reconnect appliers for a guild (call on session teardown).
-// Uses the known set of bot IDs (pool speakers + owner) for an O(M) delete rather
-// than a full O(N*M) map scan with string prefix matching.
 func (m *Service) clearAppliers(guildID snowflake.ID) {
-	for _, botID := range m.poolSvc.GetIDs() {
-		m.reconnectAppliers.Delete(botKey{guildID, botID})
-	}
-	m.reconnectAppliers.Delete(botKey{guildID, m.ownerBotID})
+	m.reconnect.clearAppliers(guildID, m.poolSvc.GetIDs(), m.ownerBotID)
 }
 
 // buildSpeakerApplier returns a reconnectApplier for a speaker bot. It captures

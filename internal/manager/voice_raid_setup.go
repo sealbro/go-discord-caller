@@ -101,7 +101,7 @@ func (m *Service) commitSession(session *guild.Session) error {
 	defer m.mu.Unlock()
 	st := m.statuses[session.GuildID]
 	if st == nil {
-		return fmt.Errorf("guild status disappeared before session could be stored")
+		return fmt.Errorf("commit session: guild status disappeared")
 	}
 	if st.HasActiveSession() {
 		return ErrSessionExists

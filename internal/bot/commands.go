@@ -785,16 +785,34 @@ func formatAccessWarnings(warnings []manager.ChannelAccessWarning) string {
 	return msg
 }
 
+// botPermissions is the Discord permission bitmask required by speaker bots.
+// Bit 48 is an unnamed/reserved Discord permission retained from the original
+// install URL; remove it if Discord revokes or reassigns the bit.
+const botPermissions discord.Permissions = discord.PermissionAddReactions |
+	discord.PermissionPrioritySpeaker |
+	discord.PermissionSendMessages |
+	discord.PermissionSendTTSMessages |
+	discord.PermissionUseExternalEmojis |
+	discord.PermissionConnect |
+	discord.PermissionSpeak |
+	discord.PermissionUseVAD |
+	discord.PermissionUseApplicationCommands |
+	discord.PermissionUseExternalStickers |
+	discord.PermissionUseSoundboard |
+	discord.PermissionUseExternalSounds |
+	discord.PermissionSendVoiceMessages |
+	1<<48 // reserved/unnamed bit present in original install URL
+
 func installOwnerURL(clientID snowflake.ID) string {
 	return fmt.Sprintf(
-		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144",
-		clientID,
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%d",
+		clientID, botPermissions,
 	)
 }
 
 func installURL(clientID snowflake.ID, guildID snowflake.ID) string {
 	return fmt.Sprintf(
-		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=391565762894144&guild_id=%s",
-		clientID, guildID,
+		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%d&guild_id=%s",
+		clientID, botPermissions, guildID,
 	)
 }

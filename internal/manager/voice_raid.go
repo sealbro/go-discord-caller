@@ -147,7 +147,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		guestCleanupOwner()
 		m.sessions.RemoveGuest(guestGuildID)
 		endSpanErr(span, err)
-		return guestMode, fmt.Errorf("failed to commit session: %w", err)
+		return guestMode, fmt.Errorf("join session: commit: %w", err)
 	}
 	// Pause mixers for channels that currently have no non-bot listeners.
 	if guestMixerPausers != nil {
@@ -281,11 +281,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err != nil {
 		setup.speakerCleanup()
 		endSpanErr(span, err)
-		return "", fmt.Errorf("failed to join owner channel: %w", err)
+		return "", fmt.Errorf("start raid: join owner channel: %w", err)
 	}
 	if conn == nil {
 		setup.speakerCleanup()
-		err = fmt.Errorf("no voice connection to owner channel")
+		err = fmt.Errorf("start raid: owner voice connection nil")
 		endSpanErr(span, err)
 		return "", err
 	}
@@ -303,7 +303,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err != nil {
 		setup.speakerCleanup()
 		endSpanErr(span, err)
-		return "", fmt.Errorf("failed to setup owner capture: %w", err)
+		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
 	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(guildID, chIn, chOwnerOut, allowUser))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)

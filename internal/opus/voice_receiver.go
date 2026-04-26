@@ -90,7 +90,7 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 }
 
 func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
-	slog.Info("cleanup user", slog.Any("userID", userID))
+	slog.Debug("cleanup user", slog.Any("userID", userID))
 }
 
 func (v *VoiceReceiver) Close() {

@@ -378,11 +378,11 @@ func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) 
 func (m *Service) newSpeaker(botUserID snowflake.ID) (*guild.Speaker, error) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok {
-		return nil, fmt.Errorf("cannot find client for bot user ID %s", botUserID)
+		return nil, fmt.Errorf("new speaker: no client for bot %s", botUserID)
 	}
 	selfUser, ok := client.Caches.SelfUser()
 	if !ok {
-		return nil, fmt.Errorf("cannot find self user for bot user ID %s", botUserID)
+		return nil, fmt.Errorf("new speaker: no self user for bot %s", botUserID)
 	}
 	user := selfUser.User
 	return &guild.Speaker{

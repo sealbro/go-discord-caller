@@ -65,11 +65,11 @@ func (m *Service) ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) e
 
 	st := m.statuses[guildID]
 	if st == nil {
-		return fmt.Errorf("guild %s has no registered status", guildID)
+		return fmt.Errorf("toggle speaker: guild %s not registered", guildID)
 	}
 	sp, exists := st.Speakers[speakerID]
 	if !exists {
-		return fmt.Errorf("speaker %s is not registered in guild %s", speakerID, guildID)
+		return fmt.Errorf("toggle speaker: speaker %s not registered in guild %s", speakerID, guildID)
 	}
 	sp.Enabled = enabled
 	return nil

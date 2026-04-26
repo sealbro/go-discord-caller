@@ -7,11 +7,13 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// OpusMetrics tracks per-frame timing for the voice pipeline.
+// OpusMetrics tracks per-frame timing for the voice pipeline and mixer.
 type OpusMetrics struct {
 	receiveDuration   metric.Float64Histogram
 	provideDuration   metric.Float64Histogram
 	allowUserDuration metric.Float64Histogram
+	tickDuration      metric.Float64Histogram
+	pipelineLatency   metric.Float64Histogram
 }
 
 func (o *OpusMetrics) init(meter metric.Meter) (err error) {
@@ -33,6 +35,20 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		metric.WithDescription("allowUser filter execution duration per evaluated frame"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(0.001, 0.005, 0.01, 0.05, 0.1, 0.25, 0.5, 1),
+	); err != nil {
+		return
+	}
+	if o.tickDuration, err = meter.Float64Histogram("gdc.mixer.tick.duration",
+		metric.WithDescription("Mixer tick processing time"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 2, 5, 10, 20),
+	); err != nil {
+		return
+	}
+	if o.pipelineLatency, err = meter.Float64Histogram("gdc.mixer.pipeline.latency",
+		metric.WithDescription("End-to-end latency from fanout decode to mixer output"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(1, 5, 10, 20, 40, 60, 100, 200, 500),
 	); err != nil {
 		return
 	}
@@ -77,4 +93,20 @@ func (r OpusRecorder) RecordAllowUser(ms float64) {
 		return
 	}
 	r.m.allowUserDuration.Record(context.Background(), ms, r.attr)
+}
+
+// RecordTick records a mixer tick duration in milliseconds.
+func (r OpusRecorder) RecordTick(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.tickDuration.Record(context.Background(), ms, r.attr)
+}
+
+// RecordPipelineLatency records end-to-end pipeline latency in milliseconds.
+func (r OpusRecorder) RecordPipelineLatency(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.pipelineLatency.Record(context.Background(), ms, r.attr)
 }

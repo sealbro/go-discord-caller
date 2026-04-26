@@ -6,7 +6,6 @@ import "go.opentelemetry.io/otel/metric"
 // Create with NewMetrics; inject via constructor instead of accessing globals.
 type Metrics struct {
 	Session SessionMetrics
-	Mixer   MixerMetrics
 	Pool    PoolMetrics
 	Bot     BotMetrics
 	Opus    OpusMetrics
@@ -17,9 +16,6 @@ type Metrics struct {
 func NewMetrics(meter metric.Meter) (*Metrics, error) {
 	m := &Metrics{}
 	if err := m.Session.init(meter); err != nil {
-		return nil, err
-	}
-	if err := m.Mixer.init(meter); err != nil {
 		return nil, err
 	}
 	if err := m.Pool.init(meter); err != nil {

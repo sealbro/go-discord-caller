@@ -106,7 +106,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		if !guestMode.IsDirectOutput() {
 			guestChannelMixers = make(map[snowflake.ID]*opus.Mixer, len(destinations))
 			for _, dest := range destinations {
-				mx, err := opus.NewMixer(m.metrics.Mixer.For(guestGuildID.String()))
+				mx, err := opus.NewMixer(m.metrics.Opus.For(guestGuildID.String()))
 				if err != nil {
 					setup.speakerCleanup()
 					guestCleanupOwner()
@@ -117,7 +117,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				guestChannelMixers[dest.channelID] = mx
 			}
 		}
-		guestRelayMixer, err = opus.NewMixer(m.metrics.Mixer.For(guestGuildID.String()))
+		guestRelayMixer, err = opus.NewMixer(m.metrics.Opus.For(guestGuildID.String()))
 		if err != nil {
 			setup.speakerCleanup()
 			guestCleanupOwner()

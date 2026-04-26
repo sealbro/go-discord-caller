@@ -81,11 +81,11 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 			outs:      []chan<- []byte{p.chOwnerOut},
 		})
 	}
-	relayMixer, err := opus.NewMixer(p.metrics.Mixer.For(p.guildID.String()))
+	relayMixer, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}
-	hubMixer, err := opus.NewMixer(p.metrics.Mixer.For(p.guildID.String()))
+	hubMixer, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create hub mixer: %w", err)
 	}
@@ -134,13 +134,13 @@ func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Ses
 			outs:      []chan<- []byte{p.chOwnerOut},
 		})
 	}
-	relayMixer, err := opus.NewMixer(p.metrics.Mixer.For(p.guildID.String()))
+	relayMixer, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.metrics.Mixer.For(p.guildID.String()))
+		mx, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
 		if err != nil {
 			return nil, nil, fmt.Errorf("create channel mixer: %w", err)
 		}

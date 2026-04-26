@@ -2290,6 +2290,326 @@
           }
         }
       },
+      "ts-opus-durations": {
+        "kind": "Panel",
+        "spec": {
+          "id": 27,
+          "title": "Opus Frame Processing P99 (Receive / Provide / AllowUser)",
+          "description": "99th-percentile execution time for ReceiveOpusFrame, ProvideOpusFrame, and the allowUser filter. All three exclude time blocked waiting for channels.",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "legendFormat": "receive p99",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "B",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "legendFormat": "provide p99",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "C",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "legendFormat": "allow_user p99",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "timeseries",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "legend": {
+                  "calcs": ["mean", "max"],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": { "mode": "multi", "sort": "desc" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": {
+                    "drawStyle": "line",
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "fillOpacity": 10,
+                    "spanNulls": false,
+                    "showPoints": "auto",
+                    "thresholdsStyle": { "mode": "line" }
+                  },
+                  "min": 0,
+                  "unit": "ms",
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      { "color": "green", "value": null },
+                      { "color": "yellow", "value": 1 },
+                      { "color": "red", "value": 5 }
+                    ]
+                  }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "heatmap-opus-receive": {
+        "kind": "Panel",
+        "spec": {
+          "id": 28,
+          "title": "Opus Receive Duration Heatmap",
+          "description": "Distribution of ReceiveOpusFrame execution time",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "legendFormat": "{{le}}",
+                        "format": "heatmap",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "heatmap",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Greens",
+                  "steps": 64
+                },
+                "filterValues": { "le": 1e-09 },
+                "legend": { "show": true },
+                "tooltip": { "mode": "single", "showColorScale": false, "yHistogram": false },
+                "yAxis": { "axisPlacement": "left", "decimals": 2, "reverse": false, "unit": "ms" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": { "fillOpacity": 80, "lineWidth": 1 }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "heatmap-opus-provide": {
+        "kind": "Panel",
+        "spec": {
+          "id": 29,
+          "title": "Opus Provide Duration Heatmap",
+          "description": "Distribution of ProvideOpusFrame execution time",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "legendFormat": "{{le}}",
+                        "format": "heatmap",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "heatmap",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Yellows",
+                  "steps": 64
+                },
+                "filterValues": { "le": 1e-09 },
+                "legend": { "show": true },
+                "tooltip": { "mode": "single", "showColorScale": false, "yHistogram": false },
+                "yAxis": { "axisPlacement": "left", "decimals": 2, "reverse": false, "unit": "ms" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": { "fillOpacity": 80, "lineWidth": 1 }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
+      "heatmap-opus-allow-user": {
+        "kind": "Panel",
+        "spec": {
+          "id": 30,
+          "title": "Opus AllowUser Filter Duration Heatmap",
+          "description": "Distribution of allowUser filter execution time per evaluated frame",
+          "links": [],
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "refId": "A",
+                    "datasource": { "type": "prometheus" },
+                    "hidden": false,
+                    "query": {
+                      "kind": "DataQuery",
+                      "group": "",
+                      "version": "",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "legendFormat": "{{le}}",
+                        "format": "heatmap",
+                        "instant": false,
+                        "range": true
+                      }
+                    }
+                  }
+                }
+              ],
+              "transformations": [],
+              "queryOptions": {}
+            }
+          },
+          "vizConfig": {
+            "kind": "heatmap",
+            "group": "",
+            "version": "",
+            "spec": {
+              "options": {
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "RdPu",
+                  "steps": 64
+                },
+                "filterValues": { "le": 1e-09 },
+                "legend": { "show": true },
+                "tooltip": { "mode": "single", "showColorScale": false, "yHistogram": false },
+                "yAxis": { "axisPlacement": "left", "decimals": 3, "reverse": false, "unit": "ms" }
+              },
+              "fieldConfig": {
+                "defaults": {
+                  "color": { "mode": "palette-classic" },
+                  "custom": { "fillOpacity": 80, "lineWidth": 1 }
+                },
+                "overrides": []
+              }
+            }
+          }
+        }
+      },
       "ts-reconnect": {
         "kind": "Panel",
         "spec": {
@@ -2702,6 +3022,46 @@
               "x": 12,
               "y": 76,
               "width": 12,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "ts-opus-durations" },
+              "x": 0,
+              "y": 84,
+              "width": 24,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "heatmap-opus-receive" },
+              "x": 0,
+              "y": 92,
+              "width": 8,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "heatmap-opus-provide" },
+              "x": 8,
+              "y": 92,
+              "width": 8,
+              "height": 8
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": { "kind": "ElementReference", "name": "heatmap-opus-allow-user" },
+              "x": 16,
+              "y": 92,
+              "width": 8,
               "height": 8
             }
           }

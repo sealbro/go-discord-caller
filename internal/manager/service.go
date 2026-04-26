@@ -64,6 +64,19 @@ func (m *Service) StartMetrics() {
 	if err := m.metrics.Bot.RegisterBotOnline(m.observeBotOnline); err != nil {
 		slog.Error("manager: failed to register bot_online metric callback", slog.Any("err", err))
 	}
+	if err := m.metrics.Bot.RegisterGuildInfo(m.observeGuildInfo); err != nil {
+		slog.Error("manager: failed to register guild_info metric callback", slog.Any("err", err))
+	}
+}
+
+// observeGuildInfo is an OTel observable callback that emits gdc_discord_guild
+// for every guild the owner bot is currently a member of.
+// Reads directly from the disgo cache — no duplicate state needed.
+func (m *Service) observeGuildInfo(_ context.Context, o metric.Observer) error {
+	for g := range m.ownerClient.Caches.Guilds() {
+		m.metrics.Bot.ObserveGuildInfo(o, g.ID.String(), g.Name)
+	}
+	return nil
 }
 
 // observeBotOnline is an OTel observable callback that emits gdc_bot_online

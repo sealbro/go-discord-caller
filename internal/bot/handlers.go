@@ -15,7 +15,7 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),
-		bot.NewListenerFunc(onGuildJoin(managerSvc, metrics)),
+		bot.NewListenerFunc(onGuildJoin(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate),
@@ -23,11 +23,6 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceMove(managerSvc)),
 	}
-}
-
-// recordGuildInfo registers the guild so the observable gauge emits it on every scrape.
-func recordGuildInfo(metrics *telemetry.BotMetrics, guildID snowflake.ID, guildName string) {
-	metrics.RecordGuildInfo(guildID.String(), guildName)
 }
 
 // onReady is called when the bot has connected and is ready.
@@ -46,13 +41,11 @@ func onReady(m ManagerService) func(*events.Ready) {
 }
 
 // onGuildAvailable is called for each guild that becomes available after the
-// initial Ready handshake. It records the guild info metric and initialises
-// VoiceCallers from the current voice states so the counter is accurate after
-// a bot restart (users already in voice channels emit no new join events).
+// initial Ready handshake. It initialises VoiceCallers from the current voice
+// states so the counter is accurate after a bot restart (users already in
+// voice channels emit no new join events).
 func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildAvailable) {
 	return func(e *events.GuildAvailable) {
-		recordGuildInfo(metrics, e.GuildID, e.Guild.Name)
-
 		// Seed VoiceCallers from voice states present in the GUILD_CREATE payload.
 		counts := make(map[snowflake.ID]int64) // channelID → caller count
 		for _, vs := range e.Guild.VoiceStates {
@@ -75,9 +68,8 @@ func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*eve
 
 // onGuildJoin is called when the owner bot is added to a new guild.
 // It seeds speakers and ensures the guild has a persistent relay code.
-func onGuildJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildJoin) {
+func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
-		recordGuildInfo(metrics, e.GuildID, e.Guild.Name)
 		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
 	}
 }

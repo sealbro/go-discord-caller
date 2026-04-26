@@ -2,10 +2,33 @@ package opus
 
 import (
 	"log/slog"
+	"sync"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 )
+
+// recvFrameCap is the pool buffer capacity for raw Opus frames received from Discord.
+// Discord voice sends Opus at 48 kHz, 20 ms frames; at typical voice bitrates
+// (8–64 kbps) encoded frame size is 20–160 bytes. 256 bytes covers all standard
+// bitrates and Opus FEC padding with headroom.
+const recvFrameCap = 256
+
+var recvFramePool = &sync.Pool{
+	New: func() any {
+		b := make([]byte, recvFrameCap)
+		return &b
+	},
+}
+
+// getRecvFrame returns a []byte of length n from the receive pool.
+// Falls back to a fresh allocation when n exceeds recvFrameCap (rare for voice frames).
+func getRecvFrame(n int) []byte {
+	if n > recvFrameCap {
+		return make([]byte, n)
+	}
+	return (*recvFramePool.Get().(*[]byte))[:n]
+}
 
 // VoiceReceiver forwards incoming Opus frames into a channel.
 type VoiceReceiver struct {
@@ -48,8 +71,10 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	}
 
 	// Copy the opus bytes before sending because the backing array may be reused
-	// by the voice library.
-	data := make([]byte, len(packet.Opus))
+	// by the voice library. Use the pool to avoid a fresh allocation per frame.
+	// VoiceProvider.ProvideOpusFrame returns the buffer via PutEncodedFrame after
+	// the UDP send completes, so the pool recycles it safely.
+	data := getRecvFrame(len(packet.Opus))
 	copy(data, packet.Opus)
 
 	// Try to forward the frame. Selecting on done prevents a send to a

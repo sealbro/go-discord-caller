@@ -73,18 +73,31 @@ func (m *Service) StartMetrics() {
 func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 	speakerIDs := m.poolSvc.GetIDs()
 
+	// Snapshot the per-guild speaker sets under the read lock so that metric
+	// emission (which calls into the OTel SDK and may itself acquire locks)
+	// does not hold m.mu and block voice raid write operations.
+	type guildEntry struct {
+		guildID    snowflake.ID
+		speakerIDs []snowflake.ID
+	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	snap := make([]guildEntry, 0, len(m.statuses))
 	for guildID, st := range m.statuses {
-		// Owner bot is always a member of every guild it manages.
-		m.metrics.Bot.ObserveBotOnline(o, m.ownerBotID.String(), guildID.String())
-
-		// Speaker bots: emit only when registered in this guild.
+		var inGuild []snowflake.ID
 		for _, botID := range speakerIDs {
-			if _, inGuild := st.Speakers[botID]; inGuild {
-				m.metrics.Bot.ObserveBotOnline(o, botID.String(), guildID.String())
+			if _, ok := st.Speakers[botID]; ok {
+				inGuild = append(inGuild, botID)
 			}
+		}
+		snap = append(snap, guildEntry{guildID, inGuild})
+	}
+	m.mu.RUnlock()
+
+	for _, e := range snap {
+		// Owner bot is always a member of every guild it manages.
+		m.metrics.Bot.ObserveBotOnline(o, m.ownerBotID.String(), e.guildID.String())
+		for _, botID := range e.speakerIDs {
+			m.metrics.Bot.ObserveBotOnline(o, botID.String(), e.guildID.String())
 		}
 	}
 	return nil
@@ -210,6 +223,11 @@ func (m *Service) UpdateMixerPause(guildID snowflake.ID) {
 }
 
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
+	// Fast path: member cache is pre-warmed by warmGuildCache at startup.
+	if _, ok := m.ownerClient.Caches.Member(guildID, userID); ok {
+		return true
+	}
+	// Slow path: cache miss — fall back to REST (e.g. first call before warmup).
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := m.ownerClient.Rest.GetMember(guildID, userID, rest.WithCtx(ctx))

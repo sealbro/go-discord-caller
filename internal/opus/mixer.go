@@ -78,17 +78,20 @@ func getEncodedFrame(n int) []byte {
 	return (*encodedFramePool.Get().(*[]byte))[:n]
 }
 
-// PutEncodedFrame returns a buffer to the pool.
-// Buffers not allocated by getEncodedFrame — identified by a capacity other than
-// encodedFrameCap (e.g. raw Opus passthrough slices from the receiver) — are
-// silently dropped; the GC reclaims them.
+// PutEncodedFrame returns a buffer to the appropriate pool based on its capacity.
+// Buffers with cap == encodedFrameCap go to encodedFramePool (re-encoded mixer output).
+// Buffers with cap == recvFrameCap go to recvFramePool (raw Opus received from Discord).
+// All other capacities are silently dropped; the GC reclaims them.
 // The caller must not access the slice after this call.
 func PutEncodedFrame(b []byte) {
-	if cap(b) != encodedFrameCap {
-		return
+	switch cap(b) {
+	case encodedFrameCap:
+		b = b[:encodedFrameCap]
+		encodedFramePool.Put(&b)
+	case recvFrameCap:
+		b = b[:recvFrameCap]
+		recvFramePool.Put(&b)
 	}
-	b = b[:encodedFrameCap]
-	encodedFramePool.Put(&b)
 }
 
 // Frame carries one audio frame through a mixer input channel.

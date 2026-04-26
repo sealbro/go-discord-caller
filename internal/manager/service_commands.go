@@ -297,13 +297,32 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 	defer cancel()
 	conn, err := gv.Join(reconnCtx, guildID)
 	if err != nil {
-		slog.WarnContext(ctx, "reconnect: failed to rejoin bound channel",
+		// Single retry after a short backoff to handle transient failures
+		// (Discord rate limits, brief network interruptions). The reconnect
+		// guard stays held so a concurrent leave event does not race us.
+		slog.WarnContext(ctx, "reconnect: first join attempt failed, retrying in 2s",
 			slog.String("guildID", guildID.String()),
 			slog.String("botUserID", botUserID.String()),
-			slog.String("channelID", channelID.String()),
 			slog.Any("err", err),
 		)
-		return
+		select {
+		case <-reconnCtx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+		if !m.HasActiveSession(guildID) {
+			return // session ended during backoff
+		}
+		conn, err = gv.Join(reconnCtx, guildID)
+		if err != nil {
+			slog.WarnContext(ctx, "reconnect: failed to rejoin bound channel",
+				slog.String("guildID", guildID.String()),
+				slog.String("botUserID", botUserID.String()),
+				slog.String("channelID", channelID.String()),
+				slog.Any("err", err),
+			)
+			return
+		}
 	}
 	// Re-apply voice provider/receiver to the new conn so audio flows again.
 	// Pass ctx (the reconnect context) so the applier's FrameDroppers use a live,

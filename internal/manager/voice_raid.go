@@ -69,6 +69,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		} else {
 			ownerCleanup = cleanup
 			ownerChIn = chIn
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildOwnerApplier(ctx, guestGuildID, ownerChIn, ownerChOut, allowUser))
 		}
 	}
 	// guestCleanupOwner consolidates owner teardown used in both error paths and deferred teardown.
@@ -205,6 +206,13 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	)
 	go func() {
 		defer func() {
+			// Clear session first so that voice-leave events fired during cleanup
+			// do not trigger a spurious reconnect via ReconnectBotChannel.
+			m.mu.Lock()
+			if st := m.statuses[guestGuildID]; st != nil {
+				st.Session = nil
+			}
+			m.mu.Unlock()
 			setup.speakerCleanup()
 			guestCleanupOwner()
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
@@ -213,11 +221,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				close(ch)
 			}
 			m.sessions.RemoveGuest(guestGuildID)
-			m.mu.Lock()
-			if st := m.statuses[guestGuildID]; st != nil {
-				st.Session = nil
-			}
-			m.mu.Unlock()
+			m.clearAppliers(guestGuildID)
 			m.metrics.Session.SessionStopped(ctx, guestGuildID)
 			span.End()
 			slog.InfoContext(ctx, "guest session ended", slog.String("guildID", guestGuildID.String()))
@@ -251,6 +255,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		m.ownerVoice(guildID).Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
 	}
+	m.clearAppliers(guildID)
 	slog.InfoContext(ctx, "voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil
 }
@@ -300,6 +305,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		endSpanErr(span, err)
 		return "", fmt.Errorf("failed to setup owner capture: %w", err)
 	}
+	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(ctx, guildID, chIn, chOwnerOut, allowUser))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(

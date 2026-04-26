@@ -1,13 +1,19 @@
 package manager
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"slices"
+	"time"
 
+	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // SeedExistingSpeakers registers any pool bots already in each guild and ensures
@@ -243,4 +249,146 @@ func (m *Service) HasActiveSession(guildID snowflake.ID) bool {
 	defer m.mu.RUnlock()
 	st := m.statuses[guildID]
 	return st != nil && st.HasActiveSession()
+}
+
+// ReconnectBotChannel reconnects a bot to its bound voice channel in the given guild.
+// Called when a bot's voice connection drops or is moved away during an active session.
+// No-op if there is no active session, the bot has no bound channel, or a reconnect
+// for this bot is already in flight (prevents the leave→reconnect→leave→... loop).
+func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID) {
+	// Guard: one reconnect attempt per (guild, bot) at a time.
+	// Calling Leave below fires another GuildVoiceLeave which would re-enter here;
+	// the LoadOrStore makes that second call a no-op.
+	key := guildID.String() + ":" + botUserID.String()
+	if _, loaded := m.reconnecting.LoadOrStore(key, struct{}{}); loaded {
+		return
+	}
+	defer m.reconnecting.Delete(key)
+
+	if !m.HasActiveSession(guildID) {
+		return
+	}
+	channelID, ok := m.store.GetBoundChannel(guildID, botUserID)
+	if !ok || channelID == 0 {
+		return
+	}
+	var gv pool.GuildVoice
+	if botUserID == m.ownerBotID {
+		gv = m.ownerVoice(guildID)
+	} else {
+		var found bool
+		gv, found = m.speakerVoice(guildID, botUserID)
+		if !found {
+			return
+		}
+	}
+
+	// Close the existing (possibly broken) voice connection so conn.Open starts
+	// fresh instead of re-using stale internal state that causes a timeout.
+	leaveCtx, leaveCancel := context.WithTimeout(ctx, voiceLeaveTimeout)
+	gv.Leave(leaveCtx, guildID)
+	leaveCancel()
+
+	if !m.HasActiveSession(guildID) {
+		return // session ended while we were closing
+	}
+
+	reconnCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	conn, err := gv.Join(reconnCtx, guildID)
+	if err != nil {
+		slog.WarnContext(ctx, "reconnect: failed to rejoin bound channel",
+			slog.String("guildID", guildID.String()),
+			slog.String("botUserID", botUserID.String()),
+			slog.String("channelID", channelID.String()),
+			slog.Any("err", err),
+		)
+		return
+	}
+	// Re-apply voice provider/receiver to the new conn so audio flows again.
+	if applier, ok := m.loadApplier(guildID, botUserID); ok {
+		applier(conn)
+	}
+	slog.InfoContext(ctx, "reconnect: bot rejoined bound channel",
+		slog.String("guildID", guildID.String()),
+		slog.String("botUserID", botUserID.String()),
+		slog.String("channelID", channelID.String()),
+	)
+}
+
+// storeApplier saves a reconnectApplier for the given guild+bot pair.
+func (m *Service) storeApplier(guildID, botUserID snowflake.ID, a reconnectApplier) {
+	m.reconnectAppliers.Store(guildID.String()+":"+botUserID.String(), a)
+}
+
+// loadApplier retrieves the reconnectApplier for the given guild+bot pair.
+func (m *Service) loadApplier(guildID, botUserID snowflake.ID) (reconnectApplier, bool) {
+	v, ok := m.reconnectAppliers.Load(guildID.String() + ":" + botUserID.String())
+	if !ok {
+		return nil, false
+	}
+	return v.(reconnectApplier), true
+}
+
+// clearAppliers removes all reconnect appliers for a guild (call on session teardown).
+func (m *Service) clearAppliers(guildID snowflake.ID) {
+	prefix := guildID.String() + ":"
+	m.reconnectAppliers.Range(func(k, _ any) bool {
+		if key, ok := k.(string); ok && len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			m.reconnectAppliers.Delete(k)
+		}
+		return true
+	})
+}
+
+// buildSpeakerApplier returns a reconnectApplier for a speaker bot. It captures
+// chOut and chCapture so the same mixer channels are reused after reconnect.
+// A new VoiceReceiver is always created because disgo closes the old one on kick.
+// The VoiceProvider is created fresh so two audioSender goroutines don't compete
+// on the same channel (the old one is stopped; creating new is cleaner).
+func (m *Service) buildSpeakerApplier(ctx context.Context, guildID, botID snowflake.ID, chOut <-chan []byte, withCapture bool, chCapture chan []byte, allowUser func(snowflake.ID) bool) reconnectApplier {
+	var makeProvider func() voice.OpusFrameProvider
+	if m.test.IsTestBot(botID) {
+		makeProvider = func() voice.OpusFrameProvider {
+			p, _ := opus.NewFileVoiceProvider(m.test.FileDCA)
+			return p
+		}
+	} else {
+		onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
+		makeProvider = func() voice.OpusFrameProvider {
+			return opus.NewVoiceProvider(chOut, onDrop)
+		}
+	}
+	return func(conn voice.Conn) {
+		conn.SetOpusFrameProvider(makeProvider())
+		if withCapture && chCapture != nil {
+			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, botID, allowUser))
+		} else {
+			conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
+		}
+	}
+}
+
+// buildOwnerApplier returns a reconnectApplier for the owner bot.
+// chOut is nil when the session mode does not play back audio into the owner's channel.
+func (m *Service) buildOwnerApplier(ctx context.Context, guildID snowflake.ID, chCapture chan []byte, chOut <-chan []byte, allowUser func(snowflake.ID) bool) reconnectApplier {
+	var makeProvider func() voice.OpusFrameProvider
+	if chOut != nil {
+		onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
+		makeProvider = func() voice.OpusFrameProvider {
+			return opus.NewVoiceProvider(chOut, onDrop)
+		}
+	} else {
+		makeProvider = func() voice.OpusFrameProvider {
+			return opus.NewEmptyVoiceProvider()
+		}
+	}
+	return func(conn voice.Conn) {
+		conn.SetOpusFrameProvider(makeProvider())
+		if chCapture != nil {
+			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, m.ownerBotID, allowUser))
+		} else {
+			conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
+		}
+	}
 }

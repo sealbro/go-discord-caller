@@ -25,10 +25,9 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 	}
 }
 
-// recordGuildInfo records the guild info metric. Uses context.Background() because
-// disgo event handlers do not carry a request-scoped context.
+// recordGuildInfo registers the guild so the observable gauge emits it on every scrape.
 func recordGuildInfo(metrics *telemetry.BotMetrics, guildID snowflake.ID, guildName string) {
-	metrics.RecordGuildInfo(context.Background(), guildID.String(), guildName)
+	metrics.RecordGuildInfo(guildID.String(), guildName)
 }
 
 // onReady is called when the bot has connected and is ready.
@@ -153,11 +152,16 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 // onVoiceLeave is called whenever a user leaves a voice channel.
 func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceLeave) {
 	return func(e *events.GuildVoiceLeave) {
+		guildID := e.VoiceState.GuildID
+
 		if e.Member.User.Bot {
+			// Reconnect the bot to its bound channel if a session is active.
+			if m.HasActiveSession(guildID) {
+				go m.ReconnectBotChannel(context.Background(), guildID, e.Member.User.ID)
+			}
 			return
 		}
 
-		guildID := e.VoiceState.GuildID
 		slog.Info("user left voice channel",
 			slog.String("userID", e.Member.User.ID.String()),
 			slog.String("guildID", guildID.String()),
@@ -175,11 +179,20 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 // onVoiceMove is called whenever a user moves between voice channels.
 func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 	return func(e *events.GuildVoiceMove) {
+		guildID := e.VoiceState.GuildID
+
 		if e.Member.User.Bot {
+			// Move the bot back to its bound channel if it was moved away during an active session.
+			if m.HasActiveSession(guildID) {
+				boundChID, ok := m.GetBoundChannel(guildID, e.Member.User.ID)
+				if ok && (e.VoiceState.ChannelID == nil || *e.VoiceState.ChannelID != boundChID) {
+					go m.ReconnectBotChannel(context.Background(), guildID, e.Member.User.ID)
+				}
+			}
 			return
 		}
 
 		// Both the old and new channel may need mixer pause state updated.
-		m.UpdateMixerPause(e.VoiceState.GuildID)
+		m.UpdateMixerPause(guildID)
 	}
 }

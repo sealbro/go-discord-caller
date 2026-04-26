@@ -33,6 +33,7 @@ type SessionManager interface {
 	HasActiveSession(guildID snowflake.ID) bool
 	UpdateMixerPause(guildID snowflake.ID)
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
+	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 }
 
 // BindingManager handles channel and role bindings.

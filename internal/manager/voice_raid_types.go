@@ -3,10 +3,16 @@ package manager
 import (
 	"time"
 
+	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
+
+// reconnectApplier re-applies voice provider/receiver to a freshly opened conn
+// after a bot reconnects to its bound channel mid-session. It creates new
+// provider/receiver objects from the same channels so the mixer graph stays connected.
+type reconnectApplier func(conn voice.Conn)
 
 // ChannelAccessWarning describes a bot that cannot connect or speak in its bound channel.
 type ChannelAccessWarning struct {

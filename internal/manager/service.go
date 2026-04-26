@@ -33,13 +33,15 @@ type Service struct {
 	mu       sync.RWMutex
 	statuses map[snowflake.ID]*guild.Status // protected by mu
 
-	store       store.Store
-	poolSvc     pool.PoolService
-	ownerClient *bot.Client
-	ownerBotID  snowflake.ID
-	test        config.TestConfig
-	sessions    *ally.Manager
-	metrics     *telemetry.Metrics
+	store             store.Store
+	poolSvc           pool.PoolService
+	ownerClient       *bot.Client
+	ownerBotID        snowflake.ID
+	test              config.TestConfig
+	sessions          *ally.Manager
+	metrics           *telemetry.Metrics
+	reconnecting      sync.Map // key: "guildID:botUserID"; guards against concurrent reconnect loops
+	reconnectAppliers sync.Map // key: "guildID:botUserID" → reconnectApplier; re-wires audio after reconnect
 }
 
 // NewService creates a new manager Service.

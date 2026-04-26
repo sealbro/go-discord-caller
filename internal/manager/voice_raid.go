@@ -56,7 +56,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
-		ownerSetup := NewVoiceConnSetup(m.ownerBotID, &m.metrics.Opus).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
+		ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guestGuildID.String())).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
 			ownerSetup.WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathReceiver))
@@ -106,7 +106,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		if !guestMode.IsDirectOutput() {
 			guestChannelMixers = make(map[snowflake.ID]*opus.Mixer, len(destinations))
 			for _, dest := range destinations {
-				mx, err := opus.NewMixer(&m.metrics.Mixer)
+				mx, err := opus.NewMixer(m.metrics.Mixer.For(guestGuildID.String()))
 				if err != nil {
 					setup.speakerCleanup()
 					guestCleanupOwner()
@@ -117,7 +117,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				guestChannelMixers[dest.channelID] = mx
 			}
 		}
-		guestRelayMixer, err = opus.NewMixer(&m.metrics.Mixer)
+		guestRelayMixer, err = opus.NewMixer(m.metrics.Mixer.For(guestGuildID.String()))
 		if err != nil {
 			setup.speakerCleanup()
 			guestCleanupOwner()
@@ -290,7 +290,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", err
 	}
 	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
-	ownerSetup := NewVoiceConnSetup(m.ownerBotID, &m.metrics.Opus).WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
+	ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guildID.String())).WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
 	var chOwnerOut chan []byte

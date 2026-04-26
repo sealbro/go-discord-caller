@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -38,17 +39,42 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 	return nil
 }
 
+// OpusRecorder is a pre-baked recorder for a specific guild_id.
+// Obtain one via OpusMetrics.For and reuse it for the lifetime of a session.
+// All record calls are zero-alloc on the hot path.
+type OpusRecorder struct {
+	m    *OpusMetrics
+	attr metric.MeasurementOption
+}
+
+// For returns an OpusRecorder with guild_id pre-baked into every measurement.
+func (o *OpusMetrics) For(guildID string) OpusRecorder {
+	return OpusRecorder{
+		m:    o,
+		attr: metric.WithAttributes(attribute.String("guild_id", guildID)),
+	}
+}
+
 // RecordReceive records the execution duration of one ReceiveOpusFrame call.
-func (o *OpusMetrics) RecordReceive(ms float64) {
-	o.receiveDuration.Record(context.Background(), ms)
+func (r OpusRecorder) RecordReceive(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.receiveDuration.Record(context.Background(), ms, r.attr)
 }
 
 // RecordProvide records the execution duration of one ProvideOpusFrame drain+return path.
-func (o *OpusMetrics) RecordProvide(ms float64) {
-	o.provideDuration.Record(context.Background(), ms)
+func (r OpusRecorder) RecordProvide(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.provideDuration.Record(context.Background(), ms, r.attr)
 }
 
 // RecordAllowUser records the execution duration of one allowUser filter call.
-func (o *OpusMetrics) RecordAllowUser(ms float64) {
-	o.allowUserDuration.Record(context.Background(), ms)
+func (r OpusRecorder) RecordAllowUser(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.allowUserDuration.Record(context.Background(), ms, r.attr)
 }

@@ -39,10 +39,10 @@ type VoiceReceiver struct {
 	botID     snowflake.ID
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 	onDrop    func()                  // called once per frame dropped due to full channel; nil = no-op
-	metrics   *telemetry.OpusMetrics  // nil-safe; pass nil to disable instrumentation
+	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op)
 }
 
-func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, onDrop func(), metrics *telemetry.OpusMetrics) *VoiceReceiver {
+func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, onDrop func(), metrics telemetry.OpusRecorder) *VoiceReceiver {
 	return &VoiceReceiver{
 		ch:        ch,
 		done:      make(chan struct{}),
@@ -89,16 +89,13 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	select {
 	case v.ch <- data:
 	case <-v.done:
-		// receiver was closed between the check above and here; discard safely
 	default:
 		if v.onDrop != nil {
 			v.onDrop()
 		}
 	}
 
-	if v.metrics != nil {
-		v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
-	}
+	v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
 	return nil
 }
 

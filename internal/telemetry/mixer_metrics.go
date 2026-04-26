@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
@@ -30,12 +31,28 @@ func (m *MixerMetrics) init(meter metric.Meter) (err error) {
 	return nil
 }
 
+// MixerRecorder is a pre-baked recorder for a specific guild_id.
+// Obtain one via MixerMetrics.For and reuse it for the lifetime of a session.
+// All record calls are zero-alloc on the hot path.
+type MixerRecorder struct {
+	m    *MixerMetrics
+	attr metric.MeasurementOption
+}
+
+// For returns a MixerRecorder with guild_id pre-baked into every measurement.
+func (m *MixerMetrics) For(guildID string) MixerRecorder {
+	return MixerRecorder{
+		m:    m,
+		attr: metric.WithAttributes(attribute.String("guild_id", guildID)),
+	}
+}
+
 // RecordTick records a mixer tick duration in milliseconds.
-func (m *MixerMetrics) RecordTick(ctx context.Context, ms float64) {
-	m.tickDuration.Record(ctx, ms)
+func (r MixerRecorder) RecordTick(ctx context.Context, ms float64) {
+	r.m.tickDuration.Record(ctx, ms, r.attr)
 }
 
 // RecordPipelineLatency records end-to-end pipeline latency in milliseconds.
-func (m *MixerMetrics) RecordPipelineLatency(ctx context.Context, ms float64) {
-	m.pipelineLatency.Record(ctx, ms)
+func (r MixerRecorder) RecordPipelineLatency(ctx context.Context, ms float64) {
+	r.m.pipelineLatency.Record(ctx, ms, r.attr)
 }

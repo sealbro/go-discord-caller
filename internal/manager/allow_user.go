@@ -20,14 +20,14 @@ import (
 // connection to warm the member cache before the filter is first evaluated.
 func (m *Service) buildAllowUserFilter(guildID snowflake.ID) func(snowflake.ID) bool {
 	caches := m.ownerClient.Caches
-	opusMetrics := &m.metrics.Opus
+	opusRecorder := m.metrics.Opus.For(guildID.String())
 
 	// withTiming wraps a filter fn to record allowUser execution duration.
 	withTiming := func(fn func(snowflake.ID) bool) func(snowflake.ID) bool {
 		return func(userID snowflake.ID) bool {
 			start := time.Now()
 			result := fn(userID)
-			opusMetrics.RecordAllowUser(float64(time.Since(start).Microseconds()) / 1000.0)
+			opusRecorder.RecordAllowUser(float64(time.Since(start).Microseconds()) / 1000.0)
 			return result
 		}
 	}

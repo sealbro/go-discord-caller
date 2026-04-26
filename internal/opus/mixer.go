@@ -124,7 +124,7 @@ type Mixer struct {
 	mu      sync.Mutex
 	inputs  map[snowflake.ID]*inputEntry
 	paused  atomic.Bool
-	metrics *telemetry.MixerMetrics
+	metrics telemetry.MixerRecorder
 
 	out chan []byte
 	enc *hraban.Encoder
@@ -149,9 +149,9 @@ const mixerComplexity = 3
 const mixerInputDrainThreshold = 4
 
 // NewMixer creates a Mixer ready to accept inputs and run.
-// metrics is used to record tick duration and pipeline latency; pass a zero-value
-// MixerMetrics (or nil pointer fields) when metrics are not needed.
-func NewMixer(metrics *telemetry.MixerMetrics) (*Mixer, error) {
+// metrics is a pre-baked recorder (guild_id already embedded); obtain one via
+// MixerMetrics.For(guildID).
+func NewMixer(metrics telemetry.MixerRecorder) (*Mixer, error) {
 	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppVoIP)
 	if err != nil {
 		return nil, fmt.Errorf("mixer: new encoder: %w", err)

@@ -15,13 +15,13 @@ import (
 // call Apply to wire everything into a voice.Conn.
 type VoiceConnSetup struct {
 	userID     snowflake.ID
-	metrics    *telemetry.OpusMetrics
+	metrics    telemetry.OpusRecorder
 	providerFn func(chIn <-chan []byte) (voice.OpusFrameProvider, error)
 	receiverFn func() (chan []byte, voice.OpusFrameReceiver, error)
 }
 
 // NewVoiceConnSetup creates a new voice session builder.
-func NewVoiceConnSetup(userID snowflake.ID, metrics *telemetry.OpusMetrics) *VoiceConnSetup {
+func NewVoiceConnSetup(userID snowflake.ID, metrics telemetry.OpusRecorder) *VoiceConnSetup {
 	return &VoiceConnSetup{userID: userID, metrics: metrics}
 }
 

@@ -259,7 +259,7 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 	// Guard: one reconnect attempt per (guild, bot) at a time.
 	// Calling Leave below fires another GuildVoiceLeave which would re-enter here;
 	// the LoadOrStore makes that second call a no-op.
-	key := guildID.String() + ":" + botUserID.String()
+	key := botKey{guildID, botUserID}
 	if _, loaded := m.reconnecting.LoadOrStore(key, struct{}{}); loaded {
 		return
 	}
@@ -320,12 +320,12 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 
 // storeApplier saves a reconnectApplier for the given guild+bot pair.
 func (m *Service) storeApplier(guildID, botUserID snowflake.ID, a reconnectApplier) {
-	m.reconnectAppliers.Store(guildID.String()+":"+botUserID.String(), a)
+	m.reconnectAppliers.Store(botKey{guildID, botUserID}, a)
 }
 
 // loadApplier retrieves the reconnectApplier for the given guild+bot pair.
 func (m *Service) loadApplier(guildID, botUserID snowflake.ID) (reconnectApplier, bool) {
-	v, ok := m.reconnectAppliers.Load(guildID.String() + ":" + botUserID.String())
+	v, ok := m.reconnectAppliers.Load(botKey{guildID, botUserID})
 	if !ok {
 		return nil, false
 	}
@@ -333,14 +333,13 @@ func (m *Service) loadApplier(guildID, botUserID snowflake.ID) (reconnectApplier
 }
 
 // clearAppliers removes all reconnect appliers for a guild (call on session teardown).
+// Uses the known set of bot IDs (pool speakers + owner) for an O(M) delete rather
+// than a full O(N*M) map scan with string prefix matching.
 func (m *Service) clearAppliers(guildID snowflake.ID) {
-	prefix := guildID.String() + ":"
-	m.reconnectAppliers.Range(func(k, _ any) bool {
-		if key, ok := k.(string); ok && len(key) >= len(prefix) && key[:len(prefix)] == prefix {
-			m.reconnectAppliers.Delete(k)
-		}
-		return true
-	})
+	for _, botID := range m.poolSvc.GetIDs() {
+		m.reconnectAppliers.Delete(botKey{guildID, botID})
+	}
+	m.reconnectAppliers.Delete(botKey{guildID, m.ownerBotID})
 }
 
 // buildSpeakerApplier returns a reconnectApplier for a speaker bot. It captures

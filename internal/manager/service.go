@@ -40,8 +40,8 @@ type Service struct {
 	test              config.TestConfig
 	sessions          *ally.Manager
 	metrics           *telemetry.Metrics
-	reconnecting      sync.Map // key: "guildID:botUserID"; guards against concurrent reconnect loops
-	reconnectAppliers sync.Map // key: "guildID:botUserID" → reconnectApplier; re-wires audio after reconnect
+	reconnecting      sync.Map // key: botKey; guards against concurrent reconnect loops
+	reconnectAppliers sync.Map // key: botKey → reconnectApplier; re-wires audio after reconnect
 }
 
 // NewService creates a new manager Service.

@@ -213,6 +213,11 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 	}
 
 	s.mu.Lock()
+	// Close the old (disconnected) client before replacing it so its internal
+	// goroutines and WebSocket connection are released rather than leaked.
+	if old := s.poolClients[botUserID]; old != nil {
+		old.Close(ctx)
+	}
 	s.poolClients[botUserID] = newClient
 	s.mu.Unlock()
 	slog.InfoContext(ctx, "pool: reconnected speaker gateway", slog.String("botUserID", botUserID.String()))

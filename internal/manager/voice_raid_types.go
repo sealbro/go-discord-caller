@@ -17,6 +17,14 @@ import (
 // recording and speaking-flag ops use a live, uncancelled context.
 type reconnectApplier func(ctx context.Context, conn voice.Conn)
 
+// botKey is a composite key for the reconnecting and reconnectAppliers sync.Maps.
+// Using a struct avoids the three string allocations (two .String() calls plus
+// concatenation) that occurred on every GuildVoiceLeave event with string keys.
+type botKey struct {
+	guildID   snowflake.ID
+	botUserID snowflake.ID
+}
+
 // ChannelAccessWarning describes a bot that cannot connect or speak in its bound channel.
 type ChannelAccessWarning struct {
 	BotID     snowflake.ID

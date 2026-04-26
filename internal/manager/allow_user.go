@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
@@ -17,25 +18,32 @@ import (
 // The filter is built once per session and shared across all voice connections
 // (owner and speakers). Call prefetchChannelMembers separately for each
 // connection to warm the member cache before the filter is first evaluated.
-//
-// NOTE: The roleID is captured at build time. If an admin changes the capture
-// role mid-raid, the running session continues using the original role until
-// the raid is restarted.
 func (m *Service) buildAllowUserFilter(guildID snowflake.ID) func(snowflake.ID) bool {
 	caches := m.ownerClient.Caches
+	opusMetrics := &m.metrics.Opus
+
+	// withTiming wraps a filter fn to record allowUser execution duration.
+	withTiming := func(fn func(snowflake.ID) bool) func(snowflake.ID) bool {
+		return func(userID snowflake.ID) bool {
+			start := time.Now()
+			result := fn(userID)
+			opusMetrics.RecordAllowUser(float64(time.Since(start).Microseconds()) / 1000.0)
+			return result
+		}
+	}
 
 	roleID, hasRole := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
 	if !hasRole {
 		// No role filter — allow all non-bot users.
-		return func(userID snowflake.ID) bool {
+		return withTiming(func(userID snowflake.ID) bool {
 			member, ok := caches.Member(guildID, userID)
 			return ok && !member.User.Bot
-		}
+		})
 	}
 
 	slog.Info("role filter active", slog.String("guildID", guildID.String()), slog.String("roleID", roleID.String()))
 
-	return func(userID snowflake.ID) bool {
+	return withTiming(func(userID snowflake.ID) bool {
 		member, ok := caches.Member(guildID, userID)
 		if !ok {
 			return false
@@ -47,7 +55,7 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID) func(snowflake.ID) 
 			return false
 		}
 		return slices.Contains(member.RoleIDs, roleID)
-	}
+	})
 }
 
 // prefetchChannelMembers requests full member data for every user currently in

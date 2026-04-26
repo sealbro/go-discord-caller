@@ -3,9 +3,11 @@ package opus
 import (
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // recvFrameCap is the pool buffer capacity for raw Opus frames received from Discord.
@@ -16,8 +18,7 @@ const recvFrameCap = 256
 
 var recvFramePool = &sync.Pool{
 	New: func() any {
-		b := make([]byte, recvFrameCap)
-		return &b
+		return new(make([]byte, recvFrameCap))
 	},
 }
 
@@ -37,14 +38,18 @@ type VoiceReceiver struct {
 	done      chan struct{}
 	botID     snowflake.ID
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
+	onDrop    func()                  // called once per frame dropped due to full channel; nil = no-op
+	metrics   *telemetry.OpusMetrics  // nil-safe; pass nil to disable instrumentation
 }
 
-func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool) *VoiceReceiver {
+func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, onDrop func(), metrics *telemetry.OpusMetrics) *VoiceReceiver {
 	return &VoiceReceiver{
 		ch:        ch,
 		done:      make(chan struct{}),
 		botID:     botID,
 		allowUser: allowUser,
+		onDrop:    onDrop,
+		metrics:   metrics,
 	}
 }
 
@@ -65,6 +70,8 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		return nil
 	}
 
+	start := time.Now()
+
 	// Apply optional role/user filter.
 	if v.allowUser != nil && !v.allowUser(userID) {
 		return nil
@@ -84,7 +91,13 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	case <-v.done:
 		// receiver was closed between the check above and here; discard safely
 	default:
-		slog.Debug("dropping opus frame: channel full", slog.String("botID", v.botID.String()))
+		if v.onDrop != nil {
+			v.onDrop()
+		}
+	}
+
+	if v.metrics != nil {
+		v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
 	}
 	return nil
 }

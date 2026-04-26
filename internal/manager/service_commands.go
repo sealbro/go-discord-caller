@@ -214,8 +214,8 @@ func (m *Service) enrichBindings(snap *guild.Status, guildID snowflake.ID) {
 	if code, ok := m.store.GetAllyCode(guildID); ok {
 		snap.AllyCode = code
 	}
-	if guild, ok := m.ownerClient.Caches.Guild(guildID); ok {
-		snap.GuildName = guild.Name
+	if cachedGuild, ok := m.ownerClient.Caches.Guild(guildID); ok {
+		snap.GuildName = cachedGuild.Name
 	}
 }
 
@@ -380,11 +380,11 @@ func (m *Service) buildSpeakerApplier(guildID, botID snowflake.ID, chOut <-chan 
 			provider = p
 		} else {
 			onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
-			provider = opus.NewVoiceProvider(chOut, onDrop)
+			provider = opus.NewVoiceProvider(chOut, onDrop, &m.metrics.Opus)
 		}
 		conn.SetOpusFrameProvider(provider)
 		if withCapture && chCapture != nil {
-			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, botID, allowUser))
+			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, botID, allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver), &m.metrics.Opus))
 		} else {
 			conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
 		}
@@ -401,13 +401,13 @@ func (m *Service) buildOwnerApplier(guildID snowflake.ID, chCapture chan []byte,
 		var provider voice.OpusFrameProvider
 		if hasOut {
 			onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
-			provider = opus.NewVoiceProvider(chOut, onDrop)
+			provider = opus.NewVoiceProvider(chOut, onDrop, &m.metrics.Opus)
 		} else {
 			provider = opus.NewEmptyVoiceProvider()
 		}
 		conn.SetOpusFrameProvider(provider)
 		if chCapture != nil {
-			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, m.ownerBotID, allowUser))
+			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, m.ownerBotID, allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver), &m.metrics.Opus))
 		} else {
 			conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
 		}

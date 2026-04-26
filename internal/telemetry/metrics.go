@@ -9,6 +9,7 @@ type Metrics struct {
 	Mixer   MixerMetrics
 	Pool    PoolMetrics
 	Bot     BotMetrics
+	Opus    OpusMetrics
 }
 
 // NewMetrics initialises all instruments from the provided meter.
@@ -25,6 +26,9 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		return nil, err
 	}
 	if err := m.Bot.init(meter); err != nil {
+		return nil, err
+	}
+	if err := m.Opus.init(meter); err != nil {
 		return nil, err
 	}
 	return m, nil

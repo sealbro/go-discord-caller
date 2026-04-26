@@ -56,10 +56,10 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
-		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
+		ownerSetup := NewVoiceConnSetup(m.ownerBotID, &m.metrics.Opus).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
-			ownerSetup.WithVoiceReceiver(allowUser)
+			ownerSetup.WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathReceiver))
 		}
 		ownerChOut = make(chan []byte, audioChanBuf)
 		chIn, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
@@ -290,7 +290,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", err
 	}
 	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
-	ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceReceiver(allowUser)
+	ownerSetup := NewVoiceConnSetup(m.ownerBotID, &m.metrics.Opus).WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
 	var chOwnerOut chan []byte

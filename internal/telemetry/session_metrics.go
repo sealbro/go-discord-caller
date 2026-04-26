@@ -75,6 +75,7 @@ const (
 	DropPathOwnerStarRelay  DropPath = "owner_star_relay"
 	DropPathRelayBridge     DropPath = "relay_bridge"
 	DropPathProvider        DropPath = "provider"
+	DropPathReceiver        DropPath = "receiver"
 )
 
 // FrameDropper pre-computes the metric attributes for guildID+path and returns

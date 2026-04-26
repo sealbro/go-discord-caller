@@ -7,6 +7,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // VoiceConnSetup is a builder that configures a voice connection's provider
@@ -14,13 +15,14 @@ import (
 // call Apply to wire everything into a voice.Conn.
 type VoiceConnSetup struct {
 	userID     snowflake.ID
+	metrics    *telemetry.OpusMetrics
 	providerFn func(chIn <-chan []byte) (voice.OpusFrameProvider, error)
 	receiverFn func() (chan []byte, voice.OpusFrameReceiver, error)
 }
 
 // NewVoiceConnSetup creates a new voice session builder.
-func NewVoiceConnSetup(userID snowflake.ID) *VoiceConnSetup {
-	return &VoiceConnSetup{userID: userID}
+func NewVoiceConnSetup(userID snowflake.ID, metrics *telemetry.OpusMetrics) *VoiceConnSetup {
+	return &VoiceConnSetup{userID: userID, metrics: metrics}
 }
 
 // WithFileProvider plays audio from a DCA file, draining chIn.
@@ -41,16 +43,17 @@ func (v *VoiceConnSetup) WithFileProvider(path string) *VoiceConnSetup {
 // onDrop is called once per frame discarded by the provider's drain loop; pass nil to disable.
 func (v *VoiceConnSetup) WithVoiceProvider(onDrop func()) *VoiceConnSetup {
 	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.NewVoiceProvider(chIn, onDrop), nil
+		return opus.NewVoiceProvider(chIn, onDrop, v.metrics), nil
 	}
 	return v
 }
 
 // WithVoiceReceiver captures incoming voice frames filtered by allowUser.
-func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool) *VoiceConnSetup {
+// onDrop is called once per frame dropped because the capture channel is full; pass nil to disable.
+func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, onDrop func()) *VoiceConnSetup {
 	v.receiverFn = func() (chan []byte, voice.OpusFrameReceiver, error) {
 		ch := make(chan []byte, audioChanBuf)
-		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser), nil
+		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser, onDrop, v.metrics), nil
 	}
 	return v
 }

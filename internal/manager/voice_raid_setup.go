@@ -116,7 +116,7 @@ func (m *Service) commitSession(session *guild.Session) error {
 // by allowUser (shared filter built once at session start).
 // The caller is responsible for calling the returned cleanup function.
 func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
-	session := NewVoiceConnSetup(speakerID)
+	session := NewVoiceConnSetup(speakerID, &m.metrics.Opus)
 	if m.test.IsTestBot(speakerID) {
 		session.WithFileProvider(m.test.FileDCA)
 	} else {
@@ -124,7 +124,7 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 	}
 
 	if withCapture {
-		session.WithVoiceReceiver(allowUser)
+		session.WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
 	}
 
 	capture, cleanup, err := session.Apply(ctx, conn, chOut)

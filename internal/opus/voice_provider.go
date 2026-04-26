@@ -2,15 +2,19 @@ package opus
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/disgoorg/disgo/voice"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // VoiceProvider streams Opus frames from a channel into a voice connection.
 type VoiceProvider struct {
 	voice.OpusFrameProvider
-	ch   <-chan []byte
-	done chan struct{}
+	ch      <-chan []byte
+	done    chan struct{}
+	onDrop  func()                 // called once per frame silently discarded by the drain loop; nil = no-op
+	metrics telemetry.OpusRecorder // zero-value is safe (no-op)
 	// prev holds the buffer returned by the last ProvideOpusFrame call.
 	// It is recycled via PutEncodedFrame at the start of the next call —
 	// by that point disgo has finished sending the packet over UDP and no
@@ -18,10 +22,12 @@ type VoiceProvider struct {
 	prev []byte
 }
 
-func NewVoiceProvider(ch <-chan []byte) *VoiceProvider {
+func NewVoiceProvider(ch <-chan []byte, onDrop func(), metrics telemetry.OpusRecorder) *VoiceProvider {
 	return &VoiceProvider{
-		ch:   ch,
-		done: make(chan struct{}),
+		ch:      ch,
+		done:    make(chan struct{}),
+		onDrop:  onDrop,
+		metrics: metrics,
 	}
 }
 
@@ -49,6 +55,7 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 		if !ok {
 			return nil, fmt.Errorf("voice provider channel closed")
 		}
+		start := time.Now()
 		// Drain excess frames when the buffer depth exceeds the threshold,
 		// but keep the last queued frame in the channel so speech is not
 		// cut mid-word. Under normal jitter (0–2 frames queued) frames play
@@ -59,17 +66,23 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 				case newer, ok := <-v.ch:
 					if !ok {
 						v.prev = data
+						v.metrics.RecordProvide(float64(time.Since(start).Microseconds()) / 1000.0)
 						return data, nil
 					}
-					PutEncodedFrame(data) // dropped frame; return to pool
+					PutEncodedFrame(data)
+					if v.onDrop != nil {
+						v.onDrop()
+					}
 					data = newer
 				default:
 					v.prev = data
+					v.metrics.RecordProvide(float64(time.Since(start).Microseconds()) / 1000.0)
 					return data, nil
 				}
 			}
 		}
 		v.prev = data
+		v.metrics.RecordProvide(float64(time.Since(start).Microseconds()) / 1000.0)
 		return data, nil
 	}
 }

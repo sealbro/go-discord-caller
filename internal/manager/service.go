@@ -40,6 +40,7 @@ type Service struct {
 	test        config.TestConfig
 	sessions    *ally.Manager
 	metrics     *telemetry.Metrics
+	reconnect   reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
 }
 
 // NewService creates a new manager Service.
@@ -53,6 +54,7 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		test:        test,
 		sessions:    ally.NewManager(),
 		metrics:     metrics,
+		reconnect:   newReconnectState(),
 	}
 }
 
@@ -62,6 +64,19 @@ func (m *Service) StartMetrics() {
 	if err := m.metrics.Bot.RegisterBotOnline(m.observeBotOnline); err != nil {
 		slog.Error("manager: failed to register bot_online metric callback", slog.Any("err", err))
 	}
+	if err := m.metrics.Bot.RegisterGuildInfo(m.observeGuildInfo); err != nil {
+		slog.Error("manager: failed to register guild_info metric callback", slog.Any("err", err))
+	}
+}
+
+// observeGuildInfo is an OTel observable callback that emits gdc_discord_guild
+// for every guild the owner bot is currently a member of.
+// Reads directly from the disgo cache — no duplicate state needed.
+func (m *Service) observeGuildInfo(_ context.Context, o metric.Observer) error {
+	for g := range m.ownerClient.Caches.Guilds() {
+		m.metrics.Bot.ObserveGuildInfo(o, g.ID.String(), g.Name)
+	}
+	return nil
 }
 
 // observeBotOnline is an OTel observable callback that emits gdc_bot_online
@@ -71,18 +86,31 @@ func (m *Service) StartMetrics() {
 func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 	speakerIDs := m.poolSvc.GetIDs()
 
+	// Snapshot the per-guild speaker sets under the read lock so that metric
+	// emission (which calls into the OTel SDK and may itself acquire locks)
+	// does not hold m.mu and block voice raid write operations.
+	type guildEntry struct {
+		guildID    snowflake.ID
+		speakerIDs []snowflake.ID
+	}
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
+	snap := make([]guildEntry, 0, len(m.statuses))
 	for guildID, st := range m.statuses {
-		// Owner bot is always a member of every guild it manages.
-		m.metrics.Bot.ObserveBotOnline(o, m.ownerBotID.String(), guildID.String())
-
-		// Speaker bots: emit only when registered in this guild.
+		var inGuild []snowflake.ID
 		for _, botID := range speakerIDs {
-			if _, inGuild := st.Speakers[botID]; inGuild {
-				m.metrics.Bot.ObserveBotOnline(o, botID.String(), guildID.String())
+			if _, ok := st.Speakers[botID]; ok {
+				inGuild = append(inGuild, botID)
 			}
+		}
+		snap = append(snap, guildEntry{guildID, inGuild})
+	}
+	m.mu.RUnlock()
+
+	for _, e := range snap {
+		// Owner bot is always a member of every guild it manages.
+		m.metrics.Bot.ObserveBotOnline(o, m.ownerBotID.String(), e.guildID.String())
+		for _, botID := range e.speakerIDs {
+			m.metrics.Bot.ObserveBotOnline(o, botID.String(), e.guildID.String())
 		}
 	}
 	return nil
@@ -208,6 +236,11 @@ func (m *Service) UpdateMixerPause(guildID snowflake.ID) {
 }
 
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {
+	// Fast path: member cache is pre-warmed by warmGuildCache at startup.
+	if _, ok := m.ownerClient.Caches.Member(guildID, userID); ok {
+		return true
+	}
+	// Slow path: cache miss — fall back to REST (e.g. first call before warmup).
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, err := m.ownerClient.Rest.GetMember(guildID, userID, rest.WithCtx(ctx))
@@ -358,11 +391,11 @@ func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) 
 func (m *Service) newSpeaker(botUserID snowflake.ID) (*guild.Speaker, error) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok {
-		return nil, fmt.Errorf("cannot find client for bot user ID %s", botUserID)
+		return nil, fmt.Errorf("new speaker: no client for bot %s", botUserID)
 	}
 	selfUser, ok := client.Caches.SelfUser()
 	if !ok {
-		return nil, fmt.Errorf("cannot find self user for bot user ID %s", botUserID)
+		return nil, fmt.Errorf("new speaker: no self user for bot %s", botUserID)
 	}
 	user := selfUser.User
 	return &guild.Speaker{

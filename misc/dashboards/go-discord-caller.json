@@ -2,120 +2,43 @@
   "apiVersion": "dashboard.grafana.app/v2",
   "kind": "Dashboard",
   "metadata": {
-    "name": "go-discord-caller-v1"
+    "annotations": {
+      "grafana.app/folder": "",
+      "grafana.app/saved-from-ui": "Grafana Cloud"
+    },
+    "labels": {},
+    "name": "go-discord-caller-v1",
+    "namespace": "stacks-368460"
   },
   "spec": {
-    "title": "go-discord-caller",
-    "description": "Discord voice relay system. Metrics exported via OpenTelemetry OTLP gRPC. OTel\u2192Prometheus naming: dots\u2192underscores, unit suffixes appended (_seconds, _milliseconds).",
-    "tags": [
-      "discord",
-      "voice",
-      "otel",
-      "audio"
-    ],
-    "cursorSync": "Off",
-    "preload": false,
-    "liveNow": false,
-    "annotations": [],
-    "links": [],
-    "timeSettings": {
-      "from": "now-3h",
-      "to": "now",
-      "timezone": "browser",
-      "autoRefresh": "30s",
-      "autoRefreshIntervals": [
-        "5s",
-        "10s",
-        "30s",
-        "1m",
-        "5m",
-        "15m",
-        "30m",
-        "1h",
-        "2h",
-        "1d"
-      ],
-      "fiscalYearStartMonth": 0,
-      "hideTimepicker": false
-    },
-    "variables": [
+    "annotations": [
       {
-        "kind": "QueryVariable",
+        "kind": "AnnotationQuery",
         "spec": {
-          "name": "job",
-          "label": "Job",
-          "hide": "dontHide",
-          "refresh": "onTimeRangeChanged",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "grafanacloud-prom"
-          },
+          "builtIn": true,
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations \u0026 Alerts",
           "query": {
+            "datasource": {
+              "name": "-- Grafana --"
+            },
+            "group": "grafana",
             "kind": "DataQuery",
-            "group": "",
-            "version": "",
-            "spec": {
-              "expr": "label_values(gdc_voice_sessions_active, job)"
-            }
-          },
-          "regex": "",
-          "sort": "alphabeticalAsc",
-          "multi": false,
-          "includeAll": true,
-          "allValue": ".*",
-          "allowCustomValue": false,
-          "skipUrlSync": false,
-          "current": {
-            "text": "All",
-            "value": "$__all"
-          }
-        }
-      },
-      {
-        "kind": "QueryVariable",
-        "spec": {
-          "name": "guild_id",
-          "label": "Guild",
-          "hide": "dontHide",
-          "refresh": "onTimeRangeChanged",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "grafanacloud-prom"
-          },
-          "query": {
-            "kind": "DataQuery",
-            "group": "",
-            "version": "",
-            "spec": {
-              "expr": "query_result(gdc_discord_guild{job=~\"$job\"})"
-            }
-          },
-          "regex": "/guild_name=\"(?P<text>[^\"]+)\".*guild_id=\"(?P<value>[^\"]+)\"/",
-          "sort": "alphabeticalAsc",
-          "multi": true,
-          "includeAll": true,
-          "allValue": ".*",
-          "allowCustomValue": false,
-          "skipUrlSync": false,
-          "current": {
-            "text": [
-              "All"
-            ],
-            "value": [
-              "$__all"
-            ]
+            "spec": {},
+            "version": "v0"
           }
         }
       }
     ],
+    "cursorSync": "Off",
+    "description": "Discord voice relay system. Metrics exported via OpenTelemetry OTLP gRPC. OTel→Prometheus naming: dots→underscores, unit suffixes appended (_seconds, _milliseconds).",
+    "editable": true,
     "elements": {
-      "stat-active-sessions": {
+      "panel-1": {
         "kind": "Panel",
         "spec": {
-          "id": 1,
-          "title": "Active Voice Sessions",
-          "description": "",
-          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -123,60 +46,45 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum(gdc_voice_sessions_active{job=~\"$job\"})",
-                        "legendFormat": "Active",
                         "instant": true,
+                        "legendFormat": "Active",
                         "range": false
                       },
-                      "group": "",
-                      "version": ""
-                    }
+                      "version": "v0"
+                    },
+                    "refId": "A"
                   }
                 }
               ],
-              "transformations": [],
-              "queryOptions": {}
+              "queryOptions": {},
+              "transformations": []
             }
           },
+          "description": "",
+          "id": 1,
+          "links": [],
+          "title": "Active Voice Sessions",
           "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
+            "group": "stat",
+            "kind": "VizConfig",
             "spec": {
-              "options": {
-                "colorMode": "background",
-                "graphMode": "none",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "reduceOptions": {
-                  "calcs": [
-                    "lastNotNull"
-                  ],
-                  "fields": "",
-                  "values": false
-                },
-                "textMode": "auto"
-              },
               "fieldConfig": {
                 "defaults": {
                   "color": {
                     "mode": "thresholds"
                   },
-                  "mappings": [],
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
                         "color": "green",
-                        "value": null
+                        "value": 0
                       },
                       {
                         "color": "yellow",
@@ -191,58 +99,13 @@
                   "unit": "short"
                 },
                 "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "stat-session-start-rate": {
-        "kind": "Panel",
-        "spec": {
-          "id": 2,
-          "title": "Session Start Rate",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "Starts/s",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
-            "spec": {
+              },
               "options": {
                 "colorMode": "background",
-                "graphMode": "area",
+                "graphMode": "none",
                 "justifyMode": "center",
                 "orientation": "auto",
+                "percentChangeColorMode": "standard",
                 "reduceOptions": {
                   "calcs": [
                     "lastNotNull"
@@ -250,79 +113,1293 @@
                   "fields": "",
                   "values": false
                 },
-                "textMode": "auto"
-              },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-10": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p50",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p95",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 10,
+          "links": [],
+          "title": "Command Duration P50 / P95 / P99",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
               "fieldConfig": {
                 "defaults": {
                   "color": {
-                    "mode": "fixed",
-                    "fixedColor": "blue"
+                    "mode": "palette-classic"
                   },
-                  "mappings": [],
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 0,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "s"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "mean",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-11": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "format": "heatmap",
+                        "instant": false,
+                        "legendFormat": "{{le}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 11,
+          "links": [],
+          "title": "Command Duration Heatmap",
+          "vizConfig": {
+            "group": "heatmap",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "scaleDistribution": {
+                      "type": "linear"
+                    }
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "fill": "dark-orange",
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Oranges",
+                  "steps": 64
+                },
+                "exemplars": {
+                  "color": "rgba(255,0,255,0.7)"
+                },
+                "filterValues": {
+                  "le": 1e-9
+                },
+                "legend": {
+                  "show": true
+                },
+                "rowsFrame": {
+                  "layout": "auto"
+                },
+                "tooltip": {
+                  "mode": "single",
+                  "showColorScale": false,
+                  "yHistogram": false
+                },
+                "yAxis": {
+                  "axisPlacement": "left",
+                  "decimals": 2,
+                  "reverse": false,
+                  "unit": "s"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-12": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p50",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p95",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Time to process one 20 ms audio mixing tick. Budget: 20 ms. Values above threshold indicate the mixer is falling behind real-time.",
+          "id": 12,
+          "links": [],
+          "title": "Mixer Tick Duration P50 / P95 / P99",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 5
+                      },
+                      {
+                        "color": "red",
+                        "value": 20
+                      }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "mean",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-13": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p50",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p95",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Time from fanout decode (VoiceReceiver) to mixer output frame. Measures the full audio relay delay introduced by the mixing pipeline.",
+          "id": 13,
+          "links": [],
+          "title": "Pipeline End-to-End Latency P50 / P95 / P99",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 40
+                      },
+                      {
+                        "color": "red",
+                        "value": 100
+                      }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "mean",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-14": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "format": "heatmap",
+                        "instant": false,
+                        "legendFormat": "{{le}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 14,
+          "links": [],
+          "title": "Mixer Tick Duration Heatmap",
+          "vizConfig": {
+            "group": "heatmap",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "scaleDistribution": {
+                      "type": "linear"
+                    }
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "fill": "dark-orange",
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Blues",
+                  "steps": 64
+                },
+                "exemplars": {
+                  "color": "rgba(255,0,255,0.7)"
+                },
+                "filterValues": {
+                  "le": 1e-9
+                },
+                "legend": {
+                  "show": true
+                },
+                "rowsFrame": {
+                  "layout": "auto"
+                },
+                "tooltip": {
+                  "mode": "single",
+                  "showColorScale": false,
+                  "yHistogram": false
+                },
+                "yAxis": {
+                  "axisPlacement": "left",
+                  "decimals": 2,
+                  "reverse": false,
+                  "unit": "ms"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-15": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "format": "heatmap",
+                        "instant": false,
+                        "legendFormat": "{{le}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 15,
+          "links": [],
+          "title": "Pipeline Latency Heatmap",
+          "vizConfig": {
+            "group": "heatmap",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "scaleDistribution": {
+                      "type": "linear"
+                    }
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "fill": "dark-orange",
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Purples",
+                  "steps": 64
+                },
+                "exemplars": {
+                  "color": "rgba(255,0,255,0.7)"
+                },
+                "filterValues": {
+                  "le": 1e-9
+                },
+                "legend": {
+                  "show": true
+                },
+                "rowsFrame": {
+                  "layout": "auto"
+                },
+                "tooltip": {
+                  "mode": "single",
+                  "showColorScale": false,
+                  "yHistogram": false
+                },
+                "yAxis": {
+                  "axisPlacement": "left",
+                  "decimals": 2,
+                  "reverse": false,
+                  "unit": "ms"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-16": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_total{job=~\"$job\"})",
+                        "instant": true,
+                        "legendFormat": "Total"
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_connected{job=~\"$job\"})",
+                        "instant": true,
+                        "legendFormat": "Connected"
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 16,
+          "links": [],
+          "title": "Pool Bots",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "red",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 1
+                      },
+                      {
+                        "color": "green",
+                        "value": 2
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "background",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-17": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_total{job=~\"$job\"})",
+                        "instant": false,
+                        "legendFormat": "Total",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(gdc_pool_bots_connected{job=~\"$job\"})",
+                        "instant": false,
+                        "legendFormat": "Connected",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 17,
+          "links": [],
+          "title": "Pool Bots Over Time",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-18": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(increase(gdc_pool_reconnect_failures_total{job=~\"$job\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Failures",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 18,
+          "links": [],
+          "title": "Pool Reconnect Failures",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 1
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "background",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-19": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "gdc_session_speakers{job=~\"$job\", guild_id=~\"$guild_id\"}",
+                        "instant": false,
+                        "legendFormat": "{{guild_id}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 19,
+          "links": [],
+          "title": "Session Speakers",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-2": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Starts/s",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 2,
+          "links": [],
+          "title": "Session Start Rate",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "fixedColor": "blue",
+                    "mode": "fixed"
+                  },
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
                         "color": "blue",
-                        "value": null
+                        "value": 0
                       }
                     ]
                   },
                   "unit": "reqps"
                 },
                 "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "stat-session-stop-rate": {
-        "kind": "Panel",
-        "spec": {
-          "id": 3,
-          "title": "Session Stop Rate",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "Stops/s",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
-            "spec": {
+              },
               "options": {
                 "colorMode": "background",
                 "graphMode": "area",
                 "justifyMode": "center",
                 "orientation": "auto",
+                "percentChangeColorMode": "standard",
                 "reduceOptions": {
                   "calcs": [
                     "lastNotNull"
@@ -330,39 +1407,18 @@
                   "fields": "",
                   "values": false
                 },
-                "textMode": "auto"
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "fixed",
-                    "fixedColor": "purple"
-                  },
-                  "mappings": [],
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "purple",
-                        "value": null
-                      }
-                    ]
-                  },
-                  "unit": "reqps"
-                },
-                "overrides": []
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
               }
-            }
+            },
+            "version": "13.1.0-24779284961"
           }
         }
       },
-      "stat-command-rate": {
+      "panel-20": {
         "kind": "Panel",
         "spec": {
-          "id": 4,
-          "title": "Command Rate",
-          "description": "",
-          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -370,86 +1426,119 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_command_total{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "Cmds/s",
+                        "expr": "rate(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])",
                         "instant": false,
+                        "legendFormat": "{{path}} – {{guild_id}}",
                         "range": true
                       },
-                      "group": "",
-                      "version": ""
-                    }
+                      "version": "v0"
+                    },
+                    "refId": "A"
                   }
                 }
               ],
-              "transformations": [],
-              "queryOptions": {}
+              "queryOptions": {},
+              "transformations": []
             }
           },
+          "description": "",
+          "id": 20,
+          "links": [],
+          "title": "Fanout Frames Dropped",
           "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
+            "group": "timeseries",
+            "kind": "VizConfig",
             "spec": {
-              "options": {
-                "colorMode": "value",
-                "graphMode": "area",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "reduceOptions": {
-                  "calcs": [
-                    "lastNotNull"
-                  ],
-                  "fields": "",
-                  "values": false
-                },
-                "textMode": "auto"
-              },
               "fieldConfig": {
                 "defaults": {
                   "color": {
-                    "mode": "thresholds"
+                    "mode": "palette-classic"
                   },
-                  "mappings": [],
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
                         "color": "green",
-                        "value": null
-                      },
-                      {
-                        "color": "yellow",
-                        "value": 0.5
+                        "value": 0
                       },
                       {
                         "color": "red",
-                        "value": 2
+                        "value": 80
                       }
                     ]
                   },
-                  "unit": "reqps"
+                  "unit": "cps"
                 },
                 "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
               }
-            }
+            },
+            "version": "13.1.0-24779284961"
           }
         }
       },
-      "stat-pipeline-latency-p99": {
+      "panel-21": {
         "kind": "Panel",
         "spec": {
-          "id": 5,
-          "title": "Pipeline Latency P99",
-          "description": "End-to-end audio relay latency at 99th percentile",
-          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -457,39 +1546,204 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
-                        "legendFormat": "p99",
+                        "expr": "rate(gdc_pool_reconnect_attempts_total{job=~\"$job\"}[5m])",
                         "instant": false,
+                        "legendFormat": "Attempts/s",
                         "range": true
                       },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
                       "group": "",
-                      "version": ""
-                    }
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "rate(gdc_pool_reconnect_failures_total{job=~\"$job\"}[5m])",
+                        "instant": false,
+                        "legendFormat": "Failures/s",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
                   }
                 }
               ],
-              "transformations": [],
-              "queryOptions": {}
+              "queryOptions": {},
+              "transformations": []
             }
           },
+          "description": "",
+          "id": 21,
+          "links": [],
+          "title": "Pool Reconnect Attempts / Failures",
           "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
+            "group": "timeseries",
+            "kind": "VizConfig",
             "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "cps"
+                },
+                "overrides": []
+              },
               "options": {
-                "colorMode": "value",
-                "graphMode": "area",
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-22": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"})",
+                        "instant": true,
+                        "legendFormat": "Callers",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Users with the caller role currently in a voice channel, per guild",
+          "id": 22,
+          "links": [],
+          "title": "Active Voice Callers",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 5
+                      },
+                      {
+                        "color": "red",
+                        "value": 10
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "background",
+                "graphMode": "none",
                 "justifyMode": "center",
                 "orientation": "auto",
+                "percentChangeColorMode": "standard",
                 "reduceOptions": {
                   "calcs": [
                     "lastNotNull"
@@ -497,20 +1751,184 @@
                   "fields": "",
                   "values": false
                 },
-                "textMode": "auto"
-              },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-23": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"}",
+                        "instant": false,
+                        "legendFormat": "{{guild_id}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Users with the caller role in a voice channel, per guild",
+          "id": 23,
+          "links": [],
+          "title": "Voice Callers Over Time",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
               "fieldConfig": {
                 "defaults": {
                   "color": {
-                    "mode": "thresholds"
+                    "mode": "palette-classic"
                   },
-                  "mappings": [],
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
                         "color": "green",
-                        "value": null
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-24": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "avg(gdc_bot_gateway_latency_milliseconds{job=~\"$job\"})",
+                        "instant": true,
+                        "legendFormat": "avg",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Average Discord gateway WebSocket heartbeat RTT across all bots",
+          "id": 24,
+          "links": [],
+          "title": "Gateway Latency (avg)",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
                       },
                       {
                         "color": "yellow",
@@ -525,58 +1943,13 @@
                   "unit": "ms"
                 },
                 "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "stat-mixer-tick-p99": {
-        "kind": "Panel",
-        "spec": {
-          "id": 6,
-          "title": "Mixer Tick P99",
-          "description": "Mixer 20ms tick processing time at 99th percentile",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
-                        "legendFormat": "p99",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
-            "spec": {
+              },
               "options": {
                 "colorMode": "value",
                 "graphMode": "area",
                 "justifyMode": "center",
                 "orientation": "auto",
+                "percentChangeColorMode": "standard",
                 "reduceOptions": {
                   "calcs": [
                     "lastNotNull"
@@ -584,20 +1957,1067 @@
                   "fields": "",
                   "values": false
                 },
-                "textMode": "auto"
-              },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-25": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "gdc_bot_gateway_latency_milliseconds{job=~\"$job\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{job=~\"$job\"}",
+                        "instant": false,
+                        "legendFormat": "{{bot_name}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Discord gateway WebSocket heartbeat RTT per bot",
+          "id": 25,
+          "links": [],
+          "title": "Bot Gateway Latency",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
               "fieldConfig": {
                 "defaults": {
                   "color": {
-                    "mode": "thresholds"
+                    "mode": "palette-classic"
                   },
-                  "mappings": [],
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
                         "color": "green",
-                        "value": null
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 50
+                      },
+                      {
+                        "color": "red",
+                        "value": 100
+                      }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-26": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (bot_id) (gdc_bot_online{job=~\"$job\", guild_id=~\"$guild_id\"})",
+                        "instant": false,
+                        "legendFormat": "{{bot_id}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "1 when a bot is a registered member of the guild; emitted only for bots present in the guild",
+          "id": 26,
+          "links": [],
+          "title": "Bots Online per Guild",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "max": 1,
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-27": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "group": "prometheus",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "receive p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "group": "prometheus",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "provide p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "group": "prometheus",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "allow_user p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "group": "prometheus",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "mixer tick p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "D"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "datasource": {
+                        "name": "grafanacloud-prom"
+                      },
+                      "group": "prometheus",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "instant": false,
+                        "legendFormat": "pipeline latency p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "E"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "99th-percentile execution time for ReceiveOpusFrame, ProvideOpusFrame, and the allowUser filter. All three exclude time blocked waiting for channels.",
+          "id": 27,
+          "links": [],
+          "title": "Audio Pipeline P99 (Receive / Provide / AllowUser / Mixer Tick / Latency)",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 1
+                      },
+                      {
+                        "color": "red",
+                        "value": 5
+                      }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "mean",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-28": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "format": "heatmap",
+                        "instant": false,
+                        "legendFormat": "{{le}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Distribution of ReceiveOpusFrame execution time",
+          "id": 28,
+          "links": [],
+          "title": "Opus Receive Duration Heatmap",
+          "vizConfig": {
+            "group": "heatmap",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "scaleDistribution": {
+                      "type": "linear"
+                    }
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "fill": "dark-orange",
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Greens",
+                  "steps": 64
+                },
+                "exemplars": {
+                  "color": "rgba(255,0,255,0.7)"
+                },
+                "filterValues": {
+                  "le": 1e-9
+                },
+                "legend": {
+                  "show": true
+                },
+                "rowsFrame": {
+                  "layout": "auto"
+                },
+                "tooltip": {
+                  "mode": "single",
+                  "showColorScale": false,
+                  "yHistogram": false
+                },
+                "yAxis": {
+                  "axisPlacement": "left",
+                  "decimals": 2,
+                  "reverse": false,
+                  "unit": "ms"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-29": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "format": "heatmap",
+                        "instant": false,
+                        "legendFormat": "{{le}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Distribution of ProvideOpusFrame execution time",
+          "id": 29,
+          "links": [],
+          "title": "Opus Provide Duration Heatmap",
+          "vizConfig": {
+            "group": "heatmap",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "scaleDistribution": {
+                      "type": "linear"
+                    }
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "fill": "dark-orange",
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "Yellows",
+                  "steps": 64
+                },
+                "exemplars": {
+                  "color": "rgba(255,0,255,0.7)"
+                },
+                "filterValues": {
+                  "le": 1e-9
+                },
+                "legend": {
+                  "show": true
+                },
+                "rowsFrame": {
+                  "layout": "auto"
+                },
+                "tooltip": {
+                  "mode": "single",
+                  "showColorScale": false,
+                  "yHistogram": false
+                },
+                "yAxis": {
+                  "axisPlacement": "left",
+                  "decimals": 2,
+                  "reverse": false,
+                  "unit": "ms"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-3": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Stops/s",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 3,
+          "links": [],
+          "title": "Session Stop Rate",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "fixedColor": "purple",
+                    "mode": "fixed"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "purple",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "background",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-30": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (le) (increase(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "format": "heatmap",
+                        "instant": false,
+                        "legendFormat": "{{le}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Distribution of allowUser filter execution time per evaluated frame",
+          "id": 30,
+          "links": [],
+          "title": "Opus AllowUser Filter Duration Heatmap",
+          "vizConfig": {
+            "group": "heatmap",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "custom": {
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "scaleDistribution": {
+                      "type": "linear"
+                    }
+                  }
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                  "exponent": 0.5,
+                  "fill": "dark-orange",
+                  "mode": "scheme",
+                  "reverse": false,
+                  "scale": "exponential",
+                  "scheme": "RdPu",
+                  "steps": 64
+                },
+                "exemplars": {
+                  "color": "rgba(255,0,255,0.7)"
+                },
+                "filterValues": {
+                  "le": 1e-9
+                },
+                "legend": {
+                  "show": true
+                },
+                "rowsFrame": {
+                  "layout": "auto"
+                },
+                "tooltip": {
+                  "mode": "single",
+                  "showColorScale": false,
+                  "yHistogram": false
+                },
+                "yAxis": {
+                  "axisPlacement": "left",
+                  "decimals": 3,
+                  "reverse": false,
+                  "unit": "ms"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-4": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(rate(gdc_command_total{job=~\"$job\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Cmds/s",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "",
+          "id": 4,
+          "links": [],
+          "title": "Command Rate",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 0.5
+                      },
+                      {
+                        "color": "red",
+                        "value": 2
+                      }
+                    ]
+                  },
+                  "unit": "reqps"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-5": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
+                        "instant": false,
+                        "legendFormat": "p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "End-to-end audio relay latency at 99th percentile",
+          "id": 5,
+          "links": [],
+          "title": "Pipeline Latency P99",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 50
+                      },
+                      {
+                        "color": "red",
+                        "value": 100
+                      }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-6": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
+                        "instant": false,
+                        "legendFormat": "p99",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Mixer 20ms tick processing time at 99th percentile",
+          "id": 6,
+          "links": [],
+          "title": "Mixer Tick P99",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
                       },
                       {
                         "color": "yellow",
@@ -612,18 +3032,32 @@
                   "unit": "ms"
                 },
                 "overrides": []
+              },
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
               }
-            }
+            },
+            "version": "13.1.0-24779284961"
           }
         }
       },
-      "ts-active-sessions": {
+      "panel-7": {
         "kind": "Panel",
         "spec": {
-          "id": 7,
-          "title": "Active Voice Sessions",
-          "description": "",
-          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -631,35 +3065,96 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum(gdc_voice_sessions_active{job=~\"$job\"})",
-                        "legendFormat": "Active Sessions",
                         "instant": false,
+                        "legendFormat": "Active Sessions",
                         "range": true
                       },
-                      "group": "",
-                      "version": ""
-                    }
+                      "version": "v0"
+                    },
+                    "refId": "A"
                   }
                 }
               ],
-              "transformations": [],
-              "queryOptions": {}
+              "queryOptions": {},
+              "transformations": []
             }
           },
+          "description": "",
+          "id": 7,
+          "links": [],
+          "title": "Active Voice Sessions",
           "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
+            "group": "timeseries",
+            "kind": "VizConfig",
             "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
               "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
                 "legend": {
                   "calcs": [
                     "lastNotNull",
@@ -670,39 +3165,19 @@
                   "showLegend": true
                 },
                 "tooltip": {
+                  "hideZeros": false,
                   "mode": "multi",
                   "sort": "desc"
                 }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "fillOpacity": 20,
-                    "spanNulls": false,
-                    "showPoints": "auto"
-                  },
-                  "min": 0,
-                  "unit": "short"
-                },
-                "overrides": []
               }
-            }
+            },
+            "version": "13.1.0-24779284961"
           }
         }
       },
-      "ts-session-rates": {
+      "panel-8": {
         "kind": "Panel",
         "spec": {
-          "id": 8,
-          "title": "Session Start / Stop Rate",
-          "description": "",
-          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -710,83 +3185,105 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "Starts/s",
                         "instant": false,
+                        "legendFormat": "Starts/s",
                         "range": true
                       },
-                      "group": "",
-                      "version": ""
-                    }
+                      "version": "v0"
+                    },
+                    "refId": "A"
                   }
                 },
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "B",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "Stops/s",
                         "instant": false,
+                        "legendFormat": "Stops/s",
                         "range": true
                       },
-                      "group": "",
-                      "version": ""
-                    }
+                      "version": "v0"
+                    },
+                    "refId": "B"
                   }
                 }
               ],
-              "transformations": [],
-              "queryOptions": {}
+              "queryOptions": {},
+              "transformations": []
             }
           },
+          "description": "",
+          "id": 8,
+          "links": [],
+          "title": "Session Start / Stop Rate",
           "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
+            "group": "timeseries",
+            "kind": "VizConfig",
             "spec": {
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "sum"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              },
               "fieldConfig": {
                 "defaults": {
                   "color": {
                     "mode": "palette-classic"
                   },
                   "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
                     "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
                     "lineInterpolation": "smooth",
                     "lineWidth": 2,
-                    "fillOpacity": 10,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
                     "spanNulls": false,
-                    "showPoints": "auto"
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
                   },
                   "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
                   "unit": "reqps"
                 },
                 "overrides": [
@@ -821,18 +3318,34 @@
                     ]
                   }
                 ]
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "sum"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
               }
-            }
+            },
+            "version": "13.1.0-24779284961"
           }
         }
       },
-      "ts-command-rate-by-command": {
+      "panel-9": {
         "kind": "Panel",
         "spec": {
-          "id": 9,
-          "title": "Command Rate by Command",
-          "description": "",
-          "links": [],
           "data": {
             "kind": "QueryGroup",
             "spec": {
@@ -840,1553 +3353,112 @@
                 {
                   "kind": "PanelQuery",
                   "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
                     "hidden": false,
                     "query": {
+                      "group": "",
                       "kind": "DataQuery",
                       "spec": {
                         "expr": "sum by (command) (rate(gdc_command_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "legendFormat": "{{command}}",
                         "instant": false,
+                        "legendFormat": "{{command}}",
                         "range": true
                       },
-                      "group": "",
-                      "version": ""
-                    }
+                      "version": "v0"
+                    },
+                    "refId": "A"
                   }
                 }
               ],
-              "transformations": [],
-              "queryOptions": {}
+              "queryOptions": {},
+              "transformations": []
             }
           },
+          "description": "",
+          "id": 9,
+          "links": [],
+          "title": "Command Rate by Command",
           "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
+            "group": "timeseries",
+            "kind": "VizConfig",
             "spec": {
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "lastNotNull"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              },
               "fieldConfig": {
                 "defaults": {
                   "color": {
                     "mode": "palette-classic"
                   },
                   "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
                     "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
                     "lineInterpolation": "smooth",
                     "lineWidth": 2,
-                    "fillOpacity": 10,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
                     "spanNulls": false,
-                    "showPoints": "auto"
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
                   },
                   "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
                   "unit": "reqps"
                 },
                 "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-command-duration-percentiles": {
-        "kind": "Panel",
-        "spec": {
-          "id": 10,
-          "title": "Command Duration P50 / P95 / P99",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
-                        "legendFormat": "p50",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "B",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
-                        "legendFormat": "p95",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "C",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
-                        "legendFormat": "p99",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "mean",
-                    "max"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
               },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "smooth",
-                    "lineWidth": 2,
-                    "fillOpacity": 0,
-                    "spanNulls": false,
-                    "showPoints": "auto"
-                  },
-                  "min": 0,
-                  "unit": "s"
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "heatmap-command-duration": {
-        "kind": "Panel",
-        "spec": {
-          "id": 11,
-          "title": "Command Duration Heatmap",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum by (le) (increase(gdc_command_duration_seconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "legendFormat": "{{le}}",
-                        "format": "heatmap",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "heatmap",
-            "group": "",
-            "version": "",
-            "spec": {
               "options": {
-                "calculate": false,
-                "cellGap": 2,
-                "color": {
-                  "exponent": 0.5,
-                  "mode": "scheme",
-                  "reverse": false,
-                  "scale": "exponential",
-                  "scheme": "Oranges",
-                  "steps": 64
-                },
-                "filterValues": {
-                  "le": 1e-09
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
                 },
                 "legend": {
-                  "show": true
-                },
-                "tooltip": {
-                  "mode": "single",
-                  "showColorScale": false,
-                  "yHistogram": false
-                },
-                "yAxis": {
-                  "axisPlacement": "left",
-                  "decimals": 2,
-                  "reverse": false,
-                  "unit": "s"
-                }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "fillOpacity": 80,
-                    "lineWidth": 1
-                  }
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-mixer-tick-percentiles": {
-        "kind": "Panel",
-        "spec": {
-          "id": 12,
-          "title": "Mixer Tick Duration P50 / P95 / P99",
-          "description": "Time to process one 20 ms audio mixing tick. Budget: 20 ms. Values above threshold indicate the mixer is falling behind real-time.",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-                        "legendFormat": "p50",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "B",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-                        "legendFormat": "p95",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "C",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-                        "legendFormat": "p99",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "mean",
-                    "max"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "smooth",
-                    "lineWidth": 2,
-                    "fillOpacity": 10,
-                    "spanNulls": false,
-                    "showPoints": "auto",
-                    "thresholdsStyle": {
-                      "mode": "line"
-                    }
-                  },
-                  "min": 0,
-                  "unit": "ms",
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": null
-                      },
-                      {
-                        "color": "yellow",
-                        "value": 5
-                      },
-                      {
-                        "color": "red",
-                        "value": 20
-                      }
-                    ]
-                  }
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-pipeline-latency-percentiles": {
-        "kind": "Panel",
-        "spec": {
-          "id": 13,
-          "title": "Pipeline End-to-End Latency P50 / P95 / P99",
-          "description": "Time from fanout decode (VoiceReceiver) to mixer output frame. Measures the full audio relay delay introduced by the mixing pipeline.",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-                        "legendFormat": "p50",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "B",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-                        "legendFormat": "p95",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "C",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
-                        "legendFormat": "p99",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "mean",
-                    "max"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "smooth",
-                    "lineWidth": 2,
-                    "fillOpacity": 10,
-                    "spanNulls": false,
-                    "showPoints": "auto",
-                    "thresholdsStyle": {
-                      "mode": "line"
-                    }
-                  },
-                  "min": 0,
-                  "unit": "ms",
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": null
-                      },
-                      {
-                        "color": "yellow",
-                        "value": 40
-                      },
-                      {
-                        "color": "red",
-                        "value": 100
-                      }
-                    ]
-                  }
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "heatmap-mixer-tick": {
-        "kind": "Panel",
-        "spec": {
-          "id": 14,
-          "title": "Mixer Tick Duration Heatmap",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum by (le) (increase(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "{{le}}",
-                        "format": "heatmap",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "heatmap",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "calculate": false,
-                "cellGap": 2,
-                "color": {
-                  "exponent": 0.5,
-                  "mode": "scheme",
-                  "reverse": false,
-                  "scale": "exponential",
-                  "scheme": "Blues",
-                  "steps": 64
-                },
-                "filterValues": {
-                  "le": 1e-09
-                },
-                "legend": {
-                  "show": true
-                },
-                "tooltip": {
-                  "mode": "single",
-                  "showColorScale": false,
-                  "yHistogram": false
-                },
-                "yAxis": {
-                  "axisPlacement": "left",
-                  "decimals": 2,
-                  "reverse": false,
-                  "unit": "ms"
-                }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "fillOpacity": 80,
-                    "lineWidth": 1
-                  }
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "heatmap-pipeline-latency": {
-        "kind": "Panel",
-        "spec": {
-          "id": 15,
-          "title": "Pipeline Latency Heatmap",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum by (le) (increase(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
-                        "legendFormat": "{{le}}",
-                        "format": "heatmap",
-                        "instant": false,
-                        "range": true
-                      },
-                      "group": "",
-                      "version": ""
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "heatmap",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "calculate": false,
-                "cellGap": 2,
-                "color": {
-                  "exponent": 0.5,
-                  "mode": "scheme",
-                  "reverse": false,
-                  "scale": "exponential",
-                  "scheme": "Purples",
-                  "steps": 64
-                },
-                "filterValues": {
-                  "le": 1e-09
-                },
-                "legend": {
-                  "show": true
-                },
-                "tooltip": {
-                  "mode": "single",
-                  "showColorScale": false,
-                  "yHistogram": false
-                },
-                "yAxis": {
-                  "axisPlacement": "left",
-                  "decimals": 2,
-                  "reverse": false,
-                  "unit": "ms"
-                }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "fillOpacity": 80,
-                    "lineWidth": 1
-                  }
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "stat-pool-bots": {
-        "kind": "Panel",
-        "spec": {
-          "id": 16,
-          "title": "Pool Bots",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "sum(gdc_pool_bots_total{job=~\"$job\"})",
-                        "instant": true,
-                        "legendFormat": "Total",
-                        "range": false
-                      }
-                    },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "sum(gdc_pool_bots_connected{job=~\"$job\"})",
-                        "instant": true,
-                        "legendFormat": "Connected",
-                        "range": false
-                      }
-                    },
-                    "refId": "B"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "vizConfig": {
-            "group": "",
-            "kind": "stat",
-            "version": "",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "thresholds"
-                  },
-                  "mappings": [],
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "red",
-                        "value": null
-                      },
-                      {
-                        "color": "yellow",
-                        "value": 1
-                      },
-                      {
-                        "color": "green",
-                        "value": 2
-                      }
-                    ]
-                  },
-                  "unit": "short"
-                },
-                "overrides": []
-              },
-              "options": {
-                "colorMode": "background",
-                "graphMode": "none",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "reduceOptions": {
                   "calcs": [
                     "lastNotNull"
                   ],
-                  "fields": "",
-                  "values": false
-                },
-                "textMode": "auto"
-              }
-            }
-          }
-        }
-      },
-      "ts-pool-bots": {
-        "kind": "Panel",
-        "spec": {
-          "id": 17,
-          "title": "Pool Bots Over Time",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "sum(gdc_pool_bots_total{job=~\"$job\"})",
-                        "instant": false,
-                        "legendFormat": "Total",
-                        "range": true
-                      }
-                    },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "sum(gdc_pool_bots_connected{job=~\"$job\"})",
-                        "instant": false,
-                        "legendFormat": "Connected",
-                        "range": true
-                      }
-                    },
-                    "refId": "B"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "vizConfig": {
-            "group": "",
-            "kind": "timeseries",
-            "version": "",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "fillOpacity": 20,
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "showPoints": "auto",
-                    "spanNulls": false
-                  },
-                  "min": 0,
-                  "unit": "short"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "lastNotNull",
-                    "max"
-                  ],
                   "displayMode": "list",
                   "placement": "bottom",
                   "showLegend": true
                 },
                 "tooltip": {
+                  "hideZeros": false,
                   "mode": "multi",
                   "sort": "desc"
                 }
               }
-            }
-          }
-        }
-      },
-      "ts-session-speakers": {
-        "kind": "Panel",
-        "spec": {
-          "id": 18,
-          "title": "Session Speakers",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "gdc_session_speakers{job=~\"$job\", guild_id=~\"$guild_id\"}",
-                        "instant": false,
-                        "legendFormat": "{{guild_id}}",
-                        "range": true
-                      }
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "vizConfig": {
-            "group": "",
-            "kind": "timeseries",
-            "version": "",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "fillOpacity": 20,
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "showPoints": "auto",
-                    "spanNulls": false
-                  },
-                  "min": 0,
-                  "unit": "short"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "lastNotNull",
-                    "max"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            }
-          }
-        }
-      },
-      "ts-fanout-drops": {
-        "kind": "Panel",
-        "spec": {
-          "id": 19,
-          "title": "Fanout Frames Dropped",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "rate(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[1m])",
-                        "instant": false,
-                        "legendFormat": "{{path}} \u2013 {{guild_id}}",
-                        "range": true
-                      }
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "vizConfig": {
-            "group": "",
-            "kind": "timeseries",
-            "version": "",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "fillOpacity": 20,
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "showPoints": "auto",
-                    "spanNulls": false
-                  },
-                  "min": 0,
-                  "unit": "cps"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "lastNotNull",
-                    "max"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            }
-          }
-        }
-      },
-      "stat-voice-callers": {
-        "kind": "Panel",
-        "spec": {
-          "id": 21,
-          "title": "Active Voice Callers",
-          "description": "Users with the caller role currently in a voice channel, per guild",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": { "type": "prometheus" },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "",
-                      "version": "",
-                      "spec": {
-                        "expr": "sum(gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"})",
-                        "legendFormat": "Callers",
-                        "instant": true,
-                        "range": false
-                      }
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "colorMode": "background",
-                "graphMode": "none",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-                "textMode": "auto"
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": { "mode": "thresholds" },
-                  "mappings": [],
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      { "color": "green", "value": null },
-                      { "color": "yellow", "value": 5 },
-                      { "color": "red", "value": 10 }
-                    ]
-                  },
-                  "unit": "short"
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-voice-callers": {
-        "kind": "Panel",
-        "spec": {
-          "id": 22,
-          "title": "Voice Callers Over Time",
-          "description": "Users with the caller role in a voice channel, per guild",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": { "type": "prometheus" },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "",
-                      "version": "",
-                      "spec": {
-                        "expr": "gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"}",
-                        "legendFormat": "{{guild_id}}",
-                        "instant": false,
-                        "range": true
-                      }
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "legend": {
-                  "calcs": ["lastNotNull", "max"],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": { "mode": "multi", "sort": "desc" }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": { "mode": "palette-classic" },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "fillOpacity": 20,
-                    "spanNulls": false,
-                    "showPoints": "auto"
-                  },
-                  "min": 0,
-                  "unit": "short"
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "stat-bot-gateway-latency": {
-        "kind": "Panel",
-        "spec": {
-          "id": 23,
-          "title": "Gateway Latency (avg)",
-          "description": "Average Discord gateway WebSocket heartbeat RTT across all bots",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": { "type": "prometheus" },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "",
-                      "version": "",
-                      "spec": {
-                        "expr": "avg(gdc_bot_gateway_latency_milliseconds{job=~\"$job\"})",
-                        "legendFormat": "avg",
-                        "instant": true,
-                        "range": false
-                      }
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "stat",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "colorMode": "value",
-                "graphMode": "area",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
-                "textMode": "auto"
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": { "mode": "thresholds" },
-                  "mappings": [],
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      { "color": "green", "value": null },
-                      { "color": "yellow", "value": 50 },
-                      { "color": "red", "value": 100 }
-                    ]
-                  },
-                  "unit": "ms"
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-bot-gateway-latency": {
-        "kind": "Panel",
-        "spec": {
-          "id": 24,
-          "title": "Bot Gateway Latency",
-          "description": "Discord gateway WebSocket heartbeat RTT per bot",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": { "type": "prometheus" },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "",
-                      "version": "",
-                      "spec": {
-                        "expr": "gdc_bot_gateway_latency_milliseconds{job=~\"$job\"}",
-                        "legendFormat": "{{bot_name}}",
-                        "instant": false,
-                        "range": true
-                      }
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "legend": {
-                  "calcs": ["lastNotNull", "max"],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": { "mode": "multi", "sort": "desc" }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": { "mode": "palette-classic" },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "smooth",
-                    "lineWidth": 2,
-                    "fillOpacity": 10,
-                    "spanNulls": false,
-                    "showPoints": "auto",
-                    "thresholdsStyle": { "mode": "line" }
-                  },
-                  "min": 0,
-                  "unit": "ms",
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      { "color": "green", "value": null },
-                      { "color": "yellow", "value": 50 },
-                      { "color": "red", "value": 100 }
-                    ]
-                  }
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-bot-online": {
-        "kind": "Panel",
-        "spec": {
-          "id": 25,
-          "title": "Bots Online per Guild",
-          "description": "1 when a bot is a registered member of the guild; emitted only for bots present in the guild",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "refId": "A",
-                    "datasource": { "type": "prometheus" },
-                    "hidden": false,
-                    "query": {
-                      "kind": "DataQuery",
-                      "group": "",
-                      "version": "",
-                      "spec": {
-                        "expr": "sum by (bot_id) (gdc_bot_online{job=~\"$job\", guild_id=~\"$guild_id\"})",
-                        "legendFormat": "{{bot_id}}",
-                        "instant": false,
-                        "range": true
-                      }
-                    }
-                  }
-                }
-              ],
-              "transformations": [],
-              "queryOptions": {}
-            }
-          },
-          "vizConfig": {
-            "kind": "timeseries",
-            "group": "",
-            "version": "",
-            "spec": {
-              "options": {
-                "legend": {
-                  "calcs": ["lastNotNull"],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": { "mode": "multi", "sort": "desc" }
-              },
-              "fieldConfig": {
-                "defaults": {
-                  "color": { "mode": "palette-classic" },
-                  "custom": {
-                    "drawStyle": "line",
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "fillOpacity": 20,
-                    "spanNulls": false,
-                    "showPoints": "auto"
-                  },
-                  "min": 0,
-                  "max": 1,
-                  "unit": "short"
-                },
-                "overrides": []
-              }
-            }
-          }
-        }
-      },
-      "ts-reconnect": {
-        "kind": "Panel",
-        "spec": {
-          "id": 20,
-          "title": "Pool Reconnect Attempts / Failures",
-          "description": "",
-          "links": [],
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "rate(gdc_pool_reconnect_attempts_total{job=~\"$job\"}[5m])",
-                        "instant": false,
-                        "legendFormat": "Attempts/s",
-                        "range": true
-                      }
-                    },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "datasource": {
-                      "type": "prometheus"
-                    },
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "version": "",
-                      "spec": {
-                        "expr": "rate(gdc_pool_reconnect_failures_total{job=~\"$job\"}[5m])",
-                        "instant": false,
-                        "legendFormat": "Failures/s",
-                        "range": true
-                      }
-                    },
-                    "refId": "B"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "vizConfig": {
-            "group": "",
-            "kind": "timeseries",
-            "version": "",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "drawStyle": "line",
-                    "fillOpacity": 20,
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "showPoints": "auto",
-                    "spanNulls": false
-                  },
-                  "min": 0,
-                  "unit": "cps"
-                },
-                "overrides": []
-              },
-              "options": {
-                "legend": {
-                  "calcs": [
-                    "lastNotNull",
-                    "max"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            }
+            },
+            "version": "13.1.0-24779284961"
           }
         }
       }
@@ -2400,12 +3472,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "stat-active-sessions"
+                "name": "panel-1"
               },
-              "x": 0,
-              "y": 0,
+              "height": 4,
               "width": 4,
-              "height": 4
+              "x": 0,
+              "y": 0
             }
           },
           {
@@ -2413,12 +3485,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "stat-session-start-rate"
+                "name": "panel-2"
               },
+              "height": 4,
+              "width": 4,
               "x": 4,
-              "y": 0,
-              "width": 4,
-              "height": 4
+              "y": 0
             }
           },
           {
@@ -2426,12 +3498,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "stat-session-stop-rate"
+                "name": "panel-3"
               },
+              "height": 4,
+              "width": 4,
               "x": 8,
-              "y": 0,
-              "width": 4,
-              "height": 4
+              "y": 0
             }
           },
           {
@@ -2439,12 +3511,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "stat-command-rate"
+                "name": "panel-4"
               },
+              "height": 4,
+              "width": 4,
               "x": 12,
-              "y": 0,
-              "width": 4,
-              "height": 4
+              "y": 0
             }
           },
           {
@@ -2452,12 +3524,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "stat-pipeline-latency-p99"
+                "name": "panel-5"
               },
+              "height": 4,
+              "width": 4,
               "x": 16,
-              "y": 0,
-              "width": 4,
-              "height": 4
+              "y": 0
             }
           },
           {
@@ -2465,12 +3537,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "stat-mixer-tick-p99"
+                "name": "panel-6"
               },
+              "height": 4,
+              "width": 4,
               "x": 20,
-              "y": 0,
-              "width": 4,
-              "height": 4
+              "y": 0
             }
           },
           {
@@ -2478,12 +3550,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-active-sessions"
+                "name": "panel-25"
               },
-              "x": 0,
-              "y": 4,
+              "height": 8,
               "width": 12,
-              "height": 8
+              "x": 0,
+              "y": 4
             }
           },
           {
@@ -2491,12 +3563,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-session-rates"
+                "name": "panel-27"
               },
+              "height": 8,
+              "width": 12,
               "x": 12,
-              "y": 4,
-              "width": 12,
-              "height": 8
+              "y": 4
             }
           },
           {
@@ -2504,12 +3576,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-command-rate-by-command"
+                "name": "panel-7"
               },
+              "height": 8,
+              "width": 12,
               "x": 0,
-              "y": 12,
-              "width": 12,
-              "height": 8
+              "y": 12
             }
           },
           {
@@ -2517,12 +3589,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-command-duration-percentiles"
+                "name": "panel-8"
               },
+              "height": 8,
+              "width": 12,
               "x": 12,
-              "y": 12,
-              "width": 12,
-              "height": 8
+              "y": 12
             }
           },
           {
@@ -2530,25 +3602,103 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "heatmap-command-duration"
+                "name": "panel-12"
               },
+              "height": 8,
+              "width": 12,
               "x": 0,
-              "y": 20,
+              "y": 20
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-13"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 12,
+              "y": 20
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-14"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 0,
+              "y": 28
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-15"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 12,
+              "y": 28
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-28"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 0,
+              "y": 36
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-29"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 8,
+              "y": 36
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-30"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 16,
+              "y": 36
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-11"
+              },
+              "height": 8,
               "width": 24,
-              "height": 8
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "ts-mixer-tick-percentiles"
-              },
               "x": 0,
-              "y": 28,
-              "width": 12,
-              "height": 8
+              "y": 44
             }
           },
           {
@@ -2556,12 +3706,25 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-pipeline-latency-percentiles"
+                "name": "panel-9"
               },
+              "height": 8,
+              "width": 12,
+              "x": 0,
+              "y": 52
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-10"
+              },
+              "height": 8,
+              "width": 12,
               "x": 12,
-              "y": 28,
-              "width": 12,
-              "height": 8
+              "y": 52
             }
           },
           {
@@ -2569,38 +3732,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "heatmap-mixer-tick"
+                "name": "panel-16"
               },
-              "x": 0,
-              "y": 36,
-              "width": 12,
-              "height": 8
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "heatmap-pipeline-latency"
-              },
-              "x": 12,
-              "y": 36,
-              "width": 12,
-              "height": 8
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "stat-pool-bots"
-              },
-              "x": 0,
-              "y": 44,
+              "height": 4,
               "width": 6,
-              "height": 8
+              "x": 0,
+              "y": 60
             }
           },
           {
@@ -2608,12 +3745,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-pool-bots"
+                "name": "panel-20"
               },
-              "x": 6,
-              "y": 44,
+              "height": 8,
               "width": 18,
-              "height": 8
+              "x": 6,
+              "y": 60
             }
           },
           {
@@ -2621,12 +3758,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-session-speakers"
+                "name": "panel-18"
               },
+              "height": 4,
+              "width": 6,
               "x": 0,
-              "y": 52,
-              "width": 12,
-              "height": 8
+              "y": 64
             }
           },
           {
@@ -2634,79 +3771,196 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "ts-fanout-drops"
+                "name": "panel-19"
               },
-              "x": 12,
-              "y": 52,
-              "width": 12,
-              "height": 8
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "ts-reconnect"
-              },
+              "height": 8,
+              "width": 8,
               "x": 0,
-              "y": 60,
+              "y": 68
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-17"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 8,
+              "y": 68
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-26"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 16,
+              "y": 68
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-21"
+              },
+              "height": 8,
               "width": 24,
-              "height": 8
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": { "kind": "ElementReference", "name": "stat-voice-callers" },
               "x": 0,
-              "y": 68,
-              "width": 6,
-              "height": 4
+              "y": 76
             }
           },
           {
             "kind": "GridLayoutItem",
             "spec": {
-              "element": { "kind": "ElementReference", "name": "ts-voice-callers" },
-              "x": 6,
-              "y": 68,
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-22"
+              },
+              "height": 4,
+              "width": 6,
+              "x": 0,
+              "y": 84
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-23"
+              },
+              "height": 8,
               "width": 18,
-              "height": 8
+              "x": 6,
+              "y": 84
             }
           },
           {
             "kind": "GridLayoutItem",
             "spec": {
-              "element": { "kind": "ElementReference", "name": "stat-bot-gateway-latency" },
-              "x": 0,
-              "y": 72,
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-24"
+              },
+              "height": 4,
               "width": 6,
-              "height": 4
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": { "kind": "ElementReference", "name": "ts-bot-gateway-latency" },
               "x": 0,
-              "y": 76,
-              "width": 12,
-              "height": 8
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": { "kind": "ElementReference", "name": "ts-bot-online" },
-              "x": 12,
-              "y": 76,
-              "width": 12,
-              "height": 8
+              "y": 88
             }
           }
         ]
       }
-    }
+    },
+    "links": [],
+    "liveNow": false,
+    "preload": false,
+    "tags": [
+      "discord",
+      "voice",
+      "otel",
+      "audio"
+    ],
+    "timeSettings": {
+      "autoRefresh": "30s",
+      "autoRefreshIntervals": [
+        "5s",
+        "10s",
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m",
+        "1h",
+        "2h",
+        "1d"
+      ],
+      "fiscalYearStartMonth": 0,
+      "from": "now-3h",
+      "hideTimepicker": false,
+      "timezone": "browser",
+      "to": "now"
+    },
+    "title": "go-discord-caller",
+    "variables": [
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "allValue": ".*",
+          "allowCustomValue": true,
+          "current": {
+            "text": "",
+            "value": ""
+          },
+          "definition": "label_values(gdc_voice_sessions_active, job)",
+          "hide": "dontHide",
+          "includeAll": true,
+          "label": "Job",
+          "multi": false,
+          "name": "job",
+          "options": [],
+          "query": {
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "group": "prometheus",
+            "kind": "DataQuery",
+            "spec": {
+              "query": "label_values(gdc_voice_sessions_active, job)",
+              "refId": "StandardVariableQuery"
+            },
+            "version": "v0"
+          },
+          "refresh": "onTimeRangeChanged",
+          "regex": "",
+          "regexApplyTo": "value",
+          "skipUrlSync": false,
+          "sort": "alphabeticalAsc"
+        }
+      },
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "allValue": ".*",
+          "allowCustomValue": true,
+          "current": {
+            "text": "",
+            "value": ""
+          },
+          "definition": "query_result(last_over_time(gdc_discord_guild{job=~\"$job\"}[$__range]))",
+          "hide": "dontHide",
+          "includeAll": true,
+          "label": "Guild",
+          "multi": true,
+          "name": "guild_id",
+          "options": [],
+          "query": {
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "group": "prometheus",
+            "kind": "DataQuery",
+            "spec": {
+              "query": "query_result(last_over_time(gdc_discord_guild{job=~\"$job\"}[$__range]))",
+              "refId": "StandardVariableQuery"
+            },
+            "version": "v0"
+          },
+          "refresh": "onTimeRangeChanged",
+          "regex": "/guild_id=\"(?\u003cvalue\u003e[^\"]+)\".*guild_name=\"(?\u003ctext\u003e[^\"]+)\"/",
+          "regexApplyTo": "value",
+          "skipUrlSync": false,
+          "sort": "alphabeticalAsc"
+        }
+      }
+    ]
   }
 }

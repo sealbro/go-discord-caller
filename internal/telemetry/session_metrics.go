@@ -64,16 +64,31 @@ func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.I
 	s.stops.Add(ctx, 1, attrs)
 }
 
-// DropOption pre-computes a MeasurementOption for FrameDropped.
-// Call once outside hot loops to avoid per-frame attribute allocations.
-func (s *SessionMetrics) DropOption(guildID snowflake.ID, path string) metric.MeasurementOption {
-	return metric.WithAttributes(
-		attribute.String("guild_id", guildID.String()),
-		attribute.String("path", path),
-	)
-}
+// DropPath identifies the pipeline stage where an Opus frame was dropped.
+type DropPath string
 
-// FrameDropped records one dropped Opus frame using a pre-computed option from DropOption.
-func (s *SessionMetrics) FrameDropped(ctx context.Context, opt metric.MeasurementOption) {
-	s.dropped.Add(ctx, 1, opt)
+const (
+	DropPathMixer           DropPath = "mixer"
+	DropPathDirect          DropPath = "direct"
+	DropPathChannelMixer    DropPath = "channel_mixer"
+	DropPathOwnerStarDirect DropPath = "owner_star_direct"
+	DropPathOwnerStarRelay  DropPath = "owner_star_relay"
+	DropPathRelayBridge     DropPath = "relay_bridge"
+	DropPathProvider        DropPath = "provider"
+	DropPathReceiver        DropPath = "receiver"
+)
+
+// FrameDropper pre-computes the metric attributes for guildID+path and returns
+// a zero-argument function that records one dropped frame.
+// Call once before a hot loop and invoke the returned func on each drop — this
+// avoids per-frame attribute allocations on the hot path.
+// context.Background() is used deliberately: counter increments are fire-and-forget
+// and must not be tied to the session span (which may be cancelled before the
+// goroutine exits, causing exporters to silently drop the metric).
+func (s *SessionMetrics) FrameDropper(_ context.Context, guildID snowflake.ID, path DropPath) func() {
+	opt := metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("path", string(path)),
+	)
+	return func() { s.dropped.Add(context.Background(), 1, opt) }
 }

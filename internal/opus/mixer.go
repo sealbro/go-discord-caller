@@ -78,17 +78,20 @@ func getEncodedFrame(n int) []byte {
 	return (*encodedFramePool.Get().(*[]byte))[:n]
 }
 
-// PutEncodedFrame returns a buffer to the pool.
-// Buffers not allocated by getEncodedFrame — identified by a capacity other than
-// encodedFrameCap (e.g. raw Opus passthrough slices from the receiver) — are
-// silently dropped; the GC reclaims them.
+// PutEncodedFrame returns a buffer to the appropriate pool based on its capacity.
+// Buffers with cap == encodedFrameCap go to encodedFramePool (re-encoded mixer output).
+// Buffers with cap == recvFrameCap go to recvFramePool (raw Opus received from Discord).
+// All other capacities are silently dropped; the GC reclaims them.
 // The caller must not access the slice after this call.
 func PutEncodedFrame(b []byte) {
-	if cap(b) != encodedFrameCap {
-		return
+	switch cap(b) {
+	case encodedFrameCap:
+		b = b[:encodedFrameCap]
+		encodedFramePool.Put(&b)
+	case recvFrameCap:
+		b = b[:recvFrameCap]
+		recvFramePool.Put(&b)
 	}
-	b = b[:encodedFrameCap]
-	encodedFramePool.Put(&b)
 }
 
 // Frame carries one audio frame through a mixer input channel.
@@ -121,7 +124,7 @@ type Mixer struct {
 	mu      sync.Mutex
 	inputs  map[snowflake.ID]*inputEntry
 	paused  atomic.Bool
-	metrics *telemetry.MixerMetrics
+	metrics telemetry.OpusRecorder
 
 	out chan []byte
 	enc *hraban.Encoder
@@ -146,9 +149,9 @@ const mixerComplexity = 3
 const mixerInputDrainThreshold = 4
 
 // NewMixer creates a Mixer ready to accept inputs and run.
-// metrics is used to record tick duration and pipeline latency; pass a zero-value
-// MixerMetrics (or nil pointer fields) when metrics are not needed.
-func NewMixer(metrics *telemetry.MixerMetrics) (*Mixer, error) {
+// metrics is a pre-baked recorder (guild_id already embedded); obtain one via
+// OpusMetrics.For(guildID).
+func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppVoIP)
 	if err != nil {
 		return nil, fmt.Errorf("mixer: new encoder: %w", err)
@@ -238,11 +241,11 @@ func (m *Mixer) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 			start := time.Now()
-			if err := m.tick(ctx); err != nil {
+			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
 			elapsed := time.Since(start)
-			m.metrics.RecordTick(ctx, float64(elapsed.Microseconds())/1000)
+			m.metrics.RecordTick(float64(elapsed.Microseconds()) / 1000)
 			// Subtract processing time so the next tick fires closer to 20 ms
 			// after the previous one started, not 20 ms after it finished.
 			next := mixerFrameDur - elapsed
@@ -254,7 +257,7 @@ func (m *Mixer) Run(ctx context.Context) {
 	}
 }
 
-func (m *Mixer) tick(ctx context.Context) error {
+func (m *Mixer) tick() error {
 	paused := m.paused.Load()
 
 	m.mu.Lock()
@@ -331,8 +334,7 @@ func (m *Mixer) tick(ctx context.Context) error {
 		}
 	}
 	if !oldest.IsZero() {
-		m.metrics.RecordPipelineLatency(ctx,
-			float64(now.Sub(oldest).Microseconds())/1000)
+		m.metrics.RecordPipelineLatency(float64(now.Sub(oldest).Microseconds()) / 1000)
 	}
 
 	// Zero the accumulator in-place instead of allocating a new slice.

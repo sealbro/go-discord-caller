@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -24,7 +25,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 
 	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture(), allowUser)
 	if len(joined) == 0 {
-		return nil, fmt.Errorf("no speakers joined: verify speaker channels are bound and bots are online in this guild")
+		return nil, ErrNoSpeakers
 	}
 
 	outs := make([]chan<- []byte, 0, len(joined))
@@ -74,12 +75,13 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
 			}
 			chOut := make(chan []byte, audioChanBuf)
-			chCapture, cleanup, err := m.consumeSpeaker(ctx, sp.ID, conn, chOut, withCapture, allowUser)
+			chCapture, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
 				return
 			}
+			m.storeApplier(guildID, sp.ID, m.buildSpeakerApplier(guildID, sp.ID, chOut, withCapture, chCapture, allowUser))
 			resultCh <- speakerResult{sp, chOut, chCapture, gv, cleanup}
 		}(sp)
 	}
@@ -99,10 +101,10 @@ func (m *Service) commitSession(session *guild.Session) error {
 	defer m.mu.Unlock()
 	st := m.statuses[session.GuildID]
 	if st == nil {
-		return fmt.Errorf("guild status disappeared before session could be stored")
+		return fmt.Errorf("commit session: guild status disappeared")
 	}
 	if st.HasActiveSession() {
-		return fmt.Errorf("a voice raid is already active in this server")
+		return ErrSessionExists
 	}
 	st.Session = session
 	return nil
@@ -113,16 +115,16 @@ func (m *Service) commitSession(session *guild.Session) error {
 // returned channel receives frames captured from the speaker's channel, filtered
 // by allowUser (shared filter built once at session start).
 // The caller is responsible for calling the returned cleanup function.
-func (m *Service) consumeSpeaker(ctx context.Context, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
-	session := NewVoiceConnSetup(speakerID)
+func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
+	session := NewVoiceConnSetup(speakerID, m.metrics.Opus.For(guildID.String()))
 	if m.test.IsTestBot(speakerID) {
 		session.WithFileProvider(m.test.FileDCA)
 	} else {
-		session.WithVoiceProvider()
+		session.WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider))
 	}
 
 	if withCapture {
-		session.WithVoiceReceiver(allowUser)
+		session.WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
 	}
 
 	capture, cleanup, err := session.Apply(ctx, conn, chOut)
@@ -228,10 +230,10 @@ func (m *Service) snapshotSpeakers(guildID snowflake.ID) ([]guild.Speaker, error
 	defer m.mu.RUnlock()
 	st := m.statuses[guildID]
 	if st == nil {
-		return nil, fmt.Errorf("no guild status found — seed the guild first")
+		return nil, ErrNoGuildStatus
 	}
 	if st.Session != nil {
-		return nil, fmt.Errorf("a voice raid is already active in this server")
+		return nil, ErrSessionExists
 	}
 	speakers := make([]guild.Speaker, 0, len(st.Speakers))
 	for _, v := range st.Speakers {

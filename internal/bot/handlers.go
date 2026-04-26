@@ -15,7 +15,7 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),
-		bot.NewListenerFunc(onGuildJoin(managerSvc, metrics)),
+		bot.NewListenerFunc(onGuildJoin(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate),
@@ -23,12 +23,6 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceMove(managerSvc)),
 	}
-}
-
-// recordGuildInfo records the guild info metric. Uses context.Background() because
-// disgo event handlers do not carry a request-scoped context.
-func recordGuildInfo(metrics *telemetry.BotMetrics, guildID snowflake.ID, guildName string) {
-	metrics.RecordGuildInfo(context.Background(), guildID.String(), guildName)
 }
 
 // onReady is called when the bot has connected and is ready.
@@ -47,13 +41,11 @@ func onReady(m ManagerService) func(*events.Ready) {
 }
 
 // onGuildAvailable is called for each guild that becomes available after the
-// initial Ready handshake. It records the guild info metric and initialises
-// VoiceCallers from the current voice states so the counter is accurate after
-// a bot restart (users already in voice channels emit no new join events).
+// initial Ready handshake. It initialises VoiceCallers from the current voice
+// states so the counter is accurate after a bot restart (users already in
+// voice channels emit no new join events).
 func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildAvailable) {
 	return func(e *events.GuildAvailable) {
-		recordGuildInfo(metrics, e.GuildID, e.Guild.Name)
-
 		// Seed VoiceCallers from voice states present in the GUILD_CREATE payload.
 		counts := make(map[snowflake.ID]int64) // channelID → caller count
 		for _, vs := range e.Guild.VoiceStates {
@@ -76,9 +68,8 @@ func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*eve
 
 // onGuildJoin is called when the owner bot is added to a new guild.
 // It seeds speakers and ensures the guild has a persistent relay code.
-func onGuildJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildJoin) {
+func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
-		recordGuildInfo(metrics, e.GuildID, e.Guild.Name)
 		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
 	}
 }
@@ -153,11 +144,16 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 // onVoiceLeave is called whenever a user leaves a voice channel.
 func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceLeave) {
 	return func(e *events.GuildVoiceLeave) {
+		guildID := e.VoiceState.GuildID
+
 		if e.Member.User.Bot {
+			// Reconnect the bot to its bound channel if a session is active.
+			if m.HasActiveSession(guildID) {
+				go m.ReconnectBotChannel(context.Background(), guildID, e.Member.User.ID)
+			}
 			return
 		}
 
-		guildID := e.VoiceState.GuildID
 		slog.Info("user left voice channel",
 			slog.String("userID", e.Member.User.ID.String()),
 			slog.String("guildID", guildID.String()),
@@ -175,11 +171,16 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 // onVoiceMove is called whenever a user moves between voice channels.
 func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 	return func(e *events.GuildVoiceMove) {
+		guildID := e.VoiceState.GuildID
+
 		if e.Member.User.Bot {
+			// Delegate bot-move business logic to the manager: it checks whether the
+			// bot was displaced from its bound channel and reconnects if needed.
+			m.OnBotVoiceMove(context.Background(), guildID, e.Member.User.ID, e.VoiceState.ChannelID)
 			return
 		}
 
 		// Both the old and new channel may need mixer pause state updated.
-		m.UpdateMixerPause(e.VoiceState.GuildID)
+		m.UpdateMixerPause(guildID)
 	}
 }

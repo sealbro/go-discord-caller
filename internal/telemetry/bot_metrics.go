@@ -10,8 +10,8 @@ import (
 // BotMetrics tracks Discord entity info, bot presence, voice caller counts,
 // and slash command observability.
 type BotMetrics struct {
-	meter        metric.Meter // retained for RegisterBotOnline
-	guildInfo    metric.Int64Gauge
+	meter        metric.Meter // retained for RegisterBotOnline, RegisterGuildInfo
+	guildInfo    metric.Int64ObservableGauge
 	botOnline    metric.Int64ObservableGauge
 	voiceCallers metric.Int64UpDownCounter
 	cmdCount     metric.Int64Counter
@@ -20,7 +20,7 @@ type BotMetrics struct {
 
 func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	b.meter = meter
-	if b.guildInfo, err = meter.Int64Gauge("gdc.discord.guild",
+	if b.guildInfo, err = meter.Int64ObservableGauge("gdc.discord.guild",
 		metric.WithDescription("Info gauge for known guilds; value is always 1. Labels: guild_id, guild_name."),
 	); err != nil {
 		return
@@ -66,9 +66,18 @@ func (b *BotMetrics) ObserveBotOnline(o metric.Observer, userID, guildID string)
 	)
 }
 
-// RecordGuildInfo emits the guild info gauge for a known guild.
-func (b *BotMetrics) RecordGuildInfo(ctx context.Context, guildID, guildName string) {
-	b.guildInfo.Record(ctx, 1,
+// RegisterGuildInfo registers cb as the observable callback for the guild info gauge.
+// Call once after guilds are available (e.g. from StartMetrics) so the first
+// collection cycle has data to emit.
+func (b *BotMetrics) RegisterGuildInfo(cb metric.Callback) error {
+	_, err := b.meter.RegisterCallback(cb, b.guildInfo)
+	return err
+}
+
+// ObserveGuildInfo emits a value of 1 for the given guildID/guildName pair via o.
+// Call inside the callback registered with RegisterGuildInfo.
+func (b *BotMetrics) ObserveGuildInfo(o metric.Observer, guildID, guildName string) {
+	o.ObserveInt64(b.guildInfo, 1,
 		metric.WithAttributes(
 			attribute.String("guild_id", guildID),
 			attribute.String("guild_name", guildName),

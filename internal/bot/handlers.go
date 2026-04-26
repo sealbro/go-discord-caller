@@ -18,7 +18,7 @@ func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []
 		bot.NewListenerFunc(onGuildJoin(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
-		bot.NewListenerFunc(onGuildMemberUpdate),
+		bot.NewListenerFunc(onGuildMemberUpdate(managerSvc)),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceMove(managerSvc)),
@@ -100,14 +100,16 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 }
 
 // onGuildMemberUpdate is called whenever a guild member is updated (e.g. role change).
-// It overwrites the cache entry so that the allowUser role filter picks up the new
-// RoleIDs on the very next audio frame — without requiring a session restart.
-func onGuildMemberUpdate(e *events.GuildMemberUpdate) {
-	if e.Member.User.Bot {
-		return
+// It overwrites the cache entry and pushes the new allow decision into the active
+// session's AllowFilter so the next audio frame sees the updated role immediately.
+func onGuildMemberUpdate(m ManagerService) func(*events.GuildMemberUpdate) {
+	return func(e *events.GuildMemberUpdate) {
+		if e.Member.User.Bot {
+			return
+		}
+		e.Client().Caches.MemberCache().Put(e.GuildID, e.Member.User.ID, e.Member)
+		m.NotifyMemberUpdate(e.GuildID, e.Member)
 	}
-
-	e.Client().Caches.MemberCache().Put(e.GuildID, e.Member.User.ID, e.Member)
 }
 
 // onVoiceJoin is called whenever a user joins a voice channel.
@@ -124,6 +126,7 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 
 		// Overwrite the cache entry with the full member (including RoleIDs).
 		e.Client().Caches.MemberCache().Put(guildID, e.Member.User.ID, e.Member)
+		m.NotifyMemberUpdate(guildID, e.Member)
 
 		allowed := m.HasCallerRole(guildID, e.Member.RoleIDs)
 		slog.Info("user joined voice channel",

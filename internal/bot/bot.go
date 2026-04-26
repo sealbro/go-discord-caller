@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/handler"
@@ -35,6 +36,7 @@ type SessionManager interface {
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
 	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 	OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID)
+	NotifyMemberUpdate(guildID snowflake.ID, member discord.Member)
 }
 
 // BindingManager handles channel and role bindings.

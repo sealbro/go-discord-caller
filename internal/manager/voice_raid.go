@@ -39,7 +39,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		guestMode = guild.RaidModeAllyListener
 	}
 	allowUser := m.buildAllowUserFilter(guestGuildID)
-	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser)
+	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser.Check)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
 		endSpanErr(span, err)
@@ -59,7 +59,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guestGuildID.String())).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
-			ownerSetup.WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathReceiver))
+			ownerSetup.WithVoiceReceiver(allowUser.Check, m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathReceiver))
 		}
 		ownerChOut = make(chan []byte, audioChanBuf)
 		chIn, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
@@ -69,7 +69,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		} else {
 			ownerCleanup = cleanup
 			ownerChIn = chIn
-			m.storeApplier(guestGuildID, m.ownerBotID, m.buildOwnerApplier(guestGuildID, ownerChIn, ownerChOut, allowUser))
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildOwnerApplier(guestGuildID, ownerChIn, ownerChOut, allowUser.Check))
 		}
 	}
 	// guestCleanupOwner consolidates owner teardown used in both error paths and deferred teardown.
@@ -141,6 +141,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		IsGuest:       true,
 		Speakers:      setup.speakers,
 		ChannelMixers: guestMixerPausers,
+		AllowFilter:   allowUser,
 	}
 	if err := m.commitSession(session); err != nil {
 		setup.speakerCleanup()
@@ -271,7 +272,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		),
 	)
 	allowUser := m.buildAllowUserFilter(guildID)
-	setup, err := m.setupSpeakers(ctx, guildID, mode, allowUser)
+	setup, err := m.setupSpeakers(ctx, guildID, mode, allowUser.Check)
 	if err != nil {
 		endSpanErr(span, err)
 		return "", err
@@ -290,7 +291,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", err
 	}
 	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
-	ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guildID.String())).WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
+	ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guildID.String())).WithVoiceReceiver(allowUser.Check, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
 	var chOwnerOut chan []byte
@@ -304,7 +305,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
-	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(guildID, chIn, chOwnerOut, allowUser))
+	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(guildID, chIn, chOwnerOut, allowUser.Check))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(
@@ -331,6 +332,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		ownerCleanup: ownerCleanup,
 		ov:           ov,
 		metrics:      m.metrics,
+		allowFilter:  allowUser,
 	}
 	session, start, err := pipelineFor(mode).build(ctx, p)
 	if err != nil {

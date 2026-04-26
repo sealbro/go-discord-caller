@@ -6,6 +6,13 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
+// AllowUpdater allows event handlers to push per-user allow decisions into an
+// active session's filter without importing the manager package.
+// Implemented by *manager.AllowFilter.
+type AllowUpdater interface {
+	Set(userID snowflake.ID, allowed bool)
+}
+
 // MixerPauser is the subset of opus.Mixer used for pause/resume.
 // Defined here to avoid a dependency from guild → opus.
 type MixerPauser interface {
@@ -27,4 +34,8 @@ type Session struct {
 	// Used to pause/resume mixers when users join/leave channels.
 	// Nil in snapshots.
 	ChannelMixers map[snowflake.ID]MixerPauser
+
+	// AllowFilter receives per-user allow-decision updates from event handlers.
+	// Nil in snapshots.
+	AllowFilter AllowUpdater
 }

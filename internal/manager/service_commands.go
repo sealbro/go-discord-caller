@@ -379,12 +379,11 @@ func (m *Service) buildSpeakerApplier(guildID, botID snowflake.ID, chOut <-chan 
 			p, _ := opus.NewFileVoiceProvider(m.test.FileDCA)
 			provider = p
 		} else {
-			onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
-			provider = opus.NewVoiceProvider(chOut, onDrop, m.metrics.Opus.For(guildID.String()))
+			provider = opus.NewVoiceProvider(chOut, m.metrics.Opus.For(guildID.String()).WithDrop(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)))
 		}
 		conn.SetOpusFrameProvider(provider)
 		if withCapture && chCapture != nil {
-			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, botID, allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver), m.metrics.Opus.For(guildID.String())))
+			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, botID, allowUser, m.metrics.Opus.For(guildID.String()).WithDrop(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))))
 		} else {
 			conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
 		}
@@ -400,14 +399,13 @@ func (m *Service) buildOwnerApplier(guildID snowflake.ID, chCapture chan []byte,
 	return func(ctx context.Context, conn voice.Conn) {
 		var provider voice.OpusFrameProvider
 		if hasOut {
-			onDrop := m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)
-			provider = opus.NewVoiceProvider(chOut, onDrop, m.metrics.Opus.For(guildID.String()))
+			provider = opus.NewVoiceProvider(chOut, m.metrics.Opus.For(guildID.String()).WithDrop(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider)))
 		} else {
 			provider = opus.NewEmptyVoiceProvider()
 		}
 		conn.SetOpusFrameProvider(provider)
 		if chCapture != nil {
-			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, m.ownerBotID, allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver), m.metrics.Opus.For(guildID.String())))
+			conn.SetOpusFrameReceiver(opus.NewVoiceReceiver(chCapture, m.ownerBotID, allowUser, m.metrics.Opus.For(guildID.String()).WithDrop(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))))
 		} else {
 			conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
 		}

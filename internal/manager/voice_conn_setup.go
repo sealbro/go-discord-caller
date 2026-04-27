@@ -43,7 +43,7 @@ func (v *VoiceConnSetup) WithFileProvider(path string) *VoiceConnSetup {
 // onDrop is called once per frame discarded by the provider's drain loop; pass nil to disable.
 func (v *VoiceConnSetup) WithVoiceProvider(onDrop func()) *VoiceConnSetup {
 	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.NewVoiceProvider(chIn, onDrop, v.metrics), nil
+		return opus.NewVoiceProvider(chIn, v.metrics.WithDrop(onDrop)), nil
 	}
 	return v
 }
@@ -53,7 +53,7 @@ func (v *VoiceConnSetup) WithVoiceProvider(onDrop func()) *VoiceConnSetup {
 func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, onDrop func()) *VoiceConnSetup {
 	v.receiverFn = func() (chan []byte, voice.OpusFrameReceiver, error) {
 		ch := make(chan []byte, audioChanBuf)
-		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser, onDrop, v.metrics), nil
+		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser, v.metrics.WithDrop(onDrop)), nil
 	}
 	return v
 }

@@ -61,6 +61,7 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 type OpusRecorder struct {
 	m    *OpusMetrics
 	attr metric.MeasurementOption
+	drop func() // optional drop counter; set via WithDrop
 }
 
 // For returns an OpusRecorder with guild_id pre-baked into every measurement.
@@ -73,6 +74,20 @@ func (o *OpusMetrics) For(guildID string) OpusRecorder {
 
 // Active reports whether this recorder has an underlying meter (non-zero value).
 func (r OpusRecorder) Active() bool { return r.m != nil }
+
+// WithDrop returns a copy of the recorder with fn registered as the drop callback.
+// fn is called once per frame dropped on the hot path; pass nil to clear.
+func (r OpusRecorder) WithDrop(fn func()) OpusRecorder {
+	r.drop = fn
+	return r
+}
+
+// RecordDrop invokes the registered drop callback (if any).
+func (r OpusRecorder) RecordDrop() {
+	if r.drop != nil {
+		r.drop()
+	}
+}
 
 // RecordReceive records the execution duration of one ReceiveOpusFrame call.
 func (r OpusRecorder) RecordReceive(ms float64) {

@@ -51,7 +51,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(gdc_voice_sessions_active{job=~\"$job\"})",
+                        "expr": "sum(gdc_voice_sessions_active{job=~\"$job\", guild_id=~\"$guild_id\"})",
                         "instant": true,
                         "legendFormat": "Active",
                         "range": false
@@ -392,7 +392,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "p50",
                         "range": true
@@ -410,7 +410,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "p95",
                         "range": true
@@ -428,7 +428,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "p99",
                         "range": true
@@ -552,7 +552,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.50, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "p50",
                         "range": true
@@ -570,7 +570,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.95, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "p95",
                         "range": true
@@ -588,7 +588,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "p99",
                         "range": true
@@ -712,7 +712,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (le) (increase(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum by (le) (increase(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "format": "heatmap",
                         "instant": false,
                         "legendFormat": "{{le}}",
@@ -811,7 +811,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (le) (increase(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum by (le) (increase(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "format": "heatmap",
                         "instant": false,
                         "legendFormat": "{{le}}",
@@ -1232,9 +1232,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_session_speakers{job=~\"$job\", guild_id=~\"$guild_id\"}",
+                        "expr": "gdc_session_speakers{job=~\"$job\", guild_id=~\"$guild_id\"} * on(guild_id) group_left(guild_name) gdc_discord_guild{job=~\"$job\"}",
                         "instant": false,
-                        "legendFormat": "{{guild_id}}",
+                        "legendFormat": "{{guild_name}}",
                         "range": true
                       },
                       "version": "v0"
@@ -1352,7 +1352,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "Starts/s",
                         "range": true
@@ -1431,9 +1431,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "rate(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])",
+                        "expr": "increase(gdc_fanout_frames_dropped_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__interval]) * on(guild_id) group_left(guild_name) gdc_discord_guild{job=~\"$job\"}",
                         "instant": false,
-                        "legendFormat": "{{path}} – {{guild_id}}",
+                        "legendFormat": "{{path}} – {{guild_name}}",
                         "range": true
                       },
                       "version": "v0"
@@ -1507,7 +1507,7 @@
                       }
                     ]
                   },
-                  "unit": "cps"
+                  "unit": "short"
                 },
                 "overrides": []
               },
@@ -1775,9 +1775,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"}",
+                        "expr": "gdc_voice_callers{job=~\"$job\", guild_id=~\"$guild_id\"} * on(guild_id) group_left(guild_name) gdc_discord_guild{job=~\"$job\"}",
                         "instant": false,
-                        "legendFormat": "{{guild_id}}",
+                        "legendFormat": "{{guild_name}}",
                         "range": true
                       },
                       "version": "v0"
@@ -2228,7 +2228,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "receive p99",
                         "range": true
@@ -2249,7 +2249,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "provide p99",
                         "range": true
@@ -2270,7 +2270,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "allow_user p99",
                         "range": true
@@ -2291,7 +2291,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "mixer tick p99",
                         "range": true
@@ -2312,7 +2312,7 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])))",
+                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "pipeline latency p99",
                         "range": true
@@ -2361,7 +2361,8 @@
                     "lineWidth": 2,
                     "pointSize": 5,
                     "scaleDistribution": {
-                      "type": "linear"
+                      "log": 10,
+                      "type": "log"
                     },
                     "showPoints": "auto",
                     "showValues": false,
@@ -2436,7 +2437,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (le) (increase(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum by (le) (increase(gdc_opus_receive_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "format": "heatmap",
                         "instant": false,
                         "legendFormat": "{{le}}",
@@ -2535,7 +2536,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (le) (increase(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum by (le) (increase(gdc_opus_provide_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "format": "heatmap",
                         "instant": false,
                         "legendFormat": "{{le}}",
@@ -2634,7 +2635,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "Stops/s",
                         "range": true
@@ -2713,7 +2714,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (le) (increase(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum by (le) (increase(gdc_opus_allow_user_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "format": "heatmap",
                         "instant": false,
                         "legendFormat": "{{le}}",
@@ -2812,7 +2813,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_command_total{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_command_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "Cmds/s",
                         "range": true
@@ -2898,7 +2899,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
+                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_pipeline_latency_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])) by (le))",
                         "instant": false,
                         "legendFormat": "p99",
                         "range": true
@@ -2984,7 +2985,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\"}[$__rate_interval])) by (le))",
+                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_tick_duration_milliseconds_bucket{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval])) by (le))",
                         "instant": false,
                         "legendFormat": "p99",
                         "range": true
@@ -3070,7 +3071,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(gdc_voice_sessions_active{job=~\"$job\"})",
+                        "expr": "sum(gdc_voice_sessions_active{job=~\"$job\", guild_id=~\"$guild_id\"})",
                         "instant": false,
                         "legendFormat": "Active Sessions",
                         "range": true
@@ -3190,7 +3191,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_voice_session_start_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "Starts/s",
                         "range": true
@@ -3208,7 +3209,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_voice_session_stop_total{job=~\"$job\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "Stops/s",
                         "range": true

@@ -26,7 +26,7 @@ type pipelineParams struct {
 	chOwnerOut   chan []byte // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
 	ownerCleanup func()      // closes owner provider/receiver; called on teardown or build error
 	ov           pool.GuildVoice
-	metrics      *telemetry.Metrics
+	gm           telemetry.GuildMetrics
 	allowFilter  *AllowFilter
 }
 
@@ -64,8 +64,8 @@ func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Sessi
 		// ChannelMixers intentionally nil: UpdateMixerPause guards for nil.
 	}
 	start := func() {
-		startFanoutDirect(ctx, p.chIn, p.setup.outs, p.allySession, p.guildID, &p.metrics.Session)
-		startDirectSessionCleanup(ctx, p.ownerCleanup, p.guildID, &p.metrics.Session)
+		startFanoutDirect(ctx, p.gm, p.chIn, p.setup.outs, p.allySession)
+		startDirectSessionCleanup(ctx, p.gm, p.ownerCleanup)
 	}
 	return session, start, nil
 }
@@ -83,11 +83,11 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 			outs:      []chan<- []byte{p.chOwnerOut},
 		})
 	}
-	relayMixer, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
+	relayMixer, err := opus.NewMixer(p.gm.Opus)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}
-	hubMixer, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
+	hubMixer, err := opus.NewMixer(p.gm.Opus)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create hub mixer: %w", err)
 	}
@@ -114,13 +114,13 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 		}
 	}
 	start := func() {
-		wireFanoutOneManyDirect(ctx, p.guildID, sources, p.ov.ChannelID(), directSpeakerOuts, channelMixers, relayMixer, &p.metrics.Session)
+		wireFanoutOneManyDirect(ctx, p.gm, sources, p.ov.ChannelID(), directSpeakerOuts, channelMixers, relayMixer)
 		// Guest relay enters only at the hub mixer.
 		if p.mode.AllowGuestCapture() {
-			registerRelayInputs(ctx, p.guildID, p.allySession, ownerDests, channelMixers, &p.metrics.Session)
+			registerRelayInputs(ctx, p.gm, p.allySession, ownerDests, channelMixers)
 		}
-		startChannelMixers(ctx, ownerDests, channelMixers, p.guildID, &p.metrics.Session)
-		startRelayBroadcast(ctx, relayMixer, p.allySession, p.ownerCleanup, p.guildID, &p.metrics.Session)
+		startChannelMixers(ctx, p.gm, ownerDests, channelMixers)
+		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
 	}
 	return session, start, nil
 }
@@ -137,13 +137,13 @@ func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Ses
 			outs:      []chan<- []byte{p.chOwnerOut},
 		})
 	}
-	relayMixer, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
+	relayMixer, err := opus.NewMixer(p.gm.Opus)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.metrics.Opus.For(p.guildID.String()))
+		mx, err := opus.NewMixer(p.gm.Opus)
 		if err != nil {
 			return nil, nil, fmt.Errorf("create channel mixer: %w", err)
 		}
@@ -163,14 +163,14 @@ func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Ses
 		AllowFilter:   p.allowFilter,
 	}
 	start := func() {
-		wireFanout(ctx, p.guildID, sources, destinations, channelMixers, relayMixer, &p.metrics.Session)
+		wireFanout(ctx, p.gm, sources, destinations, channelMixers, relayMixer)
 		// When the host allows guest capture, register host channel mixers as relay
 		// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
 		if p.mode.AllowGuestCapture() {
-			registerRelayInputs(ctx, p.guildID, p.allySession, destinations, channelMixers, &p.metrics.Session)
+			registerRelayInputs(ctx, p.gm, p.allySession, destinations, channelMixers)
 		}
-		startChannelMixers(ctx, destinations, channelMixers, p.guildID, &p.metrics.Session)
-		startRelayBroadcast(ctx, relayMixer, p.allySession, p.ownerCleanup, p.guildID, &p.metrics.Session)
+		startChannelMixers(ctx, p.gm, destinations, channelMixers)
+		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
 	}
 	return session, start, nil
 }

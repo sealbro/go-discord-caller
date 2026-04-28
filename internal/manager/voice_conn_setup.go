@@ -15,14 +15,13 @@ import (
 // call Apply to wire everything into a voice.Conn.
 type VoiceConnSetup struct {
 	userID     snowflake.ID
-	metrics    telemetry.OpusRecorder
 	providerFn func(chIn <-chan []byte) (voice.OpusFrameProvider, error)
 	receiverFn func() (chan []byte, voice.OpusFrameReceiver, error)
 }
 
 // NewVoiceConnSetup creates a new voice session builder.
-func NewVoiceConnSetup(userID snowflake.ID, metrics telemetry.OpusRecorder) *VoiceConnSetup {
-	return &VoiceConnSetup{userID: userID, metrics: metrics}
+func NewVoiceConnSetup(userID snowflake.ID) *VoiceConnSetup {
+	return &VoiceConnSetup{userID: userID}
 }
 
 // WithFileProvider plays audio from a DCA file, draining chIn.
@@ -40,20 +39,22 @@ func (v *VoiceConnSetup) WithFileProvider(path string) *VoiceConnSetup {
 }
 
 // WithVoiceProvider reads opus frames from chIn and plays them.
-// onDrop is called once per frame discarded by the provider's drain loop; pass nil to disable.
-func (v *VoiceConnSetup) WithVoiceProvider(onDrop func()) *VoiceConnSetup {
+// metrics carries both the histogram recorder and (optionally) the drop callback —
+// build it via GuildMetrics.Provider() to wire both in one shot.
+func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder) *VoiceConnSetup {
 	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.NewVoiceProvider(chIn, v.metrics.WithDrop(onDrop)), nil
+		return opus.NewVoiceProvider(chIn, metrics), nil
 	}
 	return v
 }
 
 // WithVoiceReceiver captures incoming voice frames filtered by allowUser.
-// onDrop is called once per frame dropped because the capture channel is full; pass nil to disable.
-func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, onDrop func()) *VoiceConnSetup {
+// metrics carries both the histogram recorder and (optionally) the drop callback —
+// build it via GuildMetrics.Receiver() to wire both in one shot.
+func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder) *VoiceConnSetup {
 	v.receiverFn = func() (chan []byte, voice.OpusFrameReceiver, error) {
 		ch := make(chan []byte, audioChanBuf)
-		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser, v.metrics.WithDrop(onDrop)), nil
+		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser, metrics), nil
 	}
 	return v
 }

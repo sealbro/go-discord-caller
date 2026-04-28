@@ -9,7 +9,6 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -81,7 +80,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				gv.Leave(ctx, guildID)
 				return
 			}
-			m.storeApplier(guildID, sp.ID, m.buildSpeakerApplier(guildID, sp.ID, chOut, withCapture, chCapture, allowUser))
+			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, chCapture, allowUser))
 			resultCh <- speakerResult{sp, chOut, chCapture, gv, cleanup}
 		}(sp)
 	}
@@ -116,15 +115,16 @@ func (m *Service) commitSession(session *guild.Session) error {
 // by allowUser (shared filter built once at session start).
 // The caller is responsible for calling the returned cleanup function.
 func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
-	session := NewVoiceConnSetup(speakerID, m.metrics.Opus.For(guildID.String()))
+	gm := m.metrics.ForGuild(ctx, guildID)
+	session := NewVoiceConnSetup(speakerID)
 	if m.test.IsTestBot(speakerID) {
 		session.WithFileProvider(m.test.FileDCA)
 	} else {
-		session.WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider))
+		session.WithVoiceProvider(gm.Provider())
 	}
 
 	if withCapture {
-		session.WithVoiceReceiver(allowUser, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
+		session.WithVoiceReceiver(allowUser, gm.Receiver())
 	}
 
 	capture, cleanup, err := session.Apply(ctx, conn, chOut)
@@ -207,18 +207,26 @@ func buildGuestSources(ctx context.Context, joined []speakerResult) []sourceEntr
 
 // buildSpeakerCleanup returns a function that closes every speaker's
 // provider/receiver and leaves its voice channel, exactly once.
+// Leave calls run in parallel so teardown is bounded by the slowest connection
+// rather than N×voiceLeaveTimeout.
 func buildSpeakerCleanup(guildID snowflake.ID, joined []speakerResult) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
 			defer cancel()
+			var wg sync.WaitGroup
+			wg.Add(len(joined))
 			for _, r := range joined {
-				if r.cleanup != nil {
-					r.cleanup()
-				}
-				r.gv.Leave(ctx, guildID)
+				go func(r speakerResult) {
+					defer wg.Done()
+					if r.cleanup != nil {
+						r.cleanup()
+					}
+					r.gv.Leave(ctx, guildID)
+				}(r)
 			}
+			wg.Wait()
 		})
 	}
 }

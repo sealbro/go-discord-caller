@@ -290,26 +290,28 @@ func startFanoutDirect(ctx context.Context, gm telemetry.GuildMetrics, in <-chan
 	}()
 }
 
-// startChannelMixers runs each per-channel mixer and forwards its output to all
-// speaker output channels in that destination, closing them when the mixer stops.
-// Closing destOuts signals VoiceProvider goroutines to shut down cleanly; it is
-// safe because this goroutine is the sole writer after mixer.Run returns.
+// startChannelMixers runs each per-channel mixer with a sink that distributes
+// produced frames directly to every speaker output channel for the destination.
+// Removing the per-mixer forwarder goroutine cuts one channel hop and one
+// scheduler wake-up per produced frame. destOuts are closed after Run returns
+// so VoiceProvider goroutines shut down cleanly; this goroutine is the sole
+// writer to destOuts after the sink stops being invoked (Run has returned).
 func startChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) {
 	drop := gm.Drop(telemetry.DropPathChannelMixer)
 	for _, dest := range dests {
 		mx := chanMixers[dest.channelID]
 		destOuts := dest.outs
-		go mx.Run(ctx)
-		go func(mx *opus.Mixer, destOuts []chan<- []byte) {
-			for pkt := range mx.Output() {
-				for _, out := range destOuts {
-					select {
-					case out <- pkt:
-					default:
-						drop()
-					}
+		mx.SetSink(func(pkt []byte) {
+			for _, out := range destOuts {
+				select {
+				case out <- pkt:
+				default:
+					drop()
 				}
 			}
+		})
+		go func(mx *opus.Mixer, destOuts []chan<- []byte) {
+			mx.Run(ctx)
 			for _, out := range destOuts {
 				close(out)
 			}
@@ -317,19 +319,18 @@ func startChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 	}
 }
 
-// startRelayBroadcast runs the relay mixer and broadcasts its output to all guest guilds.
-// Calls endSession only after the mixer has fully stopped and its output channel is closed,
-// ensuring no in-flight frames are lost and cleanup is ordered after the last broadcast.
+// startRelayBroadcast runs the relay mixer with a sink that broadcasts each
+// produced frame directly to all guest guilds. endSession runs after Run
+// returns, by which time tick (and therefore the sink) is no longer invoked,
+// so cleanup is ordered after the last broadcast.
 func startRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func()) {
 	guildID := gm.GuildID()
+	relayMixer.SetSink(func(pkt []byte) {
+		relaySession.BroadcastFromGuild(guildID, pkt)
+	})
 	go func() {
 		defer endSession(ctx, ownerCleanup, gm)
-		go relayMixer.Run(ctx)
-		// Range blocks until the mixer closes its output channel (on ctx cancel),
-		// guaranteeing all queued frames are broadcast before cleanup runs.
-		for pkt := range relayMixer.Output() {
-			relaySession.BroadcastFromGuild(guildID, pkt)
-		}
+		relayMixer.Run(ctx)
 	}()
 }
 
@@ -341,15 +342,14 @@ func startDirectSessionCleanup(ctx context.Context, gm telemetry.GuildMetrics, o
 	}()
 }
 
-// startGuestRelayBroadcast runs the guest relay mixer and broadcasts its output
-// to all OTHER guilds via BroadcastFromGuild, excluding the guest itself.
+// startGuestRelayBroadcast runs the guest relay mixer with a sink that
+// broadcasts each produced frame directly to all OTHER guilds via
+// BroadcastFromGuild, excluding the guest itself.
 func startGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, session *ally.Session, guestGuildID snowflake.ID) {
+	relayMixer.SetSink(func(pkt []byte) {
+		session.BroadcastFromGuild(guestGuildID, pkt)
+	})
 	go relayMixer.Run(ctx)
-	go func() {
-		for pkt := range relayMixer.Output() {
-			session.BroadcastFromGuild(guestGuildID, pkt)
-		}
-	}()
 }
 
 // registerRelayInputs wires a guild as a relay receiver in the ally session.

@@ -30,10 +30,6 @@ const (
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
 	mixerBitrate    = 16000 // bits per second sent to Opus encoder
-	// mixerOutputBuf is the output channel buffer depth (10 frames × 20 ms = 200 ms).
-	// Frames are dropped silently when the consumer falls more than 200 ms behind.
-	// Increase this if guest guilds experience frequent audio gaps under load.
-	mixerOutputBuf = 5
 )
 
 // pcmBuf is a fixed-size array backing PCM pool entries (single allocation on miss).
@@ -124,7 +120,12 @@ type Mixer struct {
 	paused  atomic.Bool
 	metrics telemetry.OpusRecorder
 
-	out chan []byte
+	// sink is the destination callback for produced frames. It is invoked
+	// synchronously from tick and must not block (multicast to destination
+	// channels with non-blocking sends). Set once before Run via SetSink;
+	// reads from tick are safe via happens-before through goroutine start.
+	sink func(pkt []byte)
+
 	enc *hraban.Encoder
 
 	// Pre-allocated scratch buffers reused on every tick.
@@ -176,7 +177,6 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 	}
 	return &Mixer{
 		inputs:    make(map[snowflake.ID]*inputEntry),
-		out:       make(chan []byte, mixerOutputBuf),
 		enc:       enc,
 		metrics:   metrics,
 		mixed:     make([]int32, mixerPCMBuf),
@@ -184,6 +184,13 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 		encodeBuf: make([]byte, 4096),
 		framesBuf: make([]Frame, 0, 8),
 	}, nil
+}
+
+// SetSink registers the destination callback invoked once per produced frame.
+// Must be called before Run. The callback runs synchronously inside tick and
+// must not block — fan out to destination channels with non-blocking sends.
+func (m *Mixer) SetSink(sink func(pkt []byte)) {
+	m.sink = sink
 }
 
 // AddInput registers a new audio source identified by id.
@@ -215,11 +222,6 @@ func (m *Mixer) Paused() bool {
 	return m.paused.Load()
 }
 
-// Output returns the channel carrying mixed Opus frames.
-func (m *Mixer) Output() <-chan []byte {
-	return m.out
-}
-
 // Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
 // one. Using time.Timer (reset after each tick) instead of time.Ticker prevents
 // stale-frame buildup: if a tick takes longer than 20 ms under load, the next
@@ -227,10 +229,10 @@ func (m *Mixer) Output() <-chan []byte {
 // The timer accounts for tick processing time to prevent systematic drift:
 // without correction each period is 20 ms + processing, causing the mixer to
 // under-produce frames relative to the real-time Opus frame rate.
-// Closes the output channel on return.
+// The first tick fires immediately so any frames already queued at session
+// start are processed without a one-off 20 ms wait.
 func (m *Mixer) Run(ctx context.Context) {
-	defer close(m.out)
-	timer := time.NewTimer(mixerFrameDur)
+	timer := time.NewTimer(time.Microsecond)
 	defer timer.Stop()
 
 	for {
@@ -344,10 +346,8 @@ func (m *Mixer) tick() error {
 	// defensive copy is needed here.
 	if len(m.framesBuf) == 1 {
 		PutPCM(m.framesBuf[0].PCM)
-		select {
-		case m.out <- m.framesBuf[0].Opus:
-		default:
-			slog.Debug("mixer: output channel full, dropping frame")
+		if m.sink != nil {
+			m.sink(m.framesBuf[0].Opus)
 		}
 		return nil
 	}
@@ -389,10 +389,10 @@ func (m *Mixer) tick() error {
 	out := getEncodedFrame(n)
 	copy(out, m.encodeBuf[:n])
 
-	select {
-	case m.out <- out:
-	default:
-		slog.Debug("mixer: output channel full, dropping frame")
+	if m.sink != nil {
+		m.sink(out)
+	} else {
+		PutEncodedFrame(out) // no sink registered — recycle directly
 	}
 	return nil
 }

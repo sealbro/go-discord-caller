@@ -49,56 +49,38 @@ func endSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 	slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", gm.GuildID().String()))
 }
 
-// runFanoutSource is the shared goroutine body for wireFanout and wireFanoutOneMany.
-// It decodes each incoming Opus packet exactly once and distributes the resulting
-// Frame to all mixer input channels in targets. When the source channel closes or
-// ctx is cancelled, it calls RemoveInput on every mixer it registered and exits.
+// installFanoutSource installs frame targets on src.handle so that every Opus
+// packet received by the source's VoiceReceiver is decoded inline (in
+// ReceiveOpusFrame, on disgo's UDP read goroutine) and distributed to every
+// mixer input channel in frameTargets — eliminating the per-source decode
+// goroutine and the buffered-chan hop that previously sat between the
+// receiver and the mixers.
 //
-// READ-ONLY CONTRACT: pkt is shared across every Frame sent to targets.
-// No consumer may mutate pkt. The mixer copies it before forwarding
-// to its output channel (see Mixer.tick single-source path), so
-// downstream consumers always get their own slice.
-func runFanoutSource(ctx context.Context, in <-chan []byte, targets []chan opus.Frame, removals []mixerRef, drop func()) {
-	defer func() {
-		for _, r := range removals {
-			r.mx.RemoveInput(r.id)
-		}
-	}()
-	dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
-	if err != nil {
-		slog.ErrorContext(ctx, "fanout: failed to create decoder", slog.Any("err", err))
+// On handle close (session-end teardown) OnClose calls RemoveInput on every
+// registered mixer, mirroring the deferred cleanup in the old goroutine path.
+//
+// READ-ONLY CONTRACT: the Opus bytes referenced by each Frame are shared
+// across all FrameTargets. No consumer may mutate them. The mixer copies them
+// before forwarding to its output channel (see Mixer.tick single-source path),
+// so downstream consumers always get their own slice.
+func installFanoutSource(handle *opus.FanoutHandle, frameTargets []chan opus.Frame, removals []mixerRef, drop func()) {
+	if handle == nil {
+		slog.Error("fanout: source has no handle, frames will not be dispatched")
 		return
 	}
-	scratch := make([]int16, opus.MixerPCMBuf)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt, ok := <-in:
-			if !ok {
-				return
-			}
-			if len(pkt) == 0 {
-				continue // DTX silence — nothing to decode or distribute
-			}
-			n, err := dec.Decode(pkt, scratch)
-			if err != nil {
-				slog.Debug("fanout: decode failed", slog.Any("err", err))
-				continue
-			}
-			now := time.Now()
-			for _, t := range targets {
-				pcm := opus.GetPCM()[:n*opus.MixerChannels]
-				copy(pcm, scratch[:n*opus.MixerChannels])
-				select {
-				case t <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: now}:
-				default:
-					opus.PutPCM(pcm) // channel full — drop frame
-					drop()
-				}
-			}
-		}
+	targets := make([]chan<- opus.Frame, len(frameTargets))
+	for i, t := range frameTargets {
+		targets[i] = t
 	}
+	handle.Install(opus.FanoutInstall{
+		FrameTargets: targets,
+		OnClose: func() {
+			for _, r := range removals {
+				r.mx.RemoveInput(r.id)
+			}
+		},
+		DropFrame: drop,
+	})
 }
 
 // wireFanout starts a goroutine per source that decodes each incoming Opus packet
@@ -123,7 +105,7 @@ func wireFanout(ctx context.Context, gm telemetry.GuildMetrics, sources []source
 			tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", &fanTargets, &removals)
 		}
 
-		go runFanoutSource(ctx, src.ch, fanTargets, removals, drop)
+		installFanoutSource(src.handle, fanTargets, removals, drop)
 	}
 }
 
@@ -163,65 +145,35 @@ func wireFanoutOneMany(ctx context.Context, gm telemetry.GuildMetrics, sources [
 		}
 		// When ownerChannelID == 0 (guest star), sources go to relay only.
 
-		go runFanoutSource(ctx, src.ch, fanTargets, removals, drop)
+		installFanoutSource(src.handle, fanTargets, removals, drop)
 	}
 }
 
-// runFanoutOwnerStar handles the owner source in host star topology.
-// Raw Opus bytes are sent directly to directOuts (speaker chOuts — no decode needed,
-// they have exactly one source). Simultaneously, the packet is decoded once and the
-// resulting Frame is forwarded to relayMixCh so the relay mixer can broadcast to guests.
-// Closes directOuts when the source closes or ctx is cancelled.
-func runFanoutOwnerStar(ctx context.Context, gm telemetry.GuildMetrics, in <-chan []byte, directOuts []chan<- []byte, relayMixCh chan opus.Frame, relayMixer *opus.Mixer, srcID snowflake.ID) {
-	dropDirect := gm.Drop(telemetry.DropPathOwnerStarDirect)
-	dropRelay := gm.Drop(telemetry.DropPathOwnerStarRelay)
-	defer func() {
-		relayMixer.RemoveInput(srcID)
-		for _, out := range directOuts {
-			close(out)
-		}
-	}()
-	dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
-	if err != nil {
-		slog.ErrorContext(ctx, "owner star fanout: failed to create decoder", slog.Any("err", err))
+// installFanoutOwnerStar installs the owner-star fanout on handle: raw Opus
+// bytes are forwarded directly to every speaker chOut in directOuts (no
+// re-encode — owner is the only source feeding those channels), and the
+// inline-decoded Frame is delivered into the relay mixer so guests receive
+// the owner's audio. Replaces the per-source decode goroutine.
+//
+// On handle close (session end) OnClose detaches the relay mixer input and
+// closes every directOuts channel — equivalent to the old goroutine's defer.
+func installFanoutOwnerStar(handle *opus.FanoutHandle, directOuts []chan<- []byte, relayMixCh chan opus.Frame, relayMixer *opus.Mixer, srcID snowflake.ID, dropDirect, dropRelay func()) {
+	if handle == nil {
+		slog.Error("owner star fanout: source has no handle, frames will not be dispatched")
 		return
 	}
-	scratch := make([]int16, opus.MixerPCMBuf)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case pkt, ok := <-in:
-			if !ok {
-				return
-			}
-			if len(pkt) == 0 {
-				continue
-			}
-			// Raw Opus → speaker channels (single source, no re-encode needed).
+	handle.Install(opus.FanoutInstall{
+		OpusTargets:  directOuts,
+		FrameTargets: []chan<- opus.Frame{relayMixCh},
+		OnClose: func() {
+			relayMixer.RemoveInput(srcID)
 			for _, out := range directOuts {
-				select {
-				case out <- pkt:
-				default:
-					dropDirect()
-				}
+				close(out)
 			}
-			// Decode once for relay mixer.
-			n, err := dec.Decode(pkt, scratch)
-			if err != nil {
-				slog.Debug("owner star fanout: decode failed", slog.Any("err", err))
-				continue
-			}
-			pcm := opus.GetPCM()[:n*opus.MixerChannels]
-			copy(pcm, scratch[:n*opus.MixerChannels])
-			select {
-			case relayMixCh <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: time.Now()}:
-			default:
-				opus.PutPCM(pcm)
-				dropRelay()
-			}
-		}
-	}
+		},
+		DropOpus:  dropDirect,
+		DropFrame: dropRelay,
+	})
 }
 
 // wireFanoutOneManyDirect implements host star-topology fanout with direct speaker delivery.
@@ -230,6 +182,8 @@ func runFanoutOwnerStar(ctx context.Context, gm telemetry.GuildMetrics, in <-cha
 // No N-1 channel mixers are created; speaker channels receive audio directly from the owner.
 func wireFanoutOneManyDirect(ctx context.Context, gm telemetry.GuildMetrics, sources []sourceEntry, ownerChannelID snowflake.ID, directSpeakerOuts []chan<- []byte, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer) {
 	drop := gm.Drop(telemetry.DropPathMixer)
+	dropDirect := gm.Drop(telemetry.DropPathOwnerStarDirect)
+	dropRelay := gm.Drop(telemetry.DropPathOwnerStarRelay)
 	for _, src := range sources {
 		if src.channelID == ownerChannelID {
 			relayCh := make(chan opus.Frame, audioChanBuf)
@@ -237,7 +191,7 @@ func wireFanoutOneManyDirect(ctx context.Context, gm telemetry.GuildMetrics, sou
 				slog.WarnContext(ctx, "relay mixer: failed to add owner input", slog.Any("err", err))
 				continue
 			}
-			go runFanoutOwnerStar(ctx, gm, src.ch, directSpeakerOuts, relayCh, relayMixer, src.id)
+			installFanoutOwnerStar(src.handle, directSpeakerOuts, relayCh, relayMixer, src.id, dropDirect, dropRelay)
 		} else {
 			// Speaker source: decode once → hub mixer only (star spoke → hub).
 			// Speaker audio is NOT relayed to guests — only the owner/caller's audio is.
@@ -248,7 +202,7 @@ func wireFanoutOneManyDirect(ctx context.Context, gm telemetry.GuildMetrics, sou
 				tryAddMixerInput(ctx, hubMixer, src.id, "hub mixer", &fanTargets, &removals)
 			}
 
-			go runFanoutSource(ctx, src.ch, fanTargets, removals, drop)
+			installFanoutSource(src.handle, fanTargets, removals, drop)
 		}
 	}
 }
@@ -355,10 +309,13 @@ func startGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, sessi
 // registerRelayInputs wires a guild as a relay receiver in the ally session.
 // A single Opus input channel is registered with the session. One bridge
 // goroutine decodes each incoming packet exactly once and fans the resulting
-// opus.Frame out to every destination channel mixer — mirroring what
-// runFanoutSource does for local sources. Returns the single Opus input channel
-// so the caller can close it on teardown (closing triggers bridge goroutine exit,
-// which then closes all downstream frame channels).
+// opus.Frame out to every destination channel mixer — the relay equivalent of
+// what installFanoutSource sets up for local VoiceReceiver-backed sources
+// (the bridge stays as a goroutine because relay packets arrive on a chan
+// from another guild rather than via inline ReceiveOpusFrame). Returns the
+// single Opus input channel so the caller can close it on teardown (closing
+// triggers bridge goroutine exit, which then closes all downstream frame
+// channels).
 func registerRelayInputs(ctx context.Context, gm telemetry.GuildMetrics, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
 	// Register one frame output channel per destination mixer.
 	frameOuts := make([]chan opus.Frame, 0, len(dests))
@@ -397,20 +354,20 @@ func registerRelayInputs(ctx context.Context, gm telemetry.GuildMetrics, session
 		}
 		scratch := make([]int16, opus.MixerPCMBuf)
 		for pkt := range in {
-			// Drain to latest relay packet only when a backlog has built up,
-			// avoiding drops under normal jitter where two packets arrive close together.
+			// Bleed-off drain: when the backlog exceeds the threshold, skip
+			// just one extra packet this iteration (at most one extra 20 ms
+			// gap per iteration). Repeated iterations converge on the live
+			// edge without producing a single audible burst gap, which a
+			// full drain-to-latest would do under load.
 			if len(in) > relayBridgeDrainThreshold {
-			drainRelay:
-				for {
-					select {
-					case newer, ok := <-in:
-						if !ok {
-							return
-						}
-						pkt = newer
-					default:
-						break drainRelay
+				select {
+				case newer, ok := <-in:
+					if !ok {
+						return
 					}
+					drop()
+					pkt = newer
+				default:
 				}
 			}
 			if len(pkt) == 0 {

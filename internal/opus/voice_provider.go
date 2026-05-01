@@ -54,27 +54,19 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 			return nil, fmt.Errorf("voice provider channel closed")
 		}
 		start := time.Now()
-		// Drain excess frames when the buffer depth exceeds the threshold,
-		// but keep the last queued frame in the channel so speech is not
-		// cut mid-word. Under normal jitter (0–2 frames queued) frames play
-		// in order without drops, producing smooth audio.
+		// Bleed-off: when the buffer depth exceeds the threshold, drop just
+		// one extra frame per call instead of flushing to the latest. This
+		// shaves 20 ms of accumulated latency per tick — gradual enough that
+		// speech is not cut mid-word, but persistent enough to drain a stall.
 		if len(v.ch) > providerDrainThreshold {
-			for len(v.ch) > 1 {
-				select {
-				case newer, ok := <-v.ch:
-					if !ok {
-						v.prev = data
-						v.metrics.RecordProvide(float64(time.Since(start).Microseconds()) / 1000.0)
-						return data, nil
-					}
+			select {
+			case newer, ok := <-v.ch:
+				if ok {
 					PutEncodedFrame(data)
 					v.metrics.RecordDrop()
 					data = newer
-				default:
-					v.prev = data
-					v.metrics.RecordProvide(float64(time.Since(start).Microseconds()) / 1000.0)
-					return data, nil
 				}
+			default:
 			}
 		}
 		v.prev = data

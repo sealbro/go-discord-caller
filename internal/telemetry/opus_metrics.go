@@ -20,35 +20,35 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 	if o.receiveDuration, err = meter.Float64Histogram("gdc.opus.receive.duration",
 		metric.WithDescription("ReceiveOpusFrame execution duration (excluding time blocked waiting for channel)"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.25, 1, 2, 5, 10),
+		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 12, 20),
 	); err != nil {
 		return
 	}
 	if o.provideDuration, err = meter.Float64Histogram("gdc.opus.provide.duration",
 		metric.WithDescription("ProvideOpusFrame execution duration (excluding time blocked waiting for a frame)"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.05, 0.1, 0.25, 1, 2, 5, 10),
+		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 12, 20),
 	); err != nil {
 		return
 	}
 	if o.allowUserDuration, err = meter.Float64Histogram("gdc.opus.allow_user.duration",
 		metric.WithDescription("allowUser filter execution duration per evaluated frame"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 5, 10),
+		metric.WithExplicitBucketBoundaries(1, 2, 5, 12, 20),
 	); err != nil {
 		return
 	}
 	if o.tickDuration, err = meter.Float64Histogram("gdc.mixer.tick.duration",
 		metric.WithDescription("Mixer tick processing time"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 2, 5, 10, 20),
+		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 20),
 	); err != nil {
 		return
 	}
 	if o.pipelineLatency, err = meter.Float64Histogram("gdc.mixer.pipeline.latency",
 		metric.WithDescription("End-to-end latency from fanout decode to mixer output"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(1, 5, 10, 20, 40, 60, 100, 200, 500),
+		metric.WithExplicitBucketBoundaries(10, 30, 50, 70, 100, 200, 500),
 	); err != nil {
 		return
 	}
@@ -71,9 +71,6 @@ func (o *OpusMetrics) For(guildID string) OpusRecorder {
 		attr: metric.WithAttributes(attribute.String("guild_id", guildID)),
 	}
 }
-
-// Active reports whether this recorder has an underlying meter (non-zero value).
-func (r OpusRecorder) Active() bool { return r.m != nil }
 
 // WithDrop returns a copy of the recorder with fn registered as the drop callback.
 // fn is called once per frame dropped on the hot path; pass nil to clear.

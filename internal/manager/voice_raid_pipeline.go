@@ -22,9 +22,10 @@ type pipelineParams struct {
 	allyCode     ally.Code
 	allySession  *ally.Session
 	setup        *raidSetup
-	chIn         chan []byte // owner capture channel (output of VoiceReceiver)
-	chOwnerOut   chan []byte // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
-	ownerCleanup func()      // closes owner provider/receiver; called on teardown or build error
+	chIn         chan []byte        // owner capture channel (output of VoiceReceiver in legacy chan path)
+	ownerHandle  *opus.FanoutHandle // owner FanoutHandle; non-nil when owner capture is enabled
+	chOwnerOut   chan []byte        // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
+	ownerCleanup func()             // closes owner provider/receiver; called on teardown or build error
 	ov           pool.GuildVoice
 	gm           telemetry.GuildMetrics
 	allowFilter  *AllowFilter
@@ -75,7 +76,7 @@ func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Sessi
 type starPipeline struct{}
 
 func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.chIn, p.setup.joined)
+	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.chIn, p.ownerHandle, p.setup.joined)
 	destinations := buildDestinations(p.setup.joined)
 	if p.chOwnerOut != nil {
 		destinations = append(destinations, &destChannel{
@@ -129,7 +130,7 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 type mixMinusPipeline struct{}
 
 func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.chIn, p.setup.joined)
+	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.chIn, p.ownerHandle, p.setup.joined)
 	destinations := buildDestinations(p.setup.joined)
 	if p.chOwnerOut != nil {
 		destinations = append(destinations, &destChannel{

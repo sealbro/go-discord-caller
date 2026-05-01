@@ -3,10 +3,12 @@ package opus
 import (
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
@@ -34,55 +36,114 @@ func getRecvFrame(n int) []byte {
 	return recvFramePool.Get().(*recvBuf)[:n]
 }
 
-// metricsBufCap is the capacity of the async metrics drain channel.
-// At 20 ms/frame and up to ~50 active users the hot path produces ≤2500 samples/s;
-// 128 slots absorbs bursts without back-pressure while staying small.
-const metricsBufCap = 128
-
-// VoiceReceiver forwards incoming Opus frames into a channel.
-type VoiceReceiver struct {
-	voice.OpusFrameReceiver
-	ch         chan<- []byte
-	done       chan struct{}
-	botID      snowflake.ID
-	allowUser  func(snowflake.ID) bool // optional; nil means allow all non-bot users
-	metrics    telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
-	metricsBuf chan float64            // async drain; nil when metrics is zero-value
+// FanoutInstall describes the destinations a VoiceReceiver should fan each
+// incoming Opus packet to once decoding is enabled. Built once per source by
+// the wiring code (e.g. wireFanout) and applied via FanoutHandle.Install.
+type FanoutInstall struct {
+	// OpusTargets receive raw (pooled) Opus bytes. Used by topologies that
+	// forward packets without re-encoding (e.g. owner→speaker direct path
+	// in star topology). Each target gets its own pooled copy.
+	OpusTargets []chan<- []byte
+	// FrameTargets receive decoded Frames. Each target gets its own PCM buffer
+	// (from the pool); the original Opus bytes are shared across all Frames so
+	// the mixer's single-source passthrough optimisation can avoid re-encoding.
+	FrameTargets []chan<- Frame
+	// OnClose is called once when the FanoutHandle is closed (session-end
+	// teardown). Use it to detach mixer inputs (RemoveInput) and release
+	// any other state. NOT called on reconnect-time receiver close.
+	OnClose func()
+	// DropOpus is invoked each time an OpusTargets send is dropped because
+	// the destination channel is full. Optional.
+	DropOpus func()
+	// DropFrame is invoked each time a FrameTargets send is dropped. Optional.
+	DropFrame func()
 }
 
-func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder) *VoiceReceiver {
-	v := &VoiceReceiver{
+// FanoutHandle is the session-stable dispatch state shared across reconnects
+// of the same logical voice source. Construct one per source via NewFanoutHandle,
+// pass it to NewVoiceReceiver, and after the topology has wired all targets
+// call Install once. On reconnect the new VoiceReceiver passes the same handle
+// and resumes dispatching to the same targets — wiring code is unaware.
+//
+// Lifecycle: VoiceReceiver.Close stops only the receiver. The handle is
+// detached separately via Close at session end (after all reconnect activity
+// has stopped) so that the closeOnce on OnClose does not fire prematurely
+// when the OLD receiver is torn down on reconnect.
+type FanoutHandle struct {
+	state     atomic.Pointer[fanoutDispatch]
+	closeOnce sync.Once
+}
+
+// NewFanoutHandle creates an empty handle. Frames received before Install fall
+// through to the receiver's legacy chan path (or are silently dropped if the
+// receiver was constructed with a nil ch), so the brief wiring window between
+// SetOpusFrameReceiver and Install does not lose audio for topologies that
+// drain the chan, and never blocks the receiver for those that don't.
+func NewFanoutHandle() *FanoutHandle { return &FanoutHandle{} }
+
+// fanoutDispatch is the immutable bundle stored in the handle's atomic
+// pointer once Install runs.
+type fanoutDispatch struct {
+	opusTargets  []chan<- []byte
+	frameTargets []chan<- Frame
+	onClose      func()
+	dropOpus     func()
+	dropFrame    func()
+}
+
+// Install activates fanout mode for this handle. Idempotent in the sense that
+// the latest Install wins; typically called once per session.
+func (h *FanoutHandle) Install(opts FanoutInstall) {
+	h.state.Store(&fanoutDispatch{
+		opusTargets:  opts.OpusTargets,
+		frameTargets: opts.FrameTargets,
+		onClose:      opts.OnClose,
+		dropOpus:     opts.DropOpus,
+		dropFrame:    opts.DropFrame,
+	})
+}
+
+// Close runs the install-time OnClose hook exactly once. Call from session-end
+// teardown — NOT from VoiceReceiver.Close, since that runs on every reconnect.
+func (h *FanoutHandle) Close() {
+	h.closeOnce.Do(func() {
+		s := h.state.Load()
+		if s != nil && s.onClose != nil {
+			s.onClose()
+		}
+	})
+}
+
+// VoiceReceiver forwards incoming Opus frames into a channel (legacy mode) or
+// directly fans them out to mixer inputs after Opus decode (fanout mode).
+// Mode is selected at construction by the presence of a FanoutHandle.
+type VoiceReceiver struct {
+	voice.OpusFrameReceiver
+	ch        chan<- []byte // legacy bytes mode; may be nil when fanout-only
+	fanout    *FanoutHandle // when non-nil, ReceiveOpusFrame decodes + dispatches
+	done      chan struct{}
+	botID     snowflake.ID
+	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
+	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
+
+	// Per-receiver decoder + scratch buffer for fanout-mode dispatch.
+	// Lazy-init on first FrameTargets dispatch. Single-producer (disgo
+	// serialises ReceiveOpusFrame per receiver) so no synchronisation needed.
+	decoder *hraban.Decoder
+	scratch []int16
+}
+
+// NewVoiceReceiver constructs a VoiceReceiver. Pass a non-nil fanout handle to
+// activate inline decode + fanout (the wiring code must call handle.Install
+// after building the topology). Pass nil to use legacy chan-based forwarding.
+func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder, fanout *FanoutHandle) *VoiceReceiver {
+	return &VoiceReceiver{
 		ch:        ch,
+		fanout:    fanout,
 		done:      make(chan struct{}),
 		botID:     botID,
 		allowUser: allowUser,
 		metrics:   metrics,
-	}
-	if metrics.Active() {
-		v.metricsBuf = make(chan float64, metricsBufCap)
-		go v.drainMetrics()
-	}
-	return v
-}
-
-// drainMetrics runs in a background goroutine, recording buffered durations
-// so the hot path never blocks on the OTel histogram mutex.
-func (v *VoiceReceiver) drainMetrics() {
-	for {
-		select {
-		case ms := <-v.metricsBuf:
-			v.metrics.RecordReceive(ms)
-		case <-v.done:
-			// Flush remaining samples before exiting.
-			for {
-				select {
-				case ms := <-v.metricsBuf:
-					v.metrics.RecordReceive(ms)
-				default:
-					return
-				}
-			}
-		}
 	}
 }
 
@@ -110,10 +171,29 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		return nil
 	}
 
+	// Fanout mode: decode + multicast inline. Removes a buffered chan hop and
+	// the dedicated fanout goroutine that previously sat between us and the
+	// mixers (~2–10 ms scheduler wake-up cost eliminated per frame).
+	// Topologies that never install (RaidModeOneCaller direct passthrough)
+	// fall through to the legacy chan path below.
+	if v.fanout != nil {
+		if state := v.fanout.state.Load(); state != nil {
+			v.dispatchFanout(state, packet.Opus)
+			v.recordReceiveLatency(start)
+			return nil
+		}
+	}
+
+	// Legacy chan-bytes mode (RaidModeOneCaller / direct passthrough, or the
+	// brief pre-install window for fanout pipelines).
 	// Copy the opus bytes before sending because the backing array may be reused
 	// by the voice library. Use the pool to avoid a fresh allocation per frame.
 	// VoiceProvider.ProvideOpusFrame returns the buffer via PutEncodedFrame after
 	// the UDP send completes, so the pool recycles it safely.
+	if v.ch == nil {
+		v.recordReceiveLatency(start)
+		return nil
+	}
 	data := getRecvFrame(len(packet.Opus))
 	copy(data, packet.Opus)
 
@@ -126,20 +206,82 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		v.metrics.RecordDrop()
 	}
 
-	if v.metricsBuf != nil {
-		ms := float64(time.Since(start).Microseconds()) / 1000.0
+	v.recordReceiveLatency(start)
+	return nil
+}
+
+// dispatchFanout decodes once and multicasts the packet to all configured
+// targets. Allocates exactly one shared pooled Opus buffer (referenced by all
+// frame and opus targets) and one PCM buffer per frame target.
+func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) {
+	// Lazy-init the decoder on the first frame-target dispatch. A receiver
+	// with only OpusTargets never allocates one.
+	if v.decoder == nil && len(state.frameTargets) > 0 {
+		dec, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
+		if err != nil {
+			slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
+			return
+		}
+		v.decoder = dec
+		v.scratch = make([]int16, MixerPCMBuf)
+	}
+
+	// One shared pooled copy of the Opus bytes referenced by every target.
+	// VoiceProvider eventually returns it via PutEncodedFrame. (Multi-target
+	// PutEncodedFrame double-recycle is a pre-existing edge case in the
+	// passthrough path — not introduced here.)
+	sharedOpus := getRecvFrame(len(opusBytes))
+	copy(sharedOpus, opusBytes)
+
+	for _, out := range state.opusTargets {
 		select {
-		case v.metricsBuf <- ms:
-		default: // drop sample rather than block
+		case out <- sharedOpus:
+		case <-v.done:
+			return
+		default:
+			if state.dropOpus != nil {
+				state.dropOpus()
+			}
 		}
 	}
-	return nil
+
+	if len(state.frameTargets) == 0 || v.decoder == nil {
+		return
+	}
+
+	n, err := v.decoder.Decode(opusBytes, v.scratch)
+	if err != nil {
+		slog.Debug("voice receiver: decode failed", slog.Any("err", err))
+		return
+	}
+	now := time.Now()
+	for _, t := range state.frameTargets {
+		pcm := GetPCM()[:n*MixerChannels]
+		copy(pcm, v.scratch[:n*MixerChannels])
+		select {
+		case t <- Frame{PCM: pcm, Opus: sharedOpus, CreatedAt: now}:
+		case <-v.done:
+			PutPCM(pcm)
+			return
+		default:
+			PutPCM(pcm)
+			if state.dropFrame != nil {
+				state.dropFrame()
+			}
+		}
+	}
+}
+
+func (v *VoiceReceiver) recordReceiveLatency(start time.Time) {
+	v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
 }
 
 func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 	slog.Debug("cleanup user", slog.Any("userID", userID))
 }
 
+// Close stops this receiver. Does NOT close the FanoutHandle — that lives
+// across reconnects and is closed separately at session-end teardown.
 func (v *VoiceReceiver) Close() {
 	select {
 	case <-v.done:

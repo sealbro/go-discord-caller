@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -74,14 +75,14 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
 			}
 			chOut := make(chan []byte, audioChanBuf)
-			chCapture, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
+			chCapture, handle, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
 				return
 			}
-			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, chCapture, allowUser))
-			resultCh <- speakerResult{sp, chOut, chCapture, gv, cleanup}
+			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, chCapture, handle, allowUser))
+			resultCh <- speakerResult{sp, chOut, chCapture, handle, gv, cleanup}
 		}(sp)
 	}
 	wg.Wait()
@@ -112,9 +113,10 @@ func (m *Service) commitSession(session *guild.Session) error {
 // consumeSpeaker sets up audio provider and receiver for a speaker's voice connection.
 // chOut is the provider channel (frames to play). When withCapture is true the
 // returned channel receives frames captured from the speaker's channel, filtered
-// by allowUser (shared filter built once at session start).
+// by allowUser (shared filter built once at session start), and the returned
+// FanoutHandle must be passed to the topology wiring code so it can call Install.
 // The caller is responsible for calling the returned cleanup function.
-func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, func(), error) {
+func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, *opus.FanoutHandle, func(), error) {
 	gm := m.metrics.ForGuild(ctx, guildID)
 	session := NewVoiceConnSetup(speakerID)
 	if m.test.IsTestBot(speakerID) {
@@ -127,12 +129,12 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 		session.WithVoiceReceiver(allowUser, gm.Receiver())
 	}
 
-	capture, cleanup, err := session.Apply(ctx, conn, chOut)
+	capture, handle, cleanup, err := session.Apply(ctx, conn, chOut)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return capture, cleanup, nil
+	return capture, handle, cleanup, nil
 }
 
 // iterDeduplicatedCaptures calls fn for the first capture channel per voice
@@ -168,10 +170,10 @@ func iterDeduplicatedCaptures(ctx context.Context, joined []speakerResult, fn fu
 
 // buildSources returns a deduplicated list of audio sources (one capture channel per voice
 // channel). When two speaker bots share a channel the second capture is drained and discarded.
-func buildSources(ctx context.Context, ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, joined []speakerResult) []sourceEntry {
-	sources := []sourceEntry{{ownerUserID, ownerChannelID, chIn}}
+func buildSources(ctx context.Context, ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, ownerHandle *opus.FanoutHandle, joined []speakerResult) []sourceEntry {
+	sources := []sourceEntry{{ownerUserID, ownerChannelID, chIn, ownerHandle}}
 	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture, r.handle})
 	})
 	return sources
 }
@@ -200,7 +202,7 @@ func buildDestinations(joined []speakerResult) []*destChannel {
 func buildGuestSources(ctx context.Context, joined []speakerResult) []sourceEntry {
 	var sources []sourceEntry
 	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture})
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture, r.handle})
 	})
 	return sources
 }

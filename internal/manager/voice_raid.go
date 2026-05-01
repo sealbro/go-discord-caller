@@ -53,7 +53,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	ownerVoice := m.ownerVoice(guestGuildID)
 	var ownerCleanup func()
 	var ownerChOut chan []byte
-	var ownerChIn chan []byte // non-nil in AllyCaller mode; capture from owner's channel
+	var ownerChIn chan []byte          // non-nil in AllyCaller mode; capture from owner's channel
+	var ownerHandle *opus.FanoutHandle // non-nil in AllyCaller mode; install fanout for owner relay
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
@@ -63,14 +64,15 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerSetup.WithVoiceReceiver(allowUser.Check, guestGm.Receiver())
 		}
 		ownerChOut = make(chan []byte, audioChanBuf)
-		chIn, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
+		chIn, handle, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
 		if err != nil {
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
 			ownerChOut = nil
 		} else {
 			ownerCleanup = cleanup
 			ownerChIn = chIn
-			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, ownerChIn, allowUser.Check))
+			ownerHandle = handle
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, ownerChIn, handle, allowUser.Check))
 		}
 	}
 	// guestCleanupOwner consolidates owner teardown used in both error paths and deferred teardown.
@@ -165,7 +167,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		// in the owner's channel are mixed and relayed — the missing half of the
 		// guest AllyCaller flow that speakers already provide for their channels.
 		if ownerChIn != nil {
-			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn})
+			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn, ownerHandle})
 		}
 		if guestMode.IsStarTopology() {
 			// Guest star: all sources → relay only (no local channel routing).
@@ -301,13 +303,13 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		chOwnerOut = make(chan []byte, audioChanBuf)
 		ownerSetup.WithVoiceProvider(gm.Provider())
 	}
-	chIn, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
+	chIn, ownerHandle, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
 	if err != nil {
 		setup.speakerCleanup()
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
-	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, chIn, allowUser.Check))
+	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, chIn, ownerHandle, allowUser.Check))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(
@@ -330,6 +332,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		allySession:  allySession,
 		setup:        setup,
 		chIn:         chIn,
+		ownerHandle:  ownerHandle,
 		chOwnerOut:   chOwnerOut,
 		ownerCleanup: ownerCleanup,
 		ov:           ov,

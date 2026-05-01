@@ -291,9 +291,15 @@ func (m *Mixer) tick() error {
 		default:
 		}
 
-		// Drain remaining frames when paused (backpressure relief) or when
-		// the active backlog exceeds the threshold (~100 ms of latency).
-		if paused || (hasFrame && len(e.ch) > mixerInputDrainThreshold) {
+		// Backlog handling.
+		//   Paused      → full flush (backpressure relief; output is suppressed
+		//                 anyway, so dropping everything has no audible effect).
+		//   Over threshold (active) → bleed off one extra frame per tick. This
+		//                 trades a one-shot N×20 ms gap for N small 20 ms gaps
+		//                 spread over N ticks, which converges on the live edge
+		//                 without producing a single audible drop-out.
+		switch {
+		case paused:
 		drain:
 			for {
 				select {
@@ -308,6 +314,15 @@ func (m *Mixer) tick() error {
 				default:
 					break drain
 				}
+			}
+		case hasFrame && len(e.ch) > mixerInputDrainThreshold:
+			select {
+			case f := <-e.ch:
+				if len(f.PCM) > 0 {
+					PutPCM(latest.PCM) // return superseded frame's buffer
+					latest = f
+				}
+			default:
 			}
 		}
 

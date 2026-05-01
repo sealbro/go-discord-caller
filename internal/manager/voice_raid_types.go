@@ -8,6 +8,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
@@ -130,10 +131,14 @@ const voiceLeaveTimeout = 5 * time.Second
 const relayInputID snowflake.ID = 1
 
 // sourceEntry is one audio capture channel feeding the relay mixer graph.
+// handle is non-nil when the source's VoiceReceiver dispatches via FanoutHandle
+// (modern fanout mode). The wiring code calls handle.Install to attach mixer
+// inputs; handle.Close at session-end fires the install-time OnClose hook.
 type sourceEntry struct {
 	id        snowflake.ID
 	channelID snowflake.ID
 	ch        <-chan []byte
+	handle    *opus.FanoutHandle
 }
 
 // destChannel groups all speaker output channels that share the same voice channel.
@@ -146,7 +151,8 @@ type destChannel struct {
 type speakerResult struct {
 	speaker   guild.Speaker
 	chOut     chan<- []byte
-	chCapture <-chan []byte // nil when withCapture is false
+	chCapture <-chan []byte      // nil when withCapture is false
+	handle    *opus.FanoutHandle // nil when withCapture is false
 	gv        pool.GuildVoice
 	cleanup   func() // closes provider/receiver; caller must invoke on teardown
 }

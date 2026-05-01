@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-05-01
+
+### Changed
+- **`GuildMetrics` consolidates per-guild metric handles**: a single `Metrics.ForGuild(ctx, guildID)` call now produces a `GuildMetrics` value that carries the baked-in guild ID, OpusRecorder, and FrameDropper factories — removing the repeated `Opus.For(guildID).WithDrop(...)` construction at every pipeline call site and cutting per-session allocation overhead
+- **Inline fanout replaces per-source goroutines**: Opus frames are now dispatched to mixer inputs directly inside `ReceiveOpusFrame` on disgo's UDP read goroutine via `FanoutHandle`, eliminating the dedicated per-source decode goroutines and one buffered-channel hop that previously sat between receiver and mixers — lowers end-to-end audio latency
+- **Mixer output channel replaced by sink callback**: mixer output is now a sink callback function instead of a buffered `chan []byte`, removing an additional channel hop between the mixer and `VoiceProvider`
+- **Grafana dashboard queries include `guild_id`**: all panel metric expressions now filter and group by `guild_id`, enabling per-guild breakdown in the Grafana dashboard
+
 ## [0.7.3] - 2026-04-27
 
 ### Added

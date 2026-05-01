@@ -45,6 +45,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		endSpanErr(span, err)
 		return guestMode, err
 	}
+	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	// Join the owner bot into its bound channel.
 	// In AllyCaller mode the owner also captures incoming audio (WithVoiceReceiver)
 	// so users speaking in the owner's channel are relayed to the host — mirroring
@@ -52,24 +53,26 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	ownerVoice := m.ownerVoice(guestGuildID)
 	var ownerCleanup func()
 	var ownerChOut chan []byte
-	var ownerChIn chan []byte // non-nil in AllyCaller mode; capture from owner's channel
+	var ownerChIn chan []byte          // non-nil in AllyCaller mode; capture from owner's channel
+	var ownerHandle *opus.FanoutHandle // non-nil in AllyCaller mode; install fanout for owner relay
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
 	} else if conn != nil {
-		ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guestGuildID.String())).WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathProvider))
+		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider(guestGm.Provider())
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
-			ownerSetup.WithVoiceReceiver(allowUser.Check, m.metrics.Session.FrameDropper(ctx, guestGuildID, telemetry.DropPathReceiver))
+			ownerSetup.WithVoiceReceiver(allowUser.Check, guestGm.Receiver())
 		}
 		ownerChOut = make(chan []byte, audioChanBuf)
-		chIn, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
+		chIn, handle, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
 		if err != nil {
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
 			ownerChOut = nil
 		} else {
 			ownerCleanup = cleanup
 			ownerChIn = chIn
-			m.storeApplier(guestGuildID, m.ownerBotID, m.buildOwnerApplier(guestGuildID, ownerChIn, ownerChOut, allowUser.Check))
+			ownerHandle = handle
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, ownerChIn, handle, allowUser.Check))
 		}
 	}
 	// guestCleanupOwner consolidates owner teardown used in both error paths and deferred teardown.
@@ -106,7 +109,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		if !guestMode.IsDirectOutput() {
 			guestChannelMixers = make(map[snowflake.ID]*opus.Mixer, len(destinations))
 			for _, dest := range destinations {
-				mx, err := opus.NewMixer(m.metrics.Opus.For(guestGuildID.String()))
+				mx, err := opus.NewMixer(guestGm.Opus)
 				if err != nil {
 					setup.speakerCleanup()
 					guestCleanupOwner()
@@ -117,7 +120,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 				guestChannelMixers[dest.channelID] = mx
 			}
 		}
-		guestRelayMixer, err = opus.NewMixer(m.metrics.Opus.For(guestGuildID.String()))
+		guestRelayMixer, err = opus.NewMixer(guestGm.Opus)
 		if err != nil {
 			setup.speakerCleanup()
 			guestCleanupOwner()
@@ -164,11 +167,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		// in the owner's channel are mixed and relayed — the missing half of the
 		// guest AllyCaller flow that speakers already provide for their channels.
 		if ownerChIn != nil {
-			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn})
+			sources = append(sources, sourceEntry{m.ownerBotID, ownerVoice.ChannelID(), ownerChIn, ownerHandle})
 		}
 		if guestMode.IsStarTopology() {
 			// Guest star: all sources → relay only (no local channel routing).
-			wireFanoutOneMany(ctx, guestGuildID, sources, destinations, guestChannelMixers, guestRelayMixer, 0, &m.metrics.Session)
+			wireFanoutOneMany(ctx, guestGm, sources, destinations, guestChannelMixers, guestRelayMixer, 0)
 			// Output: deliver host relay directly to speaker chOuts — no channel
 			// mixers needed. Each guest channel mixer has exactly one input (relay)
 			// and would just passthrough unchanged, so bypass them entirely.
@@ -181,9 +184,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			toClose = allOuts
 			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		} else {
-			wireFanout(ctx, guestGuildID, sources, destinations, guestChannelMixers, guestRelayMixer, &m.metrics.Session)
-			toClose = registerRelayInputs(ctx, guestGuildID, allySession, destinations, guestChannelMixers, &m.metrics.Session)
-			startChannelMixers(ctx, destinations, guestChannelMixers, guestGuildID, &m.metrics.Session)
+			wireFanout(ctx, guestGm, sources, destinations, guestChannelMixers, guestRelayMixer)
+			toClose = registerRelayInputs(ctx, guestGm, allySession, destinations, guestChannelMixers)
+			startChannelMixers(ctx, guestGm, destinations, guestChannelMixers)
 			startGuestRelayBroadcast(ctx, guestRelayMixer, allySession, guestGuildID)
 		}
 	} else {
@@ -195,7 +198,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		allySession.AddGuild(guestGuildID, outs)
 		toClose = outs
 	}
-	m.metrics.Session.SessionStarted(ctx, guestGuildID, len(setup.joined))
+	guestGm.SessionStarted(len(setup.joined))
 	span.SetAttributes(attribute.Int("speaker.count", len(setup.joined)))
 	slog.InfoContext(ctx, "guest joined relay session",
 		slog.String("guildID", guestGuildID.String()),
@@ -223,7 +226,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			}
 			m.sessions.RemoveGuest(guestGuildID)
 			m.clearAppliers(guestGuildID)
-			m.metrics.Session.SessionStopped(ctx, guestGuildID)
+			guestGm.SessionStopped()
 			span.End()
 			slog.InfoContext(ctx, "guest session ended", slog.String("guildID", guestGuildID.String()))
 		}()
@@ -291,21 +294,22 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", err
 	}
 	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
-	ownerSetup := NewVoiceConnSetup(m.ownerBotID, m.metrics.Opus.For(guildID.String())).WithVoiceReceiver(allowUser.Check, m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathReceiver))
+	gm := m.metrics.ForGuild(ctx, guildID)
+	ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceReceiver(allowUser.Check, gm.Receiver())
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
 	var chOwnerOut chan []byte
 	if mode.WithCapture() {
 		chOwnerOut = make(chan []byte, audioChanBuf)
-		ownerSetup.WithVoiceProvider(m.metrics.Session.FrameDropper(ctx, guildID, telemetry.DropPathProvider))
+		ownerSetup.WithVoiceProvider(gm.Provider())
 	}
-	chIn, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
+	chIn, ownerHandle, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
 	if err != nil {
 		setup.speakerCleanup()
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
-	m.storeApplier(guildID, m.ownerBotID, m.buildOwnerApplier(guildID, chIn, chOwnerOut, allowUser.Check))
+	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, chIn, ownerHandle, allowUser.Check))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(
@@ -328,10 +332,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		allySession:  allySession,
 		setup:        setup,
 		chIn:         chIn,
+		ownerHandle:  ownerHandle,
 		chOwnerOut:   chOwnerOut,
 		ownerCleanup: ownerCleanup,
 		ov:           ov,
-		metrics:      m.metrics,
+		gm:           gm,
 		allowFilter:  allowUser,
 	}
 	session, start, err := pipelineFor(mode).build(ctx, p)
@@ -348,7 +353,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if !mode.IsDirectPassthrough() {
 		m.syncMixerPauseState(guildID, session)
 	}
-	m.metrics.Session.SessionStarted(ctx, guildID, len(setup.joined))
+	gm.SessionStarted(len(setup.joined))
 	logMsg := "voice raid started"
 	if mode.IsDirectPassthrough() {
 		logMsg = "voice raid started (direct passthrough)"

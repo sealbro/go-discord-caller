@@ -61,6 +61,7 @@ type StatusProvider interface {
 	GetStatus(guildID snowflake.ID) guild.Status
 	HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
 	HasCallerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool
+	IsBot(user discord.User) bool
 }
 
 // SeedManager handles speaker bot registration on startup and guild events.

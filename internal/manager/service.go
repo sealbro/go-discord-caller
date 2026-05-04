@@ -190,7 +190,14 @@ func (m *Service) Shutdown(ctx context.Context) {
 	m.poolSvc.Shutdown(ctx)
 }
 
-// channelHasListeners returns true if channelID contains at least one non-bot
+// IsBot reports whether user should be treated as a bot for filtering purposes.
+// Returns false in E2E test mode (AllowBots=true) so test bot accounts pass
+// the same checks that human users pass.
+func (m *Service) IsBot(user discord.User) bool {
+	return user.Bot && !m.test.AllowBots
+}
+
+// channelHasListeners returns true if channelID contains at least one listener
 // user according to the owner bot's voice-state cache.
 func (m *Service) channelHasListeners(guildID, channelID snowflake.ID) bool {
 	for vs := range m.ownerClient.Caches.VoiceStates(guildID) {
@@ -198,7 +205,7 @@ func (m *Service) channelHasListeners(guildID, channelID snowflake.ID) bool {
 			continue
 		}
 		member, ok := m.ownerClient.Caches.Member(guildID, vs.UserID)
-		if ok && !member.User.Bot {
+		if ok && !m.IsBot(member.User) {
 			return true
 		}
 	}

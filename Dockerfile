@@ -39,7 +39,6 @@ LABEL org.opencontainers.image.title="go-discord-caller" \
 
 COPY --from=builder /bin/runner /
 COPY --from=builder /runtime-libs/ /usr/local/lib/
-COPY samples/ /samples/
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 

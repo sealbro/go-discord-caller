@@ -136,14 +136,10 @@ func (m *Service) clearAppliers(guildID snowflake.ID) {
 // FrameDropper is created lazily inside the closure using the call-time ctx so
 // metrics never attach to a stale session-start span.
 func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte, chCapture chan []byte, handle *opus.FanoutHandle, allowUser func(snowflake.ID) bool) reconnectApplier {
-	isTest := m.test.IsTestBot(botID)
 	return func(ctx context.Context, conn voice.Conn) {
 		gm := m.metrics.ForGuild(ctx, guildID)
 		var provider voice.OpusFrameProvider
 		switch {
-		case isTest:
-			p, _ := opus.NewFileVoiceProvider(m.test.FileDCA)
-			provider = p
 		case chOut != nil:
 			provider = opus.NewVoiceProvider(chOut, gm.Provider())
 		default:

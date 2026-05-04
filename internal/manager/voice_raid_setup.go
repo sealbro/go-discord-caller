@@ -119,11 +119,7 @@ func (m *Service) commitSession(session *guild.Session) error {
 func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, *opus.FanoutHandle, func(), error) {
 	gm := m.metrics.ForGuild(ctx, guildID)
 	session := NewVoiceConnSetup(speakerID)
-	if m.test.IsTestBot(speakerID) {
-		session.WithFileProvider(m.test.FileDCA)
-	} else {
-		session.WithVoiceProvider(gm.Provider())
-	}
+	session.WithVoiceProvider(gm.Provider())
 
 	if withCapture {
 		session.WithVoiceReceiver(allowUser, gm.Receiver())

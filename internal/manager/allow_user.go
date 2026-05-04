@@ -72,10 +72,7 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
 			if !ok {
 				return false
 			}
-			if m.test.IsTestBot(userID) {
-				return true
-			}
-			if member.User.Bot {
+			if member.User.Bot && !m.test.AllowBots {
 				return false
 			}
 			return slices.Contains(member.RoleIDs, roleID)
@@ -97,9 +94,9 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 	m.mu.RUnlock()
 
 	roleID, hasRole := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
-	allowed := !member.User.Bot
+	allowed := !member.User.Bot || m.test.AllowBots
 	if hasRole && allowed {
-		allowed = m.test.IsTestBot(member.User.ID) || slices.Contains(member.RoleIDs, roleID)
+		allowed = slices.Contains(member.RoleIDs, roleID)
 	}
 	filter.Set(member.User.ID, allowed)
 }

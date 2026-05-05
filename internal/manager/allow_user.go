@@ -98,10 +98,11 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 	filter.Set(member.User.ID, allowed)
 }
 
-// prefetchChannelMembers requests full member data for every user currently in
-// conn's voice channel via a single RequestMembers gateway op. Discord responds
-// with GUILD_MEMBERS_CHUNK events that populate the cache with complete RoleIDs,
-// replacing any partial entries written by earlier VOICE_STATE_UPDATE events.
+// prefetchChannelMembers fetches full member data for every user currently in
+// conn's voice channel and pre-populates the member cache with complete RoleIDs.
+// Uses MemberChunkingManager.RequestMembers so the nonce is tracked and
+// GUILD_MEMBERS_CHUNK responses are actually stored in the cache — bot.Client.RequestMembers
+// sends the op with an empty nonce, causing HandleChunk to discard the response.
 func (m *Service) prefetchChannelMembers(ctx context.Context, conn voice.Conn, botUserID, guildID snowflake.ID) {
 	chID := conn.ChannelID()
 	if chID == nil {
@@ -113,9 +114,15 @@ func (m *Service) prefetchChannelMembers(ctx context.Context, conn voice.Conn, b
 			userIDs = append(userIDs, vs.UserID)
 		}
 	}
-	if len(userIDs) > 0 {
-		if err := m.ownerClient.RequestMembers(ctx, guildID, false, "", userIDs...); err != nil {
-			slog.WarnContext(ctx, "prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
-		}
+	if len(userIDs) == 0 {
+		return
+	}
+	members, err := m.ownerClient.MemberChunkingManager.RequestMembers(ctx, guildID, userIDs...)
+	if err != nil {
+		slog.WarnContext(ctx, "prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
+		return
+	}
+	for _, member := range members {
+		m.NotifyMemberUpdate(guildID, member)
 	}
 }

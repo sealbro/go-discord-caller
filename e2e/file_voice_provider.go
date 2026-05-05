@@ -1,4 +1,4 @@
-package opus
+package e2e
 
 import (
 	"encoding/binary"
@@ -74,6 +74,93 @@ func (v *FileVoiceProvider) Close() {
 	default:
 		close(v.done)
 		_ = v.file.Close()
+	}
+}
+
+// dcaEntry holds an open .dca file with its frame start offset.
+type dcaEntry struct {
+	path      string
+	file      *os.File
+	frameBase int64
+}
+
+// RoundRobinFileVoiceProvider streams Opus frames from multiple .dca files,
+// cycling through them in order: when one file reaches EOF it advances to the
+// next, wrapping back to the first after the last.
+type RoundRobinFileVoiceProvider struct {
+	voice.OpusFrameProvider
+	entries []*dcaEntry
+	idx     int
+	done    chan struct{}
+}
+
+// NewRoundRobinFileVoiceProvider opens all paths and returns a provider that
+// plays them round-robin. Paths must not be empty.
+func NewRoundRobinFileVoiceProvider(paths []string) (*RoundRobinFileVoiceProvider, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no dca files provided")
+	}
+	entries := make([]*dcaEntry, 0, len(paths))
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			for _, e := range entries {
+				_ = e.file.Close()
+			}
+			return nil, fmt.Errorf("open dca file %q: %w", p, err)
+		}
+		frameBase, err := skipDCAHeader(f)
+		if err != nil {
+			_ = f.Close()
+			for _, e := range entries {
+				_ = e.file.Close()
+			}
+			return nil, fmt.Errorf("parse dca header %q: %w", p, err)
+		}
+		entries = append(entries, &dcaEntry{path: p, file: f, frameBase: frameBase})
+	}
+	return &RoundRobinFileVoiceProvider{
+		entries: entries,
+		done:    make(chan struct{}),
+	}, nil
+}
+
+func (v *RoundRobinFileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
+	select {
+	case <-v.done:
+		return nil, fmt.Errorf("round-robin voice provider is closed")
+	default:
+	}
+
+	for {
+		cur := v.entries[v.idx]
+		frame, err := readDCAFrame(cur.file)
+		if err == nil {
+			return frame, nil
+		}
+
+		if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("read dca frame %q: %w", cur.path, err)
+		}
+
+		// Advance to the next file (wrap around) and seek it to frame start.
+		v.idx = (v.idx + 1) % len(v.entries)
+		next := v.entries[v.idx]
+		slog.Debug("dca round-robin: advancing", slog.String("next", next.path))
+		if _, seekErr := next.file.Seek(next.frameBase, io.SeekStart); seekErr != nil {
+			return nil, fmt.Errorf("seek dca file %q: %w", next.path, seekErr)
+		}
+	}
+}
+
+func (v *RoundRobinFileVoiceProvider) Close() {
+	select {
+	case <-v.done:
+	default:
+		close(v.done)
+		for _, e := range v.entries {
+			_ = e.file.Close()
+		}
 	}
 }
 

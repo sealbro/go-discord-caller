@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build integration
 
-package e2e
+package integration
 
 import (
 	"context"
@@ -16,7 +16,7 @@ var h *Harness
 func TestMain(m *testing.M) {
 	cfg, err := loadConfig()
 	if err != nil {
-		log.Fatalf("e2e config: %v", err)
+		log.Fatalf("integration config: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -24,7 +24,7 @@ func TestMain(m *testing.M) {
 
 	h, err = newHarness(ctx, cfg)
 	if err != nil {
-		log.Fatalf("e2e harness: %v", err)
+		log.Fatalf("integration harness: %v", err)
 	}
 
 	code := m.Run()

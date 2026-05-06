@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build integration
 
-package e2e
+package integration
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type e2eConfig struct {
+type integrationConfig struct {
 	OwnerToken        string
 	SpeakerTokens     []string
 	SourceToken       string
@@ -29,15 +29,15 @@ type e2eConfig struct {
 	// Guest guild channels (required only when GuestGuildID is set)
 	GuestOwnerChannelID   snowflake.ID
 	GuestSpeakerChannelID snowflake.ID
-	// Directory containing .dca files streamed round-robin by the source bot.
+	// Directory containing .dca files streamed in random order by the source bot.
 	SamplesDir string
 }
 
-func loadConfig() (*e2eConfig, error) {
-	// go test sets cwd to the package directory (e2e/); .env.e2e lives at the repo root.
-	_ = godotenv.Load("../.env.e2e")
+func loadConfig() (*integrationConfig, error) {
+	// go test sets cwd to the package directory (integration/); .env.integration lives at the repo root.
+	_ = godotenv.Load("../.env.integration")
 
-	cfg := &e2eConfig{}
+	cfg := &integrationConfig{}
 	var err error
 
 	cfg.OwnerToken = os.Getenv("DISCORD_OWNER_BOT_TOKEN")
@@ -76,7 +76,7 @@ func loadConfig() (*e2eConfig, error) {
 
 	cfg.SamplesDir = os.Getenv("E2E_SAMPLES_DIR")
 	if cfg.SamplesDir == "" {
-		cfg.SamplesDir = "../e2e/samples"
+		cfg.SamplesDir = "../integration/samples"
 	}
 
 	return cfg, nil

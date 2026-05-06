@@ -1,10 +1,10 @@
-# E2E Test Setup
+# Integration Test Setup
 
-This document covers everything needed to run the E2E test suite in `e2e/`.
+This document covers everything needed to run the integration test suite in `integration/`.
 Do this once per environment (local dev or CI). The actual tests run with:
 
 ```bash
-go test --tags=e2e --timeout=15m ./e2e/...
+go test --tags=integration --timeout=15m ./integration/...
 ```
 
 ---
@@ -48,7 +48,7 @@ Create or reuse a private server. Do **not** use a production guild.
 | Role | Purpose | Env var |
 |------|---------|---------|
 | `caller` | grants audio capture permission | `E2E_CALLER_ROLE_ID` |
-| `manager` | not strictly needed for E2E but expected by the bot | — |
+| `manager` | not strictly needed for integration tests but expected by the bot | — |
 
 **Bot invitations** — invite all bots with `bot` + `applications.commands` scope.
 
@@ -104,11 +104,11 @@ go run ./cmd/gen-samples
 On macOS this writes one file per `say` voice:
 
 ```
-e2e/samples/alex.dca
-e2e/samples/daniel.dca
-e2e/samples/karen.dca
-e2e/samples/samantha.dca
-e2e/samples/victoria.dca
+integration/samples/alex.dca
+integration/samples/daniel.dca
+integration/samples/karen.dca
+integration/samples/samantha.dca
+integration/samples/victoria.dca
 ```
 
 Each file is a few seconds of speech at 64 kbps Opus. Commit them — they are
@@ -122,7 +122,7 @@ until the test ends.
 
 ## 4. Environment variables
 
-Copy the block below into `.env.e2e` at the repo root and fill in the values.
+Copy the block below into `.env.integration` at the repo root and fill in the values.
 The file is loaded automatically by the harness (gitignored — never commit tokens).
 
 ```dotenv
@@ -148,8 +148,8 @@ E2E_GUEST_GUILD_ID=
 E2E_GUEST_OWNER_CHANNEL_ID=
 E2E_GUEST_SPEAKER_CHANNEL_ID=
 
-# --- Audio (optional; defaults to e2e/samples, all *.dca played round-robin) ---
-# E2E_SAMPLES_DIR=e2e/samples
+# --- Audio (optional; defaults to integration/samples, all *.dca played randomly) ---
+# E2E_SAMPLES_DIR=integration/samples
 ```
 
 How to find IDs: enable **Developer Mode** in Discord settings, then right-click
@@ -166,41 +166,41 @@ Docker image:
 # Build the image
 docker build -t go-discord-caller .
 
-# Run E2E inside the image, mounting your .env.e2e
+# Run inside the image, mounting your .env.integration
 docker run --rm \
-  --env-file .env.e2e \
-  -v "$(pwd)/e2e/samples:/app/e2e/samples" \
+  --env-file .env.integration \
+  -v "$(pwd)/integration/samples:/app/integration/samples" \
   go-discord-caller \
-  go test --tags=e2e --timeout=15m ./e2e/...
+  go test --tags=integration --timeout=15m ./integration/...
 ```
 
 If libdave is already installed locally:
 
 ```bash
-go test --tags=e2e --timeout=15m -v ./e2e/...
+go test --tags=integration --timeout=15m -v ./integration/...
 ```
 
 Run a single test:
 
 ```bash
-go test --tags=e2e --timeout=30s -v -run TestE1_OneCaller ./e2e/...
+go test --tags=integration --timeout=30s -v -run TestE1_OneCaller ./integration/...
 ```
 
 ### 5.1 Coverage
 
-Without `-coverpkg`, Go only instruments the `e2e` package itself (harness
+Without `-coverpkg`, Go only instruments the `integration` package itself (harness
 helpers, assert utilities) — not the `internal/` packages where all the real
 logic lives. Always pass `-coverpkg=./internal/...` to measure what the tests
 actually exercise:
 
 ```bash
-go test --tags=e2e --timeout=15m \
+go test --tags=integration --timeout=15m \
   -coverprofile=coverage.out \
   -coverpkg=./internal/... \
-  ./e2e/...
+  ./integration/...
 ```
 
-`./e2e/...` — which tests to **run**  
+`./integration/...` — which tests to **run**  
 `-coverpkg=./internal/...` — which packages to **measure**
 
 View results:
@@ -221,7 +221,7 @@ to highlight covered/uncovered lines directly in the editor.
 
 ## 6. CI (GitHub Actions)
 
-The workflow lives at `.github/workflows/e2e.yml`. It runs:
+The workflow lives at `.github/workflows/integration.yml`. It runs:
 
 - **Scheduled**: daily at 06:00 UTC
 - **Manual**: `workflow_dispatch` (run it once before merging the harness)
@@ -244,7 +244,7 @@ E2E_GUEST_OWNER_CHANNEL_ID      # optional
 E2E_GUEST_SPEAKER_CHANNEL_ID    # optional
 ```
 
-The workflow uses `concurrency: { group: e2e-discord, cancel-in-progress: false }` so
+The workflow uses `concurrency: { group: integration-discord, cancel-in-progress: false }` so
 concurrent runs queue rather than cancel — two runs fighting over the same voice
 channels would corrupt each other's state.
 
@@ -252,14 +252,14 @@ channels would corrupt each other's state.
 
 ## 7. Test file layout
 
-Tests are split across four files inside `e2e/`:
+Tests are split across four files inside `integration/`:
 
 | File | Contains |
 |------|---------|
 | `main_test.go` | `TestMain`, shared `h *Harness` |
 | `host_test.go` | E1–E4, E6, E7 — host-guild audio relay tests |
 | `guest_test.go` | E5 — inter-guild relay |
-| `handlers_test.go` | E8, E9 — Discord event handler reconnect tests |
+| `handlers_test.go` | E8–E12 — Discord event handler tests |
 
 ---
 
@@ -275,7 +275,10 @@ Tests are split across four files inside `e2e/`:
 | E6 | host | `OneManyGuildCaller` | star topology (hub hears all) | source bot 2 |
 | E7 | host | `OneCaller` | `RequestMembers` pre-fetch allows pre-joined source | — |
 | E8 | handlers | `OneCaller` | `onVoiceLeave` → `ReconnectBotChannel` after voice disconnect | — |
-| E9 | handlers | `OneCaller` | `onVoiceMove` → `OnBotVoiceMove` → `ReconnectBotChannel` after admin move | owner bot: Move Members |
+| E9 | handlers | `OneCaller` | `onVoiceMove` → `OnBotVoiceMove` → `ReconnectBotChannel` after admin move | listener bot: Move Members |
+| E10 | handlers | `OneCaller` | `onVoiceJoin` live-join: caller joins after raid start → captured | — |
+| E11 | handlers | `OneCaller` | `onVoiceLeave`/`onVoiceJoin` → auto-pause/resume via voice events | — |
+| E12 | handlers | `GuildCaller` | `onGuildMemberUpdate` → AllowFilter updated on role revoke | source bot 2, listener bot: Manage Roles |
 
 Tests that require optional bots, guilds, or permissions are skipped automatically
 when the corresponding env vars are unset or the REST call fails.
@@ -298,6 +301,6 @@ If a test panics mid-run, the cleanup still fires via `t.Cleanup`. Before each
 test, `NewManager` creates a fresh in-memory store and re-seeds the pool, so
 stale speaker bindings from a previous test do not bleed over.
 
-If a bot is still in a voice channel from a previous crashed run, `SourceBot.StartPlaying`
+If a bot is still in a voice channel from a previous crashed run, `TestSpeaker.StartPlaying`
 calls `Leave` before `Join` to avoid the stale-connection hang that occurs when
 `VoiceManager.CreateConn` returns an existing partially-closed connection.

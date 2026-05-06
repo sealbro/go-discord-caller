@@ -1,5 +1,5 @@
-// gen-samples generates DCA audio files under e2e/samples/ used by the E2E
-// test harness as the source-bot's audio stream.
+// gen-samples generates DCA audio files under integration/samples/ used by the
+// integration test harness as the source-bot's audio stream.
 //
 // On macOS it uses the built-in `say` command to produce one file per speaker
 // voice (Alex, Samantha, Victoria, Karen, Daniel), each saying
@@ -36,7 +36,7 @@ const (
 )
 
 // macSpeakers lists the macOS say voices and the text each one speaks.
-// Each speaker says their own name so they are identifiable during E2E tests.
+// Each speaker says their own name so they are identifiable during integration tests.
 var macSpeakers = []struct {
 	voice string
 	name  string
@@ -49,7 +49,7 @@ var macSpeakers = []struct {
 }
 
 func main() {
-	outDir := flag.String("outdir", "e2e/samples", "output directory for .dca files")
+	outDir := flag.String("outdir", "integration/samples", "output directory for .dca files")
 	bitrate := flag.Int("bitrate", 64000, "Opus bitrate in bps")
 	flag.Parse()
 

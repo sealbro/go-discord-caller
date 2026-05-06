@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build integration
 
-package e2e
+package integration
 
 import (
 	"fmt"

@@ -1,6 +1,6 @@
-//go:build e2e
+//go:build integration
 
-package e2e
+package integration
 
 import (
 	"context"
@@ -26,10 +26,10 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
-// Harness holds all bot connections shared across E2E tests.
+// Harness holds all bot connections shared across integration tests.
 // Create once in TestMain via newHarness; close via Shutdown after all tests run.
 type Harness struct {
-	cfg             *e2eConfig
+	cfg             *integrationConfig
 	Owner           *disgobot.Client
 	OwnerID         snowflake.ID
 	Pool            *pool.Service
@@ -39,7 +39,7 @@ type Harness struct {
 	activeListeners []disgobot.EventListener // current per-test listeners; swapped in newManagerForGuild
 }
 
-func newHarness(ctx context.Context, cfg *e2eConfig) (*Harness, error) {
+func newHarness(ctx context.Context, cfg *integrationConfig) (*Harness, error) {
 	h := &Harness{cfg: cfg}
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
@@ -54,7 +54,7 @@ func newHarness(ctx context.Context, cfg *e2eConfig) (*Harness, error) {
 	h.OwnerID, _ = guild.BotUserID(cfg.OwnerToken)
 
 	// Speaker pool.
-	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("e2e"))
+	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
 	if err != nil {
 		return nil, fmt.Errorf("build metrics: %w", err)
 	}
@@ -92,7 +92,7 @@ func (h *Harness) NewManager(speakerChannelIDs ...snowflake.ID) (*manager.Servic
 
 func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
 	st := store.NewInMemoryStore()
-	metrics, _ := telemetry.NewMetrics(noop.NewMeterProvider().Meter("e2e"))
+	metrics, _ := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
 	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics)
 
 	st.BindChannel(guildID, h.OwnerID, ownerChannelID)

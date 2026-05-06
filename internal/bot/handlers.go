@@ -10,8 +10,9 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
-// eventListeners returns all event listeners to register with the client.
-func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []bot.EventListener {
+// EventListeners returns all event listeners to register with the owner bot client.
+// Called by the production bot and by the E2E harness so both use identical handler logic.
+func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),

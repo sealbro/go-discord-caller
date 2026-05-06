@@ -19,7 +19,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
-// TestSpeaker joins a voice channel and streams DCA audio round-robin.
+// TestSpeaker joins a voice channel and streams DCA audio in random order.
 // It stands in for a human caller during E2E tests.
 type TestSpeaker struct {
 	client *bot.Client
@@ -47,14 +47,14 @@ func newTestSpeaker(ctx context.Context, token string) (*TestSpeaker, error) {
 }
 
 // StartPlaying joins channelID in guildID and begins streaming .dca files from
-// samplesDir in round-robin order. Returns a cleanup func that stops playback
+// samplesDir in random order. Returns a cleanup func that stops playback
 // and leaves the channel. The cleanup func is safe to call more than once.
 func (s *TestSpeaker) StartPlaying(ctx context.Context, guildID, channelID snowflake.ID, samplesDir string) (func(), error) {
 	paths, err := filepath.Glob(filepath.Join(samplesDir, "*.dca"))
 	if err != nil || len(paths) == 0 {
 		return nil, fmt.Errorf("no .dca files found in %q", samplesDir)
 	}
-	provider, err := NewRoundRobinFileVoiceProvider(paths)
+	provider, err := NewRandomFileVoiceProvider(paths)
 	if err != nil {
 		return nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
 	}
@@ -97,6 +97,9 @@ func (s *TestSpeaker) StartPlaying(ctx context.Context, guildID, channelID snowf
 	}
 	return cleanup, nil
 }
+
+// ID returns the bot's Discord user ID.
+func (s *TestSpeaker) ID() snowflake.ID { return s.id }
 
 // Close shuts down the source bot's gateway connection.
 func (s *TestSpeaker) Close(ctx context.Context) {

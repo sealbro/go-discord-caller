@@ -13,11 +13,16 @@ go test --tags=e2e --timeout=15m ./e2e/...
 
 | Bot | Role | Notes |
 |-----|------|-------|
-| **owner bot** | existing production owner | same token as `DISCORD_OWNER_BOT_TOKEN` |
+| **owner bot** | existing production owner | same token as `DISCORD_OWNER_BOT_TOKEN`; keep permissions identical to production |
 | **speaker bot(s)** | existing production speakers | same tokens as `DISCORD_SPEAKER_BOT_TOKEN_N` |
 | **source bot** | harness audio source | new dedicated bot; must never be a production speaker |
-| **source bot 2** | second harness source | required only for E2 (mix-minus) and E6 (star topology) |
-| **listener bot** | harness frame counter | new dedicated bot |
+| **source bot 2** | second harness source | required only for E2 (mix-minus), E6 (star topology), E12 (role revoke) |
+| **listener bot** | harness frame counter + **test-admin** | new dedicated bot; grant **Administrator** in the test guild only |
+
+The **listener bot** doubles as the test-admin for privileged REST calls (E9: move
+members, E12: manage roles). Giving Administrator to the listener bot — not the
+owner bot — keeps the owner bot at production-identical permissions, so tests
+cannot pass on permissions that don't exist in production.
 
 Create source and listener bots at https://discord.com/developers/applications.
 Enable the **bot** scope; no privileged intents needed beyond Voice.
@@ -45,9 +50,16 @@ Create or reuse a private server. Do **not** use a production guild.
 | `caller` | grants audio capture permission | `E2E_CALLER_ROLE_ID` |
 | `manager` | not strictly needed for E2E but expected by the bot | — |
 
-**Bot invitations** — invite all bots with `bot` + `applications.commands` scope and the following permissions: `View Channels`, `Connect`, `Speak`, `Use Voice Activity`.
+**Bot invitations** — invite all bots with `bot` + `applications.commands` scope.
 
-For E9 (bot-move reconnect), the owner bot additionally needs **Move Members** permission. Without it, E9 is skipped automatically.
+| Bot | Required permissions |
+|-----|---------------------|
+| owner bot | `View Channels`, `Connect`, `Speak`, `Use Voice Activity` — same as production, nothing extra |
+| speaker bots | same as owner bot |
+| source bots | `View Channels`, `Connect`, `Speak`, `Use Voice Activity` |
+| listener bot | **Administrator** (test guild only) — used as test-admin for E9 / E12 |
+
+E9 and E12 skip automatically if the listener bot lacks the necessary permissions.
 
 After inviting, run `/setup` or the equivalent commands to bind the owner and speaker channels within the bot's store (this wiring is re-done programmatically in each test, but the bots must be guild members for `SeedExistingSpeakers` to find them).
 
@@ -69,9 +81,9 @@ Required only for `TestE5_InterGuildRelay`. Create a second private server.
 ## 3. Generate sample audio
 
 The source bot discovers all `*.dca` files in the samples directory and plays
-them round-robin: when one file reaches the end it advances to the next,
-wrapping back to the first after the last. Generate the files once and commit
-them so CI needs no TTS tooling at runtime.
+them in random order: when one file reaches the end it picks a different file at
+random (never the same file twice in a row when multiple files exist). Generate
+the files once and commit them so CI needs no TTS tooling at runtime.
 
 ### 3.1 Prerequisites
 
@@ -103,8 +115,8 @@ Each file is a few seconds of speech at 64 kbps Opus. Commit them — they are
 binary but small.
 
 To override the directory, set `E2E_SAMPLES_DIR` to any directory containing
-`*.dca` files. Every file matching the glob will be played in alphabetical order,
-round-robin until the test ends.
+`*.dca` files. Every file matching the glob will be played in random order
+until the test ends.
 
 ---
 
@@ -173,6 +185,37 @@ Run a single test:
 ```bash
 go test --tags=e2e --timeout=30s -v -run TestE1_OneCaller ./e2e/...
 ```
+
+### 5.1 Coverage
+
+Without `-coverpkg`, Go only instruments the `e2e` package itself (harness
+helpers, assert utilities) — not the `internal/` packages where all the real
+logic lives. Always pass `-coverpkg=./internal/...` to measure what the tests
+actually exercise:
+
+```bash
+go test --tags=e2e --timeout=15m \
+  -coverprofile=coverage.out \
+  -coverpkg=./internal/... \
+  ./e2e/...
+```
+
+`./e2e/...` — which tests to **run**  
+`-coverpkg=./internal/...` — which packages to **measure**
+
+View results:
+
+```bash
+# Terminal summary (per-package percentages)
+go tool cover -func=coverage.out
+
+# HTML report saved to file (open in browser or load into GoLand)
+go tool cover -html=coverage.out -o coverage.html
+open coverage.html   # macOS
+```
+
+GoLand: **Run → Show Code Coverage Data…** (`⌘⌥F6`) → select `coverage.out`
+to highlight covered/uncovered lines directly in the editor.
 
 ---
 

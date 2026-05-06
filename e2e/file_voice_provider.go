@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 
 	"github.com/disgoorg/disgo/voice"
@@ -84,19 +85,19 @@ type dcaEntry struct {
 	frameBase int64
 }
 
-// RoundRobinFileVoiceProvider streams Opus frames from multiple .dca files,
-// cycling through them in order: when one file reaches EOF it advances to the
-// next, wrapping back to the first after the last.
-type RoundRobinFileVoiceProvider struct {
+// RandomFileVoiceProvider streams Opus frames from multiple .dca files,
+// picking a new file at random each time the current one reaches EOF.
+// When only one file is provided it loops that file indefinitely.
+type RandomFileVoiceProvider struct {
 	voice.OpusFrameProvider
-	entries []*dcaEntry
-	idx     int
-	done    chan struct{}
+	entries    []*dcaEntry
+	currentIdx int
+	done       chan struct{}
 }
 
-// NewRoundRobinFileVoiceProvider opens all paths and returns a provider that
-// plays them round-robin. Paths must not be empty.
-func NewRoundRobinFileVoiceProvider(paths []string) (*RoundRobinFileVoiceProvider, error) {
+// NewRandomFileVoiceProvider opens all paths and returns a provider that
+// plays them in random order. Paths must not be empty.
+func NewRandomFileVoiceProvider(paths []string) (*RandomFileVoiceProvider, error) {
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no dca files provided")
 	}
@@ -119,21 +120,22 @@ func NewRoundRobinFileVoiceProvider(paths []string) (*RoundRobinFileVoiceProvide
 		}
 		entries = append(entries, &dcaEntry{path: p, file: f, frameBase: frameBase})
 	}
-	return &RoundRobinFileVoiceProvider{
-		entries: entries,
-		done:    make(chan struct{}),
+	return &RandomFileVoiceProvider{
+		entries:    entries,
+		currentIdx: rand.IntN(len(entries)),
+		done:       make(chan struct{}),
 	}, nil
 }
 
-func (v *RoundRobinFileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
+func (v *RandomFileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
 	select {
 	case <-v.done:
-		return nil, fmt.Errorf("round-robin voice provider is closed")
+		return nil, fmt.Errorf("random voice provider is closed")
 	default:
 	}
 
 	for {
-		cur := v.entries[v.idx]
+		cur := v.entries[v.currentIdx]
 		frame, err := readDCAFrame(cur.file)
 		if err == nil {
 			return frame, nil
@@ -143,17 +145,25 @@ func (v *RoundRobinFileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
 			return nil, fmt.Errorf("read dca frame %q: %w", cur.path, err)
 		}
 
-		// Advance to the next file (wrap around) and seek it to frame start.
-		v.idx = (v.idx + 1) % len(v.entries)
-		next := v.entries[v.idx]
-		slog.Debug("dca round-robin: advancing", slog.String("next", next.path))
-		if _, seekErr := next.file.Seek(next.frameBase, io.SeekStart); seekErr != nil {
-			return nil, fmt.Errorf("seek dca file %q: %w", next.path, seekErr)
+		// Pick a random next file. With more than one file, avoid replaying
+		// the same file back-to-back by excluding the current index.
+		next := v.currentIdx
+		if len(v.entries) > 1 {
+			next = rand.IntN(len(v.entries) - 1)
+			if next >= v.currentIdx {
+				next++
+			}
+		}
+		v.currentIdx = next
+		nextEntry := v.entries[v.currentIdx]
+		slog.Debug("dca random: next file", slog.String("path", nextEntry.path))
+		if _, seekErr := nextEntry.file.Seek(nextEntry.frameBase, io.SeekStart); seekErr != nil {
+			return nil, fmt.Errorf("seek dca file %q: %w", nextEntry.path, seekErr)
 		}
 	}
 }
 
-func (v *RoundRobinFileVoiceProvider) Close() {
+func (v *RandomFileVoiceProvider) Close() {
 	select {
 	case <-v.done:
 	default:

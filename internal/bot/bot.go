@@ -148,7 +148,7 @@ func New(cfg *config.Config) (*Bot, error) {
 	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot)
 	cmdHandlers.Register(r)
 
-	client.AddEventListeners(eventListeners(managerSvc, &metrics.Bot)...)
+	client.AddEventListeners(EventListeners(managerSvc, &metrics.Bot)...)
 
 	return &Bot{
 		client:        client,

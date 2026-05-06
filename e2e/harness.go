@@ -9,13 +9,14 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo"
-	"github.com/disgoorg/disgo/bot"
+	disgobot "github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	internalbot "github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager"
@@ -28,13 +29,14 @@ import (
 // Harness holds all bot connections shared across E2E tests.
 // Create once in TestMain via newHarness; close via Shutdown after all tests run.
 type Harness struct {
-	cfg      *e2eConfig
-	Owner    *bot.Client
-	OwnerID  snowflake.ID
-	Pool     *pool.Service
-	Speaker  *TestSpeaker
-	Speaker2 *TestSpeaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
-	Listener *TestListener
+	cfg             *e2eConfig
+	Owner           *disgobot.Client
+	OwnerID         snowflake.ID
+	Pool            *pool.Service
+	Speaker         *TestSpeaker
+	Speaker2        *TestSpeaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
+	Listener        *TestListener
+	activeListeners []disgobot.EventListener // current per-test listeners; swapped in newManagerForGuild
 }
 
 func newHarness(ctx context.Context, cfg *e2eConfig) (*Harness, error) {
@@ -83,7 +85,7 @@ func newHarness(ctx context.Context, cfg *e2eConfig) (*Harness, error) {
 // NewManager creates a fresh manager.Service with a clean in-memory store.
 // speakerChannelIDs are assigned to pool speakers in order (first pool speaker
 // gets speakerChannelIDs[0], etc.). The owner and caller role are pre-bound.
-// Always call manager.StopVoiceRaid + manager.Shutdown in t.Cleanup.
+// Always call manager.StopVoiceRaid in t.Cleanup.
 func (h *Harness) NewManager(speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
 	return h.newManagerForGuild(h.cfg.GuildID, h.cfg.OwnerChannelID, speakerChannelIDs...)
 }
@@ -105,6 +107,16 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	}
 
 	svc.SeedExistingSpeakers([]snowflake.ID{guildID})
+
+	// Wire the same event handlers that production uses so onVoiceLeave and
+	// onVoiceMove fire and drive ReconnectBotChannel during tests. Remove the
+	// previous test's listeners first so they don't accumulate across tests.
+	if len(h.activeListeners) > 0 {
+		h.Owner.RemoveEventListeners(h.activeListeners...)
+	}
+	h.activeListeners = internalbot.EventListeners(svc, &metrics.Bot)
+	h.Owner.AddEventListeners(h.activeListeners...)
+
 	return svc, st
 }
 
@@ -119,13 +131,13 @@ func (h *Harness) DisconnectSpeakerVoice(ctx context.Context, guildID, speakerID
 	pool.NewGuildVoice(client.VoiceManager, 0).Leave(ctx, guildID)
 }
 
-// MoveSpeakerVoice uses the owner bot's REST API to move a speaker bot into
-// targetChannelID, simulating an admin dragging the bot to a different channel.
-// This triggers a GuildVoiceMove event on the owner bot → onVoiceMove handler →
-// OnBotVoiceMove → ReconnectBotChannel. Returns an error if the REST call fails
-// (e.g. owner bot lacks Move Members permission).
-func (h *Harness) MoveSpeakerVoice(ctx context.Context, guildID, speakerID, targetChannelID snowflake.ID) error {
-	_, err := h.Owner.Rest.UpdateMember(guildID, speakerID, discord.MemberUpdate{
+// MoveSpeakerVoice simulates an admin dragging a speaker bot into targetChannelID.
+// Uses the listener bot's REST client (the designated test-admin bot with
+// Administrator in the test guild) so the owner bot can keep production-identical
+// permissions. Triggers GuildVoiceMove on the owner bot → onVoiceMove →
+// OnBotVoiceMove → ReconnectBotChannel.
+func (h *Harness) MoveSpeakerVoice(_ context.Context, guildID, speakerID, targetChannelID snowflake.ID) error {
+	_, err := h.Listener.UpdateMember(guildID, speakerID, discord.MemberUpdate{
 		ChannelID: &targetChannelID,
 	})
 	return err
@@ -148,19 +160,20 @@ func (h *Harness) Shutdown(ctx context.Context) {
 
 // newOwnerClient builds a disgo client matching production settings but without
 // slash-command event listeners. Full intents + DAVE + FlagsAll cache.
-func newOwnerClient(token string) (*bot.Client, error) {
+// Event listeners are registered per-test via newManagerForGuild.
+func newOwnerClient(token string) (*disgobot.Client, error) {
 	return disgo.New(token,
-		bot.WithGatewayConfigOpts(
+		disgobot.WithGatewayConfigOpts(
 			gateway.WithIntents(
 				gateway.IntentGuilds,
 				gateway.IntentGuildMembers,
 				gateway.IntentGuildVoiceStates,
 			),
 		),
-		bot.WithCacheConfigOpts(
+		disgobot.WithCacheConfigOpts(
 			cache.WithCaches(cache.FlagsAll),
 		),
-		bot.WithVoiceManagerConfigOpts(
+		disgobot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			voice.WithLogger(slog.New(slog.DiscardHandler)),
 		),

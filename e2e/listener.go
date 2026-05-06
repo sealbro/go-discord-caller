@@ -12,6 +12,7 @@ import (
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
@@ -156,6 +157,20 @@ func (l *TestListener) StartListening(ctx context.Context, guildID, channelID sn
 		gv.Leave(leaveCtx, guildID)
 	}
 	return cleanup, nil
+}
+
+// GetMember fetches a guild member via the listener bot's REST client.
+// The listener bot is the designated test-admin bot (Administrator role in the
+// test guild) so privileged setup calls go through it, keeping the owner bot at
+// production-identical permissions.
+func (l *TestListener) GetMember(guildID, userID snowflake.ID) (*discord.Member, error) {
+	return l.client.Rest.GetMember(guildID, userID)
+}
+
+// UpdateMember modifies a guild member via the listener bot's REST client.
+// See GetMember for why this goes through the listener bot.
+func (l *TestListener) UpdateMember(guildID, userID snowflake.ID, update discord.MemberUpdate) (*discord.Member, error) {
+	return l.client.Rest.UpdateMember(guildID, userID, update)
 }
 
 // Close shuts down the listener bot's gateway connection.

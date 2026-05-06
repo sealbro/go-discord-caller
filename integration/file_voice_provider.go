@@ -1,4 +1,4 @@
-package opus
+package integration
 
 import (
 	"encoding/binary"
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand/v2"
 	"os"
 
 	"github.com/disgoorg/disgo/voice"
@@ -74,6 +75,102 @@ func (v *FileVoiceProvider) Close() {
 	default:
 		close(v.done)
 		_ = v.file.Close()
+	}
+}
+
+// dcaEntry holds an open .dca file with its frame start offset.
+type dcaEntry struct {
+	path      string
+	file      *os.File
+	frameBase int64
+}
+
+// RandomFileVoiceProvider streams Opus frames from multiple .dca files,
+// picking a new file at random each time the current one reaches EOF.
+// When only one file is provided it loops that file indefinitely.
+type RandomFileVoiceProvider struct {
+	voice.OpusFrameProvider
+	entries    []*dcaEntry
+	currentIdx int
+	done       chan struct{}
+}
+
+// NewRandomFileVoiceProvider opens all paths and returns a provider that
+// plays them in random order. Paths must not be empty.
+func NewRandomFileVoiceProvider(paths []string) (*RandomFileVoiceProvider, error) {
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("no dca files provided")
+	}
+	entries := make([]*dcaEntry, 0, len(paths))
+	for _, p := range paths {
+		f, err := os.Open(p)
+		if err != nil {
+			for _, e := range entries {
+				_ = e.file.Close()
+			}
+			return nil, fmt.Errorf("open dca file %q: %w", p, err)
+		}
+		frameBase, err := skipDCAHeader(f)
+		if err != nil {
+			_ = f.Close()
+			for _, e := range entries {
+				_ = e.file.Close()
+			}
+			return nil, fmt.Errorf("parse dca header %q: %w", p, err)
+		}
+		entries = append(entries, &dcaEntry{path: p, file: f, frameBase: frameBase})
+	}
+	return &RandomFileVoiceProvider{
+		entries:    entries,
+		currentIdx: rand.IntN(len(entries)),
+		done:       make(chan struct{}),
+	}, nil
+}
+
+func (v *RandomFileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
+	select {
+	case <-v.done:
+		return nil, fmt.Errorf("random voice provider is closed")
+	default:
+	}
+
+	for {
+		cur := v.entries[v.currentIdx]
+		frame, err := readDCAFrame(cur.file)
+		if err == nil {
+			return frame, nil
+		}
+
+		if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("read dca frame %q: %w", cur.path, err)
+		}
+
+		// Pick a random next file. With more than one file, avoid replaying
+		// the same file back-to-back by excluding the current index.
+		next := v.currentIdx
+		if len(v.entries) > 1 {
+			next = rand.IntN(len(v.entries) - 1)
+			if next >= v.currentIdx {
+				next++
+			}
+		}
+		v.currentIdx = next
+		nextEntry := v.entries[v.currentIdx]
+		slog.Debug("dca random: next file", slog.String("path", nextEntry.path))
+		if _, seekErr := nextEntry.file.Seek(nextEntry.frameBase, io.SeekStart); seekErr != nil {
+			return nil, fmt.Errorf("seek dca file %q: %w", nextEntry.path, seekErr)
+		}
+	}
+}
+
+func (v *RandomFileVoiceProvider) Close() {
+	select {
+	case <-v.done:
+	default:
+		close(v.done)
+		for _, e := range v.entries {
+			_ = e.file.Close()
+		}
 	}
 }
 

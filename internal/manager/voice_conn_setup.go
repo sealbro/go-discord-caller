@@ -24,20 +24,6 @@ func NewVoiceConnSetup(userID snowflake.ID) *VoiceConnSetup {
 	return &VoiceConnSetup{userID: userID}
 }
 
-// WithFileProvider plays audio from a DCA file, draining chIn.
-func (v *VoiceConnSetup) WithFileProvider(path string) *VoiceConnSetup {
-	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		if chIn != nil {
-			go func() {
-				for range chIn {
-				}
-			}()
-		}
-		return opus.NewFileVoiceProvider(path)
-	}
-	return v
-}
-
 // WithVoiceProvider reads opus frames from chIn and plays them.
 // metrics carries both the histogram recorder and (optionally) the drop callback —
 // build it via GuildMetrics.Provider() to wire both in one shot.

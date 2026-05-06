@@ -10,8 +10,9 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
-// eventListeners returns all event listeners to register with the client.
-func eventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []bot.EventListener {
+// EventListeners returns all event listeners to register with the owner bot client.
+// Called by the production bot and by the E2E harness so both use identical handler logic.
+func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),
@@ -104,7 +105,7 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 // session's AllowFilter so the next audio frame sees the updated role immediately.
 func onGuildMemberUpdate(m ManagerService) func(*events.GuildMemberUpdate) {
 	return func(e *events.GuildMemberUpdate) {
-		if e.Member.User.Bot {
+		if m.IsBot(e.Member.User) {
 			return
 		}
 		e.Client().Caches.MemberCache().Put(e.GuildID, e.Member.User.ID, e.Member)
@@ -118,13 +119,13 @@ func onGuildMemberUpdate(m ManagerService) func(*events.GuildMemberUpdate) {
 // we overwrite whatever disgo stored with the authoritative data from this event).
 func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
-		if e.Member.User.Bot {
+		if m.IsBot(e.Member.User) {
 			return
 		}
-
 		guildID := e.VoiceState.GuildID
 
-		// Overwrite the cache entry with the full member (including RoleIDs).
+		// Always overwrite the cache entry with the full member (including RoleIDs)
+		// so the AllowFilter fallback sees accurate role data for both humans and bots.
 		e.Client().Caches.MemberCache().Put(guildID, e.Member.User.ID, e.Member)
 		m.NotifyMemberUpdate(guildID, e.Member)
 

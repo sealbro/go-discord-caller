@@ -10,7 +10,7 @@ If this project is useful to you, please consider giving it a ⭐ on GitHub — 
 
 ## How it works
 
-[Voice Flow](VOICE_FLOW.md) – detailed signal flow and component interaction diagrams
+[Voice Flow](docs/VOICE_FLOW.md) – detailed signal flow and component interaction diagrams
 
 ```mermaid
 graph TB

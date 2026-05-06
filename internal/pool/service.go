@@ -319,6 +319,21 @@ func (s *Service) GetIDs() []snowflake.ID {
 	return s.sortedIDs()
 }
 
+// ConnectedSpeakerIDs returns IDs of speakers whose gateway is currently
+// connected, sorted by snowflake value. Dead or unconnected speakers are
+// excluded.
+func (s *Service) ConnectedSpeakerIDs() []snowflake.ID {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var ids []snowflake.ID
+	for _, id := range s.sortedIDs() {
+		if isConnected(s.poolClients[id]) {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
 // sortedIDs returns pool client IDs sorted by snowflake value.
 // Must be called with mu held (at least read-locked).
 func (s *Service) sortedIDs() []snowflake.ID {

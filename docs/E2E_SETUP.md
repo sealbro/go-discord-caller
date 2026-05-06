@@ -47,6 +47,8 @@ Create or reuse a private server. Do **not** use a production guild.
 
 **Bot invitations** — invite all bots with `bot` + `applications.commands` scope and the following permissions: `View Channels`, `Connect`, `Speak`, `Use Voice Activity`.
 
+For E9 (bot-move reconnect), the owner bot additionally needs **Move Members** permission. Without it, E9 is skipped automatically.
+
 After inviting, run `/setup` or the equivalent commands to bind the owner and speaker channels within the bot's store (this wiring is re-done programmatically in each test, but the bots must be guild members for `SeedExistingSpeakers` to find them).
 
 **Assign the `caller` role** to:
@@ -101,7 +103,8 @@ Each file is a few seconds of speech at 64 kbps Opus. Commit them — they are
 binary but small.
 
 To override the directory, set `E2E_SAMPLES_DIR` to any directory containing
-`*.dca` files. Every file matching the glob will be played in alphabetical order.
+`*.dca` files. Every file matching the glob will be played in alphabetical order,
+round-robin until the test ends.
 
 ---
 
@@ -204,24 +207,39 @@ channels would corrupt each other's state.
 
 ---
 
-## 7. Test coverage map
+## 7. Test file layout
 
-| Test | Mode | What it proves | Extra bots needed |
-|------|------|---------------|-------------------|
-| E1 | `OneCaller` | basic relay: source → speaker | — |
-| E2 | `GuildCaller` | mix-minus routing (A hears B, not itself) | source bot 2 |
-| E3 | `GuildCaller` | pause / resume state machine | — |
-| E4 | `OneCaller` | speaker gateway kill + audio resume | — |
-| E5 | `OneCaller` + guest | inter-guild relay | guest guild |
-| E6 | `OneManyGuildCaller` | star topology (hub hears all) | source bot 2 |
-| E7 | `OneCaller` | `RequestMembers` pre-fetch allows pre-joined source | — |
+Tests are split across four files inside `e2e/`:
 
-Tests that require optional bots or guilds are skipped automatically when the
-corresponding env vars are unset.
+| File | Contains |
+|------|---------|
+| `main_test.go` | `TestMain`, shared `h *Harness` |
+| `host_test.go` | E1–E4, E6, E7 — host-guild audio relay tests |
+| `guest_test.go` | E5 — inter-guild relay |
+| `handlers_test.go` | E8, E9 — Discord event handler reconnect tests |
 
 ---
 
-## 8. Cleanup hygiene
+## 8. Test coverage map
+
+| Test | File | Mode | What it proves | Extra bots / perms needed |
+|------|------|------|---------------|--------------------------|
+| E1 | host | `OneCaller` | basic relay: source → speaker | — |
+| E2 | host | `GuildCaller` | mix-minus routing (A hears B, not itself) | source bot 2 |
+| E3 | host | `GuildCaller` | pause / resume state machine | — |
+| E4 | host | `OneCaller` | stop + restart raid resumes audio (voice reconnect, no gateway kill) | — |
+| E5 | guest | `OneCaller` + guest | inter-guild relay | guest guild |
+| E6 | host | `OneManyGuildCaller` | star topology (hub hears all) | source bot 2 |
+| E7 | host | `OneCaller` | `RequestMembers` pre-fetch allows pre-joined source | — |
+| E8 | handlers | `OneCaller` | `onVoiceLeave` → `ReconnectBotChannel` after voice disconnect | — |
+| E9 | handlers | `OneCaller` | `onVoiceMove` → `OnBotVoiceMove` → `ReconnectBotChannel` after admin move | owner bot: Move Members |
+
+Tests that require optional bots, guilds, or permissions are skipped automatically
+when the corresponding env vars are unset or the REST call fails.
+
+---
+
+## 9. Cleanup hygiene
 
 Each test registers a `t.Cleanup` that:
 

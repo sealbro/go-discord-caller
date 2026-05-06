@@ -12,7 +12,7 @@ import (
 
 // AssertFramesReceived polls until listener has received at least min frames from
 // userID within the given deadline, or calls t.Fatal.
-func AssertFramesReceived(t testing.TB, l *ListenerBot, userID snowflake.ID, min int64, within time.Duration) {
+func AssertFramesReceived(t testing.TB, l *TestListener, userID snowflake.ID, min int64, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
@@ -27,14 +27,14 @@ func AssertFramesReceived(t testing.TB, l *ListenerBot, userID snowflake.ID, min
 
 // AssertSSRCSeen polls until at least one frame from userID is received within
 // the given deadline, or calls t.Fatal.
-func AssertSSRCSeen(t testing.TB, l *ListenerBot, userID snowflake.ID, within time.Duration) {
+func AssertSSRCSeen(t testing.TB, l *TestListener, userID snowflake.ID, within time.Duration) {
 	t.Helper()
 	AssertFramesReceived(t, l, userID, 1, within)
 }
 
 // AssertSSRCNotSeen waits the full window and then asserts that no frames from
 // userID were received. Used to verify mix-minus exclusion.
-func AssertSSRCNotSeen(t testing.TB, l *ListenerBot, userID snowflake.ID, window time.Duration) {
+func AssertSSRCNotSeen(t testing.TB, l *TestListener, userID snowflake.ID, window time.Duration) {
 	t.Helper()
 	time.Sleep(window)
 	n := l.Receiver.FramesReceived(userID)
@@ -45,7 +45,7 @@ func AssertSSRCNotSeen(t testing.TB, l *ListenerBot, userID snowflake.ID, window
 
 // AssertFrameGap asserts that frame delivery from userID stops for at least
 // pauseFor and then resumes within resumeWithin after resume is called.
-func AssertFrameGap(t testing.TB, l *ListenerBot, userID snowflake.ID, pauseFor, resumeWithin time.Duration, resume func()) {
+func AssertFrameGap(t testing.TB, l *TestListener, userID snowflake.ID, pauseFor, resumeWithin time.Duration, resume func()) {
 	t.Helper()
 
 	// Capture baseline.
@@ -77,7 +77,7 @@ func AssertFrameGap(t testing.TB, l *ListenerBot, userID snowflake.ID, pauseFor,
 
 // AssertP99FirstFrameLatency asserts that the first-frame latency observed by
 // listener for userID is within maxLatency of the provided startTime.
-func AssertP99FirstFrameLatency(t testing.TB, l *ListenerBot, userID snowflake.ID, startTime time.Time, maxLatency time.Duration) {
+func AssertP99FirstFrameLatency(t testing.TB, l *TestListener, userID snowflake.ID, startTime time.Time, maxLatency time.Duration) {
 	t.Helper()
 	ts, ok := l.Receiver.FirstFrameAt(userID)
 	if !ok {

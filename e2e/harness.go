@@ -11,6 +11,7 @@ import (
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
@@ -31,9 +32,9 @@ type Harness struct {
 	Owner    *bot.Client
 	OwnerID  snowflake.ID
 	Pool     *pool.Service
-	Source   *SourceBot
-	Source2  *SourceBot // nil when E2E_SOURCE_BOT_TOKEN_2 is unset
-	Listener *ListenerBot
+	Speaker  *TestSpeaker
+	Speaker2 *TestSpeaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
+	Listener *TestListener
 }
 
 func newHarness(ctx context.Context, cfg *e2eConfig) (*Harness, error) {
@@ -61,19 +62,19 @@ func newHarness(ctx context.Context, cfg *e2eConfig) (*Harness, error) {
 	poolCancel()
 
 	// Harness bots.
-	h.Source, err = newSourceBot(ctx, cfg.SourceToken)
+	h.Speaker, err = newTestSpeaker(ctx, cfg.SourceToken)
 	if err != nil {
-		return nil, fmt.Errorf("build source bot: %w", err)
+		return nil, fmt.Errorf("build test speaker: %w", err)
 	}
 	if cfg.SourceToken2 != "" {
-		h.Source2, err = newSourceBot(ctx, cfg.SourceToken2)
+		h.Speaker2, err = newTestSpeaker(ctx, cfg.SourceToken2)
 		if err != nil {
-			return nil, fmt.Errorf("build source bot 2: %w", err)
+			return nil, fmt.Errorf("build test speaker 2: %w", err)
 		}
 	}
-	h.Listener, err = newListenerBot(ctx, cfg.ListenerToken)
+	h.Listener, err = newTestListener(ctx, cfg.ListenerToken)
 	if err != nil {
-		return nil, fmt.Errorf("build listener bot: %w", err)
+		return nil, fmt.Errorf("build test listener: %w", err)
 	}
 
 	return h, nil
@@ -95,7 +96,7 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	st.BindChannel(guildID, h.OwnerID, ownerChannelID)
 	st.BindRole(guildID, store.RoleTypeCaller, h.cfg.CallerRoleID)
 
-	speakerIDs := h.Pool.GetIDs()
+	speakerIDs := h.Pool.ConnectedSpeakerIDs()
 	for i, chID := range speakerChannelIDs {
 		if i >= len(speakerIDs) {
 			break
@@ -107,14 +108,37 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	return svc, st
 }
 
+// DisconnectSpeakerVoice drops the speaker bot's voice connection in the guild
+// by sending OP4 with channel_id=null, triggering VOICE_STATE_UPDATE on Discord
+// so the owner bot's onVoiceLeave handler fires and calls ReconnectBotChannel.
+func (h *Harness) DisconnectSpeakerVoice(ctx context.Context, guildID, speakerID snowflake.ID) {
+	client, ok := h.Pool.GetClientByID(speakerID)
+	if !ok {
+		return
+	}
+	pool.NewGuildVoice(client.VoiceManager, 0).Leave(ctx, guildID)
+}
+
+// MoveSpeakerVoice uses the owner bot's REST API to move a speaker bot into
+// targetChannelID, simulating an admin dragging the bot to a different channel.
+// This triggers a GuildVoiceMove event on the owner bot → onVoiceMove handler →
+// OnBotVoiceMove → ReconnectBotChannel. Returns an error if the REST call fails
+// (e.g. owner bot lacks Move Members permission).
+func (h *Harness) MoveSpeakerVoice(ctx context.Context, guildID, speakerID, targetChannelID snowflake.ID) error {
+	_, err := h.Owner.Rest.UpdateMember(guildID, speakerID, discord.MemberUpdate{
+		ChannelID: &targetChannelID,
+	})
+	return err
+}
+
 // Shutdown closes all bot connections. Call once after all tests complete.
 func (h *Harness) Shutdown(ctx context.Context) {
 	h.Pool.Shutdown(ctx)
-	if h.Source != nil {
-		h.Source.Close(ctx)
+	if h.Speaker != nil {
+		h.Speaker.Close(ctx)
 	}
-	if h.Source2 != nil {
-		h.Source2.Close(ctx)
+	if h.Speaker2 != nil {
+		h.Speaker2.Close(ctx)
 	}
 	if h.Listener != nil {
 		h.Listener.Close(ctx)

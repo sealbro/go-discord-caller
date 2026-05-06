@@ -89,14 +89,14 @@ func (r *CountingReceiver) Reset() {
 	})
 }
 
-// ListenerBot joins a voice channel and counts Opus frames per source userID.
-type ListenerBot struct {
+// TestListener joins a voice channel and counts incoming Opus frames per source userID.
+type TestListener struct {
 	client   *bot.Client
 	id       snowflake.ID
 	Receiver *CountingReceiver
 }
 
-func newListenerBot(ctx context.Context, token string) (*ListenerBot, error) {
+func newTestListener(ctx context.Context, token string) (*TestListener, error) {
 	client, err := disgo.New(token,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
@@ -113,7 +113,7 @@ func newListenerBot(ctx context.Context, token string) (*ListenerBot, error) {
 		return nil, fmt.Errorf("open listener bot gateway: %w", err)
 	}
 	self, _ := client.Caches.SelfUser()
-	return &ListenerBot{
+	return &TestListener{
 		client:   client,
 		id:       self.ID,
 		Receiver: newCountingReceiver(),
@@ -123,7 +123,7 @@ func newListenerBot(ctx context.Context, token string) (*ListenerBot, error) {
 // StartListening joins channelID in guildID and begins collecting frames.
 // Returns a cleanup func that stops listening and leaves the channel.
 // Resets the frame counters before joining so each test starts clean.
-func (l *ListenerBot) StartListening(ctx context.Context, guildID, channelID snowflake.ID) (func(), error) {
+func (l *TestListener) StartListening(ctx context.Context, guildID, channelID snowflake.ID) (func(), error) {
 	// Fresh receiver per listening session so prior frames don't bleed in.
 	l.Receiver = newCountingReceiver()
 
@@ -159,6 +159,6 @@ func (l *ListenerBot) StartListening(ctx context.Context, guildID, channelID sno
 }
 
 // Close shuts down the listener bot's gateway connection.
-func (l *ListenerBot) Close(ctx context.Context) {
+func (l *TestListener) Close(ctx context.Context) {
 	l.client.Close(ctx)
 }

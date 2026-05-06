@@ -19,14 +19,14 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
-// SourceBot joins a voice channel and streams a DCA file as an audio source.
-// It stands in for a human speaker during E2E tests.
-type SourceBot struct {
+// TestSpeaker joins a voice channel and streams DCA audio round-robin.
+// It stands in for a human caller during E2E tests.
+type TestSpeaker struct {
 	client *bot.Client
 	id     snowflake.ID
 }
 
-func newSourceBot(ctx context.Context, token string) (*SourceBot, error) {
+func newTestSpeaker(ctx context.Context, token string) (*TestSpeaker, error) {
 	client, err := disgo.New(token,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
@@ -43,18 +43,18 @@ func newSourceBot(ctx context.Context, token string) (*SourceBot, error) {
 		return nil, fmt.Errorf("open source bot gateway: %w", err)
 	}
 	self, _ := client.Caches.SelfUser()
-	return &SourceBot{client: client, id: self.ID}, nil
+	return &TestSpeaker{client: client, id: self.ID}, nil
 }
 
 // StartPlaying joins channelID in guildID and begins streaming .dca files from
 // samplesDir in round-robin order. Returns a cleanup func that stops playback
 // and leaves the channel. The cleanup func is safe to call more than once.
-func (s *SourceBot) StartPlaying(ctx context.Context, guildID, channelID snowflake.ID, samplesDir string) (func(), error) {
+func (s *TestSpeaker) StartPlaying(ctx context.Context, guildID, channelID snowflake.ID, samplesDir string) (func(), error) {
 	paths, err := filepath.Glob(filepath.Join(samplesDir, "*.dca"))
 	if err != nil || len(paths) == 0 {
 		return nil, fmt.Errorf("no .dca files found in %q", samplesDir)
 	}
-	provider, err := opus.NewRoundRobinFileVoiceProvider(paths)
+	provider, err := NewRoundRobinFileVoiceProvider(paths)
 	if err != nil {
 		return nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
 	}
@@ -99,6 +99,6 @@ func (s *SourceBot) StartPlaying(ctx context.Context, guildID, channelID snowfla
 }
 
 // Close shuts down the source bot's gateway connection.
-func (s *SourceBot) Close(ctx context.Context) {
+func (s *TestSpeaker) Close(ctx context.Context) {
 	s.client.Close(ctx)
 }

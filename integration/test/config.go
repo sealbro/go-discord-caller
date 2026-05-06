@@ -5,27 +5,24 @@ package test
 import (
 	"fmt"
 	"os"
-	"regexp"
-	"sort"
-	"strconv"
-	"strings"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/joho/godotenv"
+	"github.com/sealbro/go-discord-caller/internal/config"
 )
 
+// Config extends the production config with integration-test-specific fields.
 type Config struct {
-	OwnerToken        string
-	SpeakerTokens     []string
-	SourceToken       string
-	SourceToken2      string // optional; enables E2/E6
-	ListenerToken     string
-	GuildID           snowflake.ID
-	GuestGuildID      snowflake.ID // optional; enables E5
-	OwnerChannelID    snowflake.ID
-	Speaker1ChannelID snowflake.ID
-	Speaker2ChannelID snowflake.ID // optional; enables E2/E6
-	CallerRoleID      snowflake.ID
+	config.Config                  // OwnerBotToken, SpeakerTokens (loaded via config.Load)
+	SourceToken       string       // E2E_SOURCE_BOT_TOKEN — bot that plays audio as the caller
+	SourceToken2      string       // E2E_SOURCE_BOT_TOKEN_2 — optional; enables E2/E6
+	ListenerToken     string       // E2E_LISTENER_BOT_TOKEN — bot that counts received frames
+	GuildID           snowflake.ID // E2E_TEST_GUILD_ID
+	GuestGuildID      snowflake.ID // E2E_GUEST_GUILD_ID — optional; enables E5
+	OwnerChannelID    snowflake.ID // E2E_OWNER_CHANNEL_ID
+	Speaker1ChannelID snowflake.ID // E2E_SPEAKER_CHANNEL_ID
+	Speaker2ChannelID snowflake.ID // E2E_SPEAKER2_CHANNEL_ID — optional; enables E2/E6
+	CallerRoleID      snowflake.ID // E2E_CALLER_ROLE_ID
 	// Guest guild channels (required only when GuestGuildID is set)
 	GuestOwnerChannelID   snowflake.ID
 	GuestSpeakerChannelID snowflake.ID
@@ -33,18 +30,20 @@ type Config struct {
 	SamplesDir string
 }
 
+// LoadConfig loads the integration-test configuration.
+// Common fields (owner token, speaker pool) are loaded via config.Load so the
+// speaker-token scan logic is not duplicated. Integration-specific fields are
+// read from additional env vars prefixed with E2E_.
 func LoadConfig() (*Config, error) {
 	// go test sets cwd to the package directory (integration/); .env.integration lives at the repo root.
 	_ = godotenv.Load("../.env.integration")
 
-	cfg := &Config{}
-	var err error
-
-	cfg.OwnerToken = os.Getenv("DISCORD_OWNER_BOT_TOKEN")
-	if cfg.OwnerToken == "" {
-		return nil, fmt.Errorf("DISCORD_OWNER_BOT_TOKEN is required")
+	appCfg, err := config.Load()
+	if err != nil {
+		return nil, err
 	}
-	cfg.SpeakerTokens = loadSpeakerTokens()
+
+	cfg := &Config{Config: *appCfg}
 
 	cfg.SourceToken = os.Getenv("E2E_SOURCE_BOT_TOKEN")
 	if cfg.SourceToken == "" {
@@ -80,38 +79,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	return cfg, nil
-}
-
-var speakerTokenPattern = regexp.MustCompile(`^DISCORD_SPEAKER_BOT_TOKEN_(\d+)$`)
-
-func loadSpeakerTokens() []string {
-	type entry struct {
-		idx   int
-		token string
-	}
-	var all []entry
-	for _, env := range os.Environ() {
-		eq := strings.IndexByte(env, '=')
-		if eq < 0 {
-			continue
-		}
-		k, v := env[:eq], env[eq+1:]
-		if v == "" {
-			continue
-		}
-		m := speakerTokenPattern.FindStringSubmatch(k)
-		if m == nil {
-			continue
-		}
-		idx, _ := strconv.Atoi(m[1])
-		all = append(all, entry{idx, v})
-	}
-	sort.Slice(all, func(i, j int) bool { return all[i].idx < all[j].idx })
-	out := make([]string, len(all))
-	for i, e := range all {
-		out[i] = e.token
-	}
-	return out
 }
 
 func requireSnowflake(env string) (snowflake.ID, error) {

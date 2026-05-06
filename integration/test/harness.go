@@ -45,14 +45,14 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
 	var err error
-	h.Owner, err = newOwnerClient(cfg.OwnerToken)
+	h.Owner, err = newOwnerClient(cfg.OwnerBotToken)
 	if err != nil {
 		return nil, fmt.Errorf("build owner client: %w", err)
 	}
 	if err := h.Owner.OpenGateway(ctx); err != nil {
 		return nil, fmt.Errorf("open owner gateway: %w", err)
 	}
-	h.OwnerID, _ = guild.BotUserID(cfg.OwnerToken)
+	h.OwnerID, _ = guild.BotUserID(cfg.OwnerBotToken)
 
 	// Speaker pool.
 	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))

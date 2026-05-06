@@ -1,4 +1,4 @@
-package integration
+package test
 
 import (
 	"encoding/binary"
@@ -12,71 +12,6 @@ import (
 
 	"github.com/disgoorg/disgo/voice"
 )
-
-// FileVoiceProvider streams Opus frames from a .dca file, looping infinitely.
-// DCA format: optional "DCA1" magic + int32-LE JSON length + JSON metadata,
-// then repeated frames: int16-LE frame size + raw Opus bytes.
-type FileVoiceProvider struct {
-	voice.OpusFrameProvider
-	path      string
-	file      *os.File
-	frameBase int64 // byte offset where frames begin (after header)
-	done      chan struct{}
-}
-
-func NewFileVoiceProvider(path string) (*FileVoiceProvider, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open dca file: %w", err)
-	}
-
-	frameBase, err := skipDCAHeader(f)
-	if err != nil {
-		_ = f.Close()
-		return nil, fmt.Errorf("parse dca header: %w", err)
-	}
-
-	return &FileVoiceProvider{
-		path:      path,
-		file:      f,
-		frameBase: frameBase,
-		done:      make(chan struct{}),
-	}, nil
-}
-
-func (v *FileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
-	select {
-	case <-v.done:
-		return nil, fmt.Errorf("file voice provider is closed")
-	default:
-	}
-
-	for {
-		frame, err := readDCAFrame(v.file)
-		if err == nil {
-			return frame, nil
-		}
-
-		if err != io.EOF && !errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, fmt.Errorf("read dca frame: %w", err)
-		}
-
-		// Loop: seek back to the first frame.
-		slog.Debug("dca file looping", slog.String("path", v.path))
-		if _, seekErr := v.file.Seek(v.frameBase, io.SeekStart); seekErr != nil {
-			return nil, fmt.Errorf("seek dca file: %w", seekErr)
-		}
-	}
-}
-
-func (v *FileVoiceProvider) Close() {
-	select {
-	case <-v.done:
-	default:
-		close(v.done)
-		_ = v.file.Close()
-	}
-}
 
 // dcaEntry holds an open .dca file with its frame start offset.
 type dcaEntry struct {

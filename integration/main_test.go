@@ -8,13 +8,15 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/sealbro/go-discord-caller/integration/test"
 )
 
 // h is shared across all tests; created once in TestMain.
-var h *Harness
+var h *test.Harness
 
 func TestMain(m *testing.M) {
-	cfg, err := loadConfig()
+	cfg, err := test.LoadConfig()
 	if err != nil {
 		log.Fatalf("integration config: %v", err)
 	}
@@ -22,7 +24,7 @@ func TestMain(m *testing.M) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	h, err = newHarness(ctx, cfg)
+	h, err = test.NewHarness(ctx, cfg)
 	if err != nil {
 		log.Fatalf("integration harness: %v", err)
 	}

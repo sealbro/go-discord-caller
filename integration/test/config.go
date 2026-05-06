@@ -1,6 +1,6 @@
 //go:build integration
 
-package integration
+package test
 
 import (
 	"fmt"
@@ -14,7 +14,7 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type integrationConfig struct {
+type Config struct {
 	OwnerToken        string
 	SpeakerTokens     []string
 	SourceToken       string
@@ -33,11 +33,11 @@ type integrationConfig struct {
 	SamplesDir string
 }
 
-func loadConfig() (*integrationConfig, error) {
+func LoadConfig() (*Config, error) {
 	// go test sets cwd to the package directory (integration/); .env.integration lives at the repo root.
 	_ = godotenv.Load("../.env.integration")
 
-	cfg := &integrationConfig{}
+	cfg := &Config{}
 	var err error
 
 	cfg.OwnerToken = os.Getenv("DISCORD_OWNER_BOT_TOKEN")

@@ -5,17 +5,12 @@ package test
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"testing"
 	"time"
 
-	"github.com/disgoorg/disgo"
 	disgobot "github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
-	"github.com/disgoorg/disgo/voice"
-	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	internalbot "github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
@@ -45,7 +40,13 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
 	var err error
-	h.Owner, err = newOwnerClient(cfg.OwnerBotToken)
+	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken,
+		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
+			gateway.IntentGuilds,
+			gateway.IntentGuildMembers,
+			gateway.IntentGuildVoiceStates,
+		)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build owner client: %w", err)
 	}
@@ -214,26 +215,4 @@ func (h *Harness) Shutdown(ctx context.Context) {
 		h.Listener.Close(ctx)
 	}
 	h.Owner.Close(ctx)
-}
-
-// newOwnerClient builds a disgo client matching production settings but without
-// slash-command event listeners. Full intents + DAVE + FlagsAll cache.
-// Event listeners are registered per-test via newManagerForGuild.
-func newOwnerClient(token string) (*disgobot.Client, error) {
-	return disgo.New(token,
-		disgobot.WithGatewayConfigOpts(
-			gateway.WithIntents(
-				gateway.IntentGuilds,
-				gateway.IntentGuildMembers,
-				gateway.IntentGuildVoiceStates,
-			),
-		),
-		disgobot.WithCacheConfigOpts(
-			cache.WithCaches(cache.FlagsAll),
-		),
-		disgobot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			voice.WithLogger(slog.New(slog.DiscardHandler)),
-		),
-	)
 }

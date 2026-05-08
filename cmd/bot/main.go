@@ -9,7 +9,9 @@ import (
 
 	"github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
+	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel"
 )
 
 func main() {
@@ -27,7 +29,12 @@ func main() {
 	}
 	defer shutdownTelemetry()
 
-	b, err := bot.New(cfg)
+	st, err := store.NewYAMLStore(cfg.StorePath)
+	if err != nil {
+		log.Fatalf("failed to open store %q: %v", cfg.StorePath, err)
+	}
+
+	b, err := bot.New(cfg, st, otel.Meter(telemetry.ServiceName))
 	if err != nil {
 		log.Fatalf("failed to create bot: %v", err)
 	}

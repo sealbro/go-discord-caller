@@ -82,6 +82,8 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 | `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
 | `/status`                      | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
 
+> **Warning:** In `one-caller` and `one-many` modes only **one user with the capture role** should be speaking in the owner channel at a time. If multiple users with the capture role are active simultaneously the mixed output may sound robotic or corrupted. Use `mode:many` for multi-speaker scenarios.
+
 ## Inter-guild relay
 
 Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown in `/status`.

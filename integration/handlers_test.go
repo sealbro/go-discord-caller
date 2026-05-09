@@ -20,34 +20,15 @@ func TestE8_BotReconnectAfterVoiceLeave(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	stopSource, err := h.Speaker.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker.StartPlaying: %v", err)
-	}
+	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	mgr, _ := h.NewManager(h.cfg.Speaker1ChannelID)
 	_, sessionCancel := context.WithCancel(ctx)
-	_, err = mgr.StartVoiceRaid(ctx, h.cfg.GuildID, sessionCancel, guild.RaidModeOneCaller)
-	if err != nil {
-		t.Fatalf("StartVoiceRaid: %v", err)
-	}
+	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
+	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
-	stopListener, err := h.Listener.StartListening(ctx, h.cfg.GuildID, h.cfg.Speaker1ChannelID)
-	if err != nil {
-		t.Fatalf("listener.StartListening: %v", err)
-	}
-
-	speakerIDs := h.Pool.ConnectedSpeakerIDs()
-	if len(speakerIDs) == 0 {
-		t.Skip("no speakers in pool")
-	}
-
-	t.Cleanup(func() {
-		stopSource()
-		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.cfg.GuildID)
-	})
+	speakerIDs := h.RequireSpeakers(t)
+	h.RegisterCleanup(t, mgr, stopSource, stopListener)
 
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
 
@@ -58,20 +39,12 @@ func TestE8_BotReconnectAfterVoiceLeave(t *testing.T) {
 		t.Skip("speaker not connected")
 	}
 	leaveCtx, leaveCancel := context.WithTimeout(ctx, 5*time.Second)
-	h.DisconnectSpeakerVoice(leaveCtx, h.cfg.GuildID, speakerIDs[0])
+	h.DisconnectSpeakerVoice(leaveCtx, h.Cfg.GuildID, speakerIDs[0])
 	leaveCancel()
 	t.Log("E8: speaker voice connection dropped, waiting for ReconnectBotChannel...")
 
-	baseAfterDrop := h.Listener.Receiver.FramesReceived(speakerIDs[0])
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if h.Listener.Receiver.FramesReceived(speakerIDs[0]) > baseAfterDrop+50 {
-			t.Log("E8 passed: speaker reconnected and frames resumed after voice disconnect")
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatal("E8 failed: frames did not resume within 20 s after speaker voice disconnect")
+	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 50, 20*time.Second)
+	t.Log("E8 passed: speaker reconnected and frames resumed after voice disconnect")
 }
 
 // TestE9_BotReconnectAfterVoiceMove verifies that when a speaker bot is moved to
@@ -84,34 +57,15 @@ func TestE9_BotReconnectAfterVoiceMove(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	stopSource, err := h.Speaker.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker.StartPlaying: %v", err)
-	}
+	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	mgr, _ := h.NewManager(h.cfg.Speaker1ChannelID)
 	_, sessionCancel := context.WithCancel(ctx)
-	_, err = mgr.StartVoiceRaid(ctx, h.cfg.GuildID, sessionCancel, guild.RaidModeOneCaller)
-	if err != nil {
-		t.Fatalf("StartVoiceRaid: %v", err)
-	}
+	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
+	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
-	stopListener, err := h.Listener.StartListening(ctx, h.cfg.GuildID, h.cfg.Speaker1ChannelID)
-	if err != nil {
-		t.Fatalf("listener.StartListening: %v", err)
-	}
-
-	speakerIDs := h.Pool.ConnectedSpeakerIDs()
-	if len(speakerIDs) == 0 {
-		t.Skip("no speakers in pool")
-	}
-
-	t.Cleanup(func() {
-		stopSource()
-		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.cfg.GuildID)
-	})
+	speakerIDs := h.RequireSpeakers(t)
+	h.RegisterCleanup(t, mgr, stopSource, stopListener)
 
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
 
@@ -119,23 +73,15 @@ func TestE9_BotReconnectAfterVoiceMove(t *testing.T) {
 	// displacing it from its bound Speaker1ChannelID. This fires GuildVoiceMove on
 	// the owner bot → onVoiceMove → OnBotVoiceMove → ReconnectBotChannel.
 	moveCtx, moveCancel := context.WithTimeout(ctx, 5*time.Second)
-	if err := h.MoveSpeakerVoice(moveCtx, h.cfg.GuildID, speakerIDs[0], h.cfg.OwnerChannelID); err != nil {
+	if err := h.MoveSpeakerVoice(moveCtx, h.Cfg.GuildID, speakerIDs[0], h.Cfg.OwnerChannelID); err != nil {
 		moveCancel()
 		t.Skipf("E9: move member failed (owner bot may lack Move Members permission): %v", err)
 	}
 	moveCancel()
 	t.Log("E9: speaker moved to owner channel, waiting for ReconnectBotChannel...")
 
-	baseAfterMove := h.Listener.Receiver.FramesReceived(speakerIDs[0])
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		if h.Listener.Receiver.FramesReceived(speakerIDs[0]) > baseAfterMove+50 {
-			t.Log("E9 passed: speaker reconnected and frames resumed after voice move")
-			return
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	t.Fatal("E9 failed: frames did not resume within 20 s after speaker was moved to wrong channel")
+	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 50, 20*time.Second)
+	t.Log("E9 passed: speaker reconnected and frames resumed after voice move")
 }
 
 // TestE10_CallerJoinAfterRaidStart verifies the onVoiceJoin live-join path:
@@ -148,34 +94,16 @@ func TestE10_CallerJoinAfterRaidStart(t *testing.T) {
 	defer cancel()
 
 	// Start the raid with an empty owner channel — no RequestMembers prefetch occurs.
-	mgr, _ := h.NewManager(h.cfg.Speaker1ChannelID)
-	_, err := mgr.StartVoiceRaid(ctx, h.cfg.GuildID, cancel, guild.RaidModeOneCaller)
-	if err != nil {
-		t.Fatalf("StartVoiceRaid: %v", err)
-	}
+	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
+	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
-	stopListener, err := h.Listener.StartListening(ctx, h.cfg.GuildID, h.cfg.Speaker1ChannelID)
-	if err != nil {
-		t.Fatalf("listener.StartListening: %v", err)
-	}
-
-	speakerIDs := h.Pool.ConnectedSpeakerIDs()
-	if len(speakerIDs) == 0 {
-		t.Skip("no speakers in pool")
-	}
+	speakerIDs := h.RequireSpeakers(t)
 
 	// Caller joins AFTER the raid is running. onVoiceJoin fires on the owner bot
 	// → NotifyMemberUpdate updates the AllowFilter → audio is relayed.
-	stopSource, err := h.Speaker.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker.StartPlaying: %v", err)
-	}
+	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 
-	t.Cleanup(func() {
-		stopSource()
-		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.cfg.GuildID)
-	})
+	h.RegisterCleanup(t, mgr, stopSource, stopListener)
 
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 100, 15*time.Second)
 	t.Log("E10 passed: caller joined after raid start → captured via onVoiceJoin handler")
@@ -190,33 +118,20 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 	defer cancel()
 
 	// Source joins before raid so it is captured from the start.
-	stopSource, err := h.Speaker.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker.StartPlaying: %v", err)
-	}
+	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	mgr, _ := h.NewManager(h.cfg.Speaker1ChannelID)
 	_, sessionCancel := context.WithCancel(ctx)
-	_, err = mgr.StartVoiceRaid(ctx, h.cfg.GuildID, sessionCancel, guild.RaidModeOneCaller)
-	if err != nil {
-		t.Fatalf("StartVoiceRaid: %v", err)
-	}
+	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
+	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
-	stopListener, err := h.Listener.StartListening(ctx, h.cfg.GuildID, h.cfg.Speaker1ChannelID)
-	if err != nil {
-		t.Fatalf("listener.StartListening: %v", err)
-	}
+	speakerIDs := h.RequireSpeakers(t)
 
-	speakerIDs := h.Pool.ConnectedSpeakerIDs()
-	if len(speakerIDs) == 0 {
-		t.Skip("no speakers in pool")
-	}
-
+	// stopSource is reassigned below, so use inline cleanup to capture by reference.
 	t.Cleanup(func() {
 		stopSource()
 		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.cfg.GuildID)
+		_ = mgr.StopVoiceRaid(context.Background(), h.Cfg.GuildID)
 	})
 
 	// Establish steady-state audio.
@@ -231,7 +146,7 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 
 	AssertFrameGap(t, h.Listener, speakerIDs[0], 2*time.Second, 10*time.Second, func() {
 		var err error
-		stopSource, err = h.Speaker.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
+		stopSource, err = h.Speaker.StartPlaying(ctx, h.Cfg.GuildID, h.Cfg.OwnerChannelID, h.Cfg.SamplesDir)
 		if err != nil {
 			t.Errorf("speaker rejoin: %v", err)
 		}
@@ -247,44 +162,21 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 // The test restores the caller role in cleanup so it does not affect other tests.
 func TestE12_AllowFilterUpdatedOnRoleRevoke(t *testing.T) {
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need second speaker to verify filter")
-	skipIfMissing(t, h.cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
+	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
 	// Both sources join before the raid.
-	stopSource1, err := h.Speaker.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker1.StartPlaying: %v", err)
-	}
-	stopSource2, err := h.Speaker2.StartPlaying(ctx, h.cfg.GuildID, h.cfg.OwnerChannelID, h.cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker2.StartPlaying: %v", err)
-	}
+	stopSource1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
+	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	mgr, _ := h.NewManager(h.cfg.Speaker1ChannelID, h.cfg.Speaker2ChannelID)
-	_, err = mgr.StartVoiceRaid(ctx, h.cfg.GuildID, cancel, guild.RaidModeGuildCaller)
-	if err != nil {
-		t.Fatalf("StartVoiceRaid: %v", err)
-	}
+	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID, h.Cfg.Speaker2ChannelID)
+	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
-	stopListener, err := h.Listener.StartListening(ctx, h.cfg.GuildID, h.cfg.Speaker1ChannelID)
-	if err != nil {
-		t.Fatalf("listener.StartListening: %v", err)
-	}
-
-	speakerIDs := h.Pool.ConnectedSpeakerIDs()
-	if len(speakerIDs) == 0 {
-		t.Skip("no speakers in pool")
-	}
-
-	t.Cleanup(func() {
-		stopSource1()
-		stopSource2()
-		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.cfg.GuildID)
-	})
+	speakerIDs := h.RequireSpeakers(t)
+	h.RegisterCleanup(t, mgr, stopSource1, stopSource2, stopListener)
 
 	// Establish baseline — speaker1 relays cross-channel audio.
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
@@ -292,18 +184,18 @@ func TestE12_AllowFilterUpdatedOnRoleRevoke(t *testing.T) {
 	// Fetch speaker2 source bot's current member to get its full role list.
 	// Uses the listener bot (test-admin) so the owner bot needs no extra permissions.
 	sourceID := h.Speaker2.ID()
-	member, err := h.Listener.GetMember(h.cfg.GuildID, sourceID)
+	member, err := h.Listener.GetMember(h.Cfg.GuildID, sourceID)
 	if err != nil {
 		t.Skipf("E12: GetMember failed (listener bot may lack permission): %v", err)
 	}
 
 	// Remove the caller role from speaker2 source. Restore in cleanup regardless.
-	rolesWithout := filterIDs(member.RoleIDs, h.cfg.CallerRoleID)
+	rolesWithout := filterIDs(member.RoleIDs, h.Cfg.CallerRoleID)
 	t.Cleanup(func() {
-		_, _ = h.Listener.UpdateMember(h.cfg.GuildID, sourceID,
+		_, _ = h.Listener.UpdateMember(h.Cfg.GuildID, sourceID,
 			discord.MemberUpdate{Roles: &member.RoleIDs})
 	})
-	if _, err := h.Listener.UpdateMember(h.cfg.GuildID, sourceID,
+	if _, err := h.Listener.UpdateMember(h.Cfg.GuildID, sourceID,
 		discord.MemberUpdate{Roles: &rolesWithout}); err != nil {
 		t.Skipf("E12: UpdateMember failed (listener bot may lack Manage Roles permission): %v", err)
 	}

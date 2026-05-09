@@ -226,19 +226,19 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		v.scratch = make([]int16, MixerPCMBuf)
 	}
 
-	// One shared pooled copy of the Opus bytes referenced by every target.
-	// VoiceProvider eventually returns it via PutEncodedFrame. (Multi-target
-	// PutEncodedFrame double-recycle is a pre-existing edge case in the
-	// passthrough path — not introduced here.)
-	sharedOpus := getRecvFrame(len(opusBytes))
-	copy(sharedOpus, opusBytes)
-
+	// Each OpusTarget (VoiceProvider) independently returns its buffer via
+	// PutEncodedFrame after the UDP send completes. Sharing one buffer across
+	// multiple targets would cause double-returns to the pool and data races.
 	for _, out := range state.opusTargets {
+		buf := getRecvFrame(len(opusBytes))
+		copy(buf, opusBytes)
 		select {
-		case out <- sharedOpus:
+		case out <- buf:
 		case <-v.done:
+			PutEncodedFrame(buf)
 			return
 		default:
+			PutEncodedFrame(buf)
 			if state.dropOpus != nil {
 				state.dropOpus()
 			}
@@ -255,16 +255,23 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		return
 	}
 	now := time.Now()
+	// Each frameTarget gets its own Opus buffer so that when multiple mixers
+	// do single-source passthrough, each VoiceProvider safely returns its own
+	// copy via PutEncodedFrame without double-returning the same buffer.
 	for _, t := range state.frameTargets {
 		pcm := GetPCM()[:n*MixerChannels]
 		copy(pcm, v.scratch[:n*MixerChannels])
+		opus := getRecvFrame(len(opusBytes))
+		copy(opus, opusBytes)
 		select {
-		case t <- Frame{PCM: pcm, Opus: sharedOpus, CreatedAt: now}:
+		case t <- Frame{PCM: pcm, Opus: opus, CreatedAt: now}:
 		case <-v.done:
 			PutPCM(pcm)
+			PutEncodedFrame(opus)
 			return
 		default:
 			PutPCM(pcm)
+			PutEncodedFrame(opus)
 			if state.dropFrame != nil {
 				state.dropFrame()
 			}

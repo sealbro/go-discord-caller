@@ -1,6 +1,6 @@
 //go:build integration
 
-package integration
+package test
 
 import (
 	"context"
@@ -31,7 +31,7 @@ type CountingReceiver struct {
 	once       sync.Once
 }
 
-func newCountingReceiver() *CountingReceiver {
+func NewCountingReceiver() *CountingReceiver {
 	return &CountingReceiver{done: make(chan struct{})}
 }
 
@@ -90,14 +90,14 @@ func (r *CountingReceiver) Reset() {
 	})
 }
 
-// TestListener joins a voice channel and counts incoming Opus frames per source userID.
-type TestListener struct {
+// Listener joins a voice channel and counts incoming Opus frames per source userID.
+type Listener struct {
 	client   *bot.Client
 	id       snowflake.ID
 	Receiver *CountingReceiver
 }
 
-func newTestListener(ctx context.Context, token string) (*TestListener, error) {
+func newTestListener(ctx context.Context, token string) (*Listener, error) {
 	client, err := disgo.New(token,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
@@ -114,19 +114,19 @@ func newTestListener(ctx context.Context, token string) (*TestListener, error) {
 		return nil, fmt.Errorf("open listener bot gateway: %w", err)
 	}
 	self, _ := client.Caches.SelfUser()
-	return &TestListener{
+	return &Listener{
 		client:   client,
 		id:       self.ID,
-		Receiver: newCountingReceiver(),
+		Receiver: NewCountingReceiver(),
 	}, nil
 }
 
 // StartListening joins channelID in guildID and begins collecting frames.
 // Returns a cleanup func that stops listening and leaves the channel.
 // Resets the frame counters before joining so each test starts clean.
-func (l *TestListener) StartListening(ctx context.Context, guildID, channelID snowflake.ID) (func(), error) {
+func (l *Listener) StartListening(ctx context.Context, guildID, channelID snowflake.ID) (func(), error) {
 	// Fresh receiver per listening session so prior frames don't bleed in.
-	l.Receiver = newCountingReceiver()
+	l.Receiver = NewCountingReceiver()
 
 	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID)
 	conn, err := gv.Join(ctx, guildID)
@@ -163,17 +163,28 @@ func (l *TestListener) StartListening(ctx context.Context, guildID, channelID sn
 // The listener bot is the designated test-admin bot (Administrator role in the
 // test guild) so privileged setup calls go through it, keeping the owner bot at
 // production-identical permissions.
-func (l *TestListener) GetMember(guildID, userID snowflake.ID) (*discord.Member, error) {
+func (l *Listener) GetMember(guildID, userID snowflake.ID) (*discord.Member, error) {
 	return l.client.Rest.GetMember(guildID, userID)
 }
 
 // UpdateMember modifies a guild member via the listener bot's REST client.
 // See GetMember for why this goes through the listener bot.
-func (l *TestListener) UpdateMember(guildID, userID snowflake.ID, update discord.MemberUpdate) (*discord.Member, error) {
+func (l *Listener) UpdateMember(guildID, userID snowflake.ID, update discord.MemberUpdate) (*discord.Member, error) {
 	return l.client.Rest.UpdateMember(guildID, userID, update)
 }
 
+// AddMemberRole grants roleID to userID in guildID via the listener bot's REST
+// client. The listener bot must hold Administrator (or Manage Roles) in the guild.
+func (l *Listener) AddMemberRole(guildID, userID, roleID snowflake.ID) error {
+	return l.client.Rest.AddMemberRole(guildID, userID, roleID)
+}
+
+// RemoveMemberRole revokes roleID from userID in guildID via the listener bot.
+func (l *Listener) RemoveMemberRole(guildID, userID, roleID snowflake.ID) error {
+	return l.client.Rest.RemoveMemberRole(guildID, userID, roleID)
+}
+
 // Close shuts down the listener bot's gateway connection.
-func (l *TestListener) Close(ctx context.Context) {
+func (l *Listener) Close(ctx context.Context) {
 	l.client.Close(ctx)
 }

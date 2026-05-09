@@ -1,20 +1,16 @@
 //go:build integration
 
-package integration
+package test
 
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"testing"
 	"time"
 
-	"github.com/disgoorg/disgo"
 	disgobot "github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/gateway"
-	"github.com/disgoorg/disgo/voice"
-	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
 	internalbot "github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
@@ -29,29 +25,35 @@ import (
 // Harness holds all bot connections shared across integration tests.
 // Create once in TestMain via newHarness; close via Shutdown after all tests run.
 type Harness struct {
-	cfg             *integrationConfig
+	Cfg             *Config
 	Owner           *disgobot.Client
 	OwnerID         snowflake.ID
 	Pool            *pool.Service
-	Speaker         *TestSpeaker
-	Speaker2        *TestSpeaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
-	Listener        *TestListener
+	Speaker         *Speaker
+	Speaker2        *Speaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
+	Listener        *Listener
 	activeListeners []disgobot.EventListener // current per-test listeners; swapped in newManagerForGuild
 }
 
-func newHarness(ctx context.Context, cfg *integrationConfig) (*Harness, error) {
-	h := &Harness{cfg: cfg}
+func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
+	h := &Harness{Cfg: cfg}
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
 	var err error
-	h.Owner, err = newOwnerClient(cfg.OwnerToken)
+	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken,
+		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
+			gateway.IntentGuilds,
+			gateway.IntentGuildMembers,
+			gateway.IntentGuildVoiceStates,
+		)),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("build owner client: %w", err)
 	}
 	if err := h.Owner.OpenGateway(ctx); err != nil {
 		return nil, fmt.Errorf("open owner gateway: %w", err)
 	}
-	h.OwnerID, _ = guild.BotUserID(cfg.OwnerToken)
+	h.OwnerID, _ = guild.BotUserID(cfg.OwnerBotToken)
 
 	// Speaker pool.
 	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
@@ -87,7 +89,7 @@ func newHarness(ctx context.Context, cfg *integrationConfig) (*Harness, error) {
 // gets speakerChannelIDs[0], etc.). The owner and caller role are pre-bound.
 // Always call manager.StopVoiceRaid in t.Cleanup.
 func (h *Harness) NewManager(speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
-	return h.newManagerForGuild(h.cfg.GuildID, h.cfg.OwnerChannelID, speakerChannelIDs...)
+	return h.newManagerForGuild(h.Cfg.GuildID, h.Cfg.OwnerChannelID, speakerChannelIDs...)
 }
 
 func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
@@ -96,7 +98,7 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics)
 
 	st.BindChannel(guildID, h.OwnerID, ownerChannelID)
-	st.BindRole(guildID, store.RoleTypeCaller, h.cfg.CallerRoleID)
+	st.BindRole(guildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)
 
 	speakerIDs := h.Pool.ConnectedSpeakerIDs()
 	for i, chID := range speakerChannelIDs {
@@ -143,6 +145,63 @@ func (h *Harness) MoveSpeakerVoice(_ context.Context, guildID, speakerID, target
 	return err
 }
 
+// RequireSpeakers returns connected speaker IDs, skipping the test if the pool is empty.
+func (h *Harness) RequireSpeakers(t testing.TB) []snowflake.ID {
+	t.Helper()
+	ids := h.Pool.ConnectedSpeakerIDs()
+	if len(ids) == 0 {
+		t.Skip("no speakers in pool")
+	}
+	return ids
+}
+
+// MustStartRaid creates a manager, starts a voice raid for h.Cfg.GuildID, and fatals on error.
+// The relay code is logged via t.Log. Pass a dedicated sessionCancel when the session
+// lifecycle must be independent of the test context (e.g. restart or reconnect tests).
+func (h *Harness) MustStartRaid(t testing.TB, ctx context.Context, cancel context.CancelFunc, mode guild.RaidMode, speakerChannelIDs ...snowflake.ID) *manager.Service {
+	t.Helper()
+	mgr, _ := h.NewManager(speakerChannelIDs...)
+	code, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, mode)
+	if err != nil {
+		t.Fatalf("StartVoiceRaid: %v", err)
+	}
+	t.Logf("relay code: %s", code)
+	return mgr
+}
+
+// MustStartPlaying calls speaker.StartPlaying and fatals on error.
+func (h *Harness) MustStartPlaying(t testing.TB, ctx context.Context, speaker *Speaker, channelID snowflake.ID) func() {
+	t.Helper()
+	stop, err := speaker.StartPlaying(ctx, h.Cfg.GuildID, channelID, h.Cfg.SamplesDir)
+	if err != nil {
+		t.Fatalf("speaker.StartPlaying: %v", err)
+	}
+	return stop
+}
+
+// MustStartListening calls Listener.StartListening and fatals on error.
+func (h *Harness) MustStartListening(t testing.TB, ctx context.Context, guildID, channelID snowflake.ID) func() {
+	t.Helper()
+	stop, err := h.Listener.StartListening(ctx, guildID, channelID)
+	if err != nil {
+		t.Fatalf("listener.StartListening: %v", err)
+	}
+	return stop
+}
+
+// RegisterCleanup registers t.Cleanup to call each stop func then StopVoiceRaid for h.Cfg.GuildID.
+// Do not use when stop funcs are reassigned after registration (e.g. E11) or when multiple
+// guild IDs need separate StopVoiceRaid calls (e.g. E5).
+func (h *Harness) RegisterCleanup(t testing.TB, mgr *manager.Service, stops ...func()) {
+	t.Helper()
+	t.Cleanup(func() {
+		for _, stop := range stops {
+			stop()
+		}
+		_ = mgr.StopVoiceRaid(context.Background(), h.Cfg.GuildID)
+	})
+}
+
 // Shutdown closes all bot connections. Call once after all tests complete.
 func (h *Harness) Shutdown(ctx context.Context) {
 	h.Pool.Shutdown(ctx)
@@ -156,26 +215,4 @@ func (h *Harness) Shutdown(ctx context.Context) {
 		h.Listener.Close(ctx)
 	}
 	h.Owner.Close(ctx)
-}
-
-// newOwnerClient builds a disgo client matching production settings but without
-// slash-command event listeners. Full intents + DAVE + FlagsAll cache.
-// Event listeners are registered per-test via newManagerForGuild.
-func newOwnerClient(token string) (*disgobot.Client, error) {
-	return disgo.New(token,
-		disgobot.WithGatewayConfigOpts(
-			gateway.WithIntents(
-				gateway.IntentGuilds,
-				gateway.IntentGuildMembers,
-				gateway.IntentGuildVoiceStates,
-			),
-		),
-		disgobot.WithCacheConfigOpts(
-			cache.WithCaches(cache.FlagsAll),
-		),
-		disgobot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			voice.WithLogger(slog.New(slog.DiscardHandler)),
-		),
-	)
 }

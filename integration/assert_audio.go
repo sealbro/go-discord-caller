@@ -8,11 +8,12 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/integration/test"
 )
 
 // AssertFramesReceived polls until listener has received at least min frames from
 // userID within the given deadline, or calls t.Fatal.
-func AssertFramesReceived(t testing.TB, l *TestListener, userID snowflake.ID, min int64, within time.Duration) {
+func AssertFramesReceived(t testing.TB, l *test.Listener, userID snowflake.ID, min int64, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)
 	for time.Now().Before(deadline) {
@@ -27,25 +28,14 @@ func AssertFramesReceived(t testing.TB, l *TestListener, userID snowflake.ID, mi
 
 // AssertSSRCSeen polls until at least one frame from userID is received within
 // the given deadline, or calls t.Fatal.
-func AssertSSRCSeen(t testing.TB, l *TestListener, userID snowflake.ID, within time.Duration) {
+func AssertSSRCSeen(t testing.TB, l *test.Listener, userID snowflake.ID, within time.Duration) {
 	t.Helper()
 	AssertFramesReceived(t, l, userID, 1, within)
 }
 
-// AssertSSRCNotSeen waits the full window and then asserts that no frames from
-// userID were received. Used to verify mix-minus exclusion.
-func AssertSSRCNotSeen(t testing.TB, l *TestListener, userID snowflake.ID, window time.Duration) {
-	t.Helper()
-	time.Sleep(window)
-	n := l.Receiver.FramesReceived(userID)
-	if n > 0 {
-		t.Fatalf("expected 0 frames from %s, got %d", userID, n)
-	}
-}
-
 // AssertFrameGap asserts that frame delivery from userID stops for at least
 // pauseFor and then resumes within resumeWithin after resume is called.
-func AssertFrameGap(t testing.TB, l *TestListener, userID snowflake.ID, pauseFor, resumeWithin time.Duration, resume func()) {
+func AssertFrameGap(t testing.TB, l *test.Listener, userID snowflake.ID, pauseFor, resumeWithin time.Duration, resume func()) {
 	t.Helper()
 
 	// Capture baseline.
@@ -75,18 +65,13 @@ func AssertFrameGap(t testing.TB, l *TestListener, userID snowflake.ID, pauseFor
 	t.Fatalf("frames from %s did not resume within %s after resume()", userID, resumeWithin)
 }
 
-// AssertP99FirstFrameLatency asserts that the first-frame latency observed by
-// listener for userID is within maxLatency of the provided startTime.
-func AssertP99FirstFrameLatency(t testing.TB, l *TestListener, userID snowflake.ID, startTime time.Time, maxLatency time.Duration) {
+// AssertFramesIncreasedBy captures the current frame count as a baseline and
+// polls until delta additional frames arrive within the deadline, or calls t.Fatal.
+// Use this after an interruption (reconnect, restart) to verify delivery resumed.
+func AssertFramesIncreasedBy(t testing.TB, l *test.Listener, userID snowflake.ID, delta int64, within time.Duration) {
 	t.Helper()
-	ts, ok := l.Receiver.FirstFrameAt(userID)
-	if !ok {
-		t.Fatalf("no frames received from %s — cannot measure first-frame latency", userID)
-	}
-	latency := ts.Sub(startTime)
-	if latency > maxLatency {
-		t.Fatalf("first-frame latency from %s: %s > limit %s", userID, latency, maxLatency)
-	}
+	base := l.Receiver.FramesReceived(userID)
+	AssertFramesReceived(t, l, userID, base+delta, within)
 }
 
 // skipIfMissing calls t.Skip when cond is false, formatting msg with args.

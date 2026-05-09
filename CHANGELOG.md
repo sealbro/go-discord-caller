@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-05-09
+
+### Added
+- **Tests**: integration tests for all modes, unit tests for `YAMLStore`, `RaidMode`, `Mixer`, and `bot` install-URL helpers; `Makefile` with `test`, `test-race`, and `bench` targets
+
+### Changed
+- **Mixer audio quality improved**: relay bitrate raised from 16 Kbps to 48 Kbps and encoder complexity increased from 3 to 5 — relay audio is noticeably cleaner in multi-source sessions with only modest additional CPU cost
+
+### Fixed
+- **Opus buffer data race in multi-target fanout**: `VoiceReceiver.dispatchFanout` previously shared a single pooled buffer across all fanout targets; each `VoiceProvider` would independently call `PutEncodedFrame`, causing double-returns to the pool and potential data races under concurrent sends — each target now receives its own copy of the buffer
+
 ## [0.7.4] - 2026-05-01
 
 ### Changed

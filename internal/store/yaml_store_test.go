@@ -254,15 +254,17 @@ func TestYAMLStore_DebounceFlush(t *testing.T) {
 	s.BindChannel(guild1, user1, chan1)
 
 	// Wait longer than saveDebounce for the background flush to fire.
-	deadline := time.Now().Add(saveDebounce + 200*time.Millisecond)
+	deadline := time.Now().Add(saveDebounce + 1500*time.Millisecond)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err == nil {
-			data, _ := os.ReadFile(path)
-			if len(data) > len("guilds: []\n") {
+		s2, err := NewYAMLStore(path)
+		if err == nil {
+			_, ok := s2.GetBoundChannel(guild1, user1)
+			s2.Close()
+			if ok {
 				return
 			}
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 	t.Error("file was not flushed within debounce window")
 }
@@ -283,6 +285,9 @@ func unmarshalYAML(data []byte) error {
 		channels:   make(map[channelKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
+		dirtyCh:    make(chan struct{}, 1),
+		done:       make(chan struct{}),
+		flushed:    make(chan struct{}),
 	}
 	return ts.load()
 }

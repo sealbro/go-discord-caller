@@ -167,7 +167,7 @@ func startPump(ctx context.Context, ch chan<- Frame, frames []testFrame) (stop f
 				select {
 				case ch <- Frame{PCM: pcm, Opus: opus, CreatedAt: time.Now()}:
 				default:
-					PutPCM(pcm) // channel full — discard rather than block
+					PutPCM(pcm) // channel full — discard rather than block (opus is heap-only, GC handles it)
 				}
 			}
 		}

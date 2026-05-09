@@ -173,6 +173,17 @@ func (l *Listener) UpdateMember(guildID, userID snowflake.ID, update discord.Mem
 	return l.client.Rest.UpdateMember(guildID, userID, update)
 }
 
+// AddMemberRole grants roleID to userID in guildID via the listener bot's REST
+// client. The listener bot must hold Administrator (or Manage Roles) in the guild.
+func (l *Listener) AddMemberRole(guildID, userID, roleID snowflake.ID) error {
+	return l.client.Rest.AddMemberRole(guildID, userID, roleID)
+}
+
+// RemoveMemberRole revokes roleID from userID in guildID via the listener bot.
+func (l *Listener) RemoveMemberRole(guildID, userID, roleID snowflake.ID) error {
+	return l.client.Rest.RemoveMemberRole(guildID, userID, roleID)
+}
+
 // Close shuts down the listener bot's gateway connection.
 func (l *Listener) Close(ctx context.Context) {
 	l.client.Close(ctx)

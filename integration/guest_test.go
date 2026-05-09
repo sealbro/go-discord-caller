@@ -82,7 +82,9 @@ func TestE5b_AllyCaller(t *testing.T) {
 
 	st.BindChannel(h.Cfg.GuestGuildID, h.OwnerID, h.Cfg.GuestOwnerChannelID)
 	st.BindChannel(h.Cfg.GuestGuildID, speakerIDs[0], h.Cfg.GuestSpeakerChannelID)
-	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)
+	// No CallerRole binding for the guest guild: E2E_CALLER_ROLE_ID is a host-guild
+	// role that does not exist in the guest guild, so binding it would silently reject
+	// every speaker. E5b tests relay flow; the guest filter allows any cached member.
 	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
 
 	// Host runs GuildCaller so guest capture is permitted (AllowGuestCapture = true).
@@ -151,8 +153,10 @@ func TestE5c_OneManyAllyCaller(t *testing.T) {
 		t.Fatalf("JoinSession (guest OneManyAllyCaller): %v", err)
 	}
 
-	// Host source speaks in its speaker channel; guest listener watches its speaker channel.
-	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.Speaker1ChannelID)
+	// Host owner captures audio and relays it to guests; source must be in OwnerChannelID.
+	// In star topology (OneManyGuildCaller), speaker sources go to the hub mixer only —
+	// only the owner's captured audio reaches the relay mixer and propagates to guests.
+	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuestGuildID, h.Cfg.GuestSpeakerChannelID)
 
 	t.Cleanup(func() {

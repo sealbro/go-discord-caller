@@ -29,7 +29,7 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
-	mixerBitrate    = 16000 // bits per second sent to Opus encoder
+	mixerBitrate    = 48000 // bits per second sent to Opus encoder
 )
 
 // pcmBuf is a fixed-size array backing PCM pool entries (single allocation on miss).
@@ -53,7 +53,7 @@ func PutPCM(s []int16) { pcmPool.Put((*pcmBuf)(s[:mixerPCMBuf])) }
 // calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
 // Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
 //
-//	= 16000 × 20 / 1000 / 8 = 40 bytes  →  pool cap = 160 bytes.
+//	= 48000 × 20 / 1000 / 8 = 120 bytes  →  pool cap = 480 bytes.
 //
 // frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
 const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
@@ -138,9 +138,9 @@ type Mixer struct {
 }
 
 // mixerComplexity is the Opus encoder complexity (0–10).
-// Default is 9 (max quality); 3 gives ~60% CPU reduction vs default with
-// acceptable voice quality for relay use cases.
-const mixerComplexity = 3
+// 5 is a good middle ground: significantly better quality than 3 for mixed
+// multi-source paths with modest additional CPU (~15% over complexity 3).
+const mixerComplexity = 5
 
 // mixerInputDrainThreshold is the maximum number of queued frames per input
 // (beyond the one just read) before the mixer drains to the latest.

@@ -9,8 +9,15 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"sync"
+	"sync/atomic"
 
 	"github.com/disgoorg/disgo/voice"
+)
+
+var (
+	fileIndex     atomic.Uint64
+	fileIndexOnce sync.Once
 )
 
 // dcaEntry holds an open .dca file with its frame start offset.
@@ -34,7 +41,8 @@ func NewRandomFileVoiceProvider(paths []string) (*RandomFileVoiceProvider, error
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no dca files provided")
 	}
-	p := paths[rand.IntN(len(paths))]
+	fileIndexOnce.Do(func() { fileIndex.Store(rand.Uint64N(uint64(len(paths)))) })
+	p := paths[fileIndex.Add(1)%uint64(len(paths))]
 	f, err := os.Open(p)
 	if err != nil {
 		return nil, fmt.Errorf("open dca file %q: %w", p, err)

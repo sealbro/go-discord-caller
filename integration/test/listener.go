@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -152,6 +153,54 @@ func (l *Listener) StartListening(ctx context.Context, guildID, channelID snowfl
 		}
 		stopped = true
 		l.Receiver.Close()
+		leaveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		gv.Leave(leaveCtx, guildID)
+	}
+	return cleanup, nil
+}
+
+// StartPlaying joins channelID in guildID and streams .dca files from samplesDir
+// in random order. Returns a cleanup func that stops playback and leaves the channel.
+func (l *Listener) StartPlaying(ctx context.Context, guildID, channelID snowflake.ID, samplesDir string) (func(), error) {
+	paths, err := filepath.Glob(filepath.Join(samplesDir, "*.dca"))
+	if err != nil || len(paths) == 0 {
+		return nil, fmt.Errorf("no .dca files found in %q", samplesDir)
+	}
+	provider, err := NewRandomFileVoiceProvider(paths)
+	if err != nil {
+		return nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
+	}
+
+	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID)
+	leaveCtx, leaveCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	gv.Leave(leaveCtx, guildID)
+	leaveCancel()
+
+	conn, err := gv.Join(ctx, guildID)
+	if err != nil {
+		provider.Close()
+		return nil, fmt.Errorf("listener bot join channel: %w", err)
+	}
+
+	conn.SetOpusFrameProvider(provider)
+	conn.SetOpusFrameReceiver(opus.NewEmptyVoiceReceiver())
+
+	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
+		provider.Close()
+		leaveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		gv.Leave(leaveCtx, guildID)
+		return nil, fmt.Errorf("listener bot set speaking: %w", err)
+	}
+
+	var stopped bool
+	cleanup := func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		provider.Close()
 		leaveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		gv.Leave(leaveCtx, guildID)

@@ -179,6 +179,16 @@ func (h *Harness) MustStartPlaying(t testing.TB, ctx context.Context, speaker *S
 	return stop
 }
 
+// MustStartPlayingListener calls Listener.StartPlaying and fatals on error.
+func (h *Harness) MustStartPlayingListener(t testing.TB, ctx context.Context, channelID snowflake.ID) func() {
+	t.Helper()
+	stop, err := h.Listener.StartPlaying(ctx, h.Cfg.GuildID, channelID, h.Cfg.SamplesDir)
+	if err != nil {
+		t.Fatalf("listener.StartPlaying: %v", err)
+	}
+	return stop
+}
+
 // MustStartListening calls Listener.StartListening and fatals on error.
 func (h *Harness) MustStartListening(t testing.TB, ctx context.Context, guildID, channelID snowflake.ID) func() {
 	t.Helper()

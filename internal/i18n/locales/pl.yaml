@@ -1,0 +1,110 @@
+# Polish translations. Plural forms: one, few, many, other (CLDR pl rules).
+
+# ── Slash command descriptions ────────────────────────────────────────────────
+cmd.setup.description: "Wyświetl i skonfiguruj wszystkie boty speaker na tym serwerze"
+
+cmd.start.description: "Rozpocznij voice raid lub dołącz do istniejącego jako gość, używając kodu relay"
+cmd.start.opt.code.description: "Kod relay aktywnego voice raidu z innego serwera (zostaw pusty, aby rozpocząć nowy)"
+cmd.start.opt.mode.description: "Tryb: Jeden mówi / Wielu mówi / Jeden↔Wielu. Domyślnie: Jeden mówi."
+cmd.start.opt.mode.choice.one: "Jeden mówi"
+cmd.start.opt.mode.choice.many: "Wielu mówi"
+cmd.start.opt.mode.choice.one_many: "Jeden↔Wielu"
+
+cmd.stop.description: "Każ wszystkim aktywnym speakerom opuścić swoje kanały głosowe"
+cmd.status.description: "Pokaż bieżące powiązania speakerów i stan voice raidu"
+
+# ── Generic errors ────────────────────────────────────────────────────────────
+err.need_manager: "❌ Potrzebujesz uprawnienia „Zarządzaj serwerem” lub roli menedżera serwera, aby użyć tego polecenia."
+err.need_admin: "❌ Potrzebujesz uprawnienia „Administrator” lub roli menedżera serwera, aby użyć tego polecenia."
+err.guild_only: "to polecenie można używać tylko wewnątrz serwera"
+err.unexpected_data_type: "nieoczekiwany typ danych interakcji"
+err.invalid_speaker_id: "nieprawidłowy identyfikator speakera"
+err.speaker_not_found: "❌ Nie znaleziono speakera na tym serwerze."
+err.no_more_tokens: "❌ Wszystkie tokeny speakerów z puli zostały już dodane."
+
+# ── Voice raid responses ──────────────────────────────────────────────────────
+setup.blocked_active_raid: "⚠️ Konfiguracja jest niedostępna, gdy voice raid jest aktywny. Najpierw zatrzymaj raid."
+
+raid.already_active: "⚠️ Na tym serwerze już trwa voice raid."
+raid.none_active: "⚠️ Na tym serwerze nie ma aktywnego voice raidu."
+raid.join_blocked_permissions: "❌ Nie można dołączyć do sesji relay: najpierw napraw uprawnienia botów."
+raid.start_blocked_permissions: "❌ Nie można rozpocząć voice raidu: najpierw napraw uprawnienia botów."
+raid.join_failed: "❌ Nie udało się dołączyć do sesji relay `{{.Code}}`: {{.Err}}"
+raid.start_failed: "❌ Nie udało się rozpocząć voice raidu: {{.Err}}"
+raid.stop_failed: "❌ Nie udało się zatrzymać voice raidu: {{.Err}}"
+raid.joined: "🔴 **Dołączono do sesji relay** `{{.Code}}` jako {{.Mode}}. Speakerzy łączą się ze swoimi kanałami."
+raid.started: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów."
+raid.started_with_code: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów. Kod relay: `{{.Code}}`"
+raid.stopped: "⚫ **Voice raid zatrzymany.** Wszyscy speakerzy opuścili swoje kanały."
+
+# ── Permissions warning ───────────────────────────────────────────────────────
+permissions.warning_header: "\n\n⚠️ **Niektóre boty nie mogą uzyskać dostępu do swojego kanału (brak uprawnień Connect/Speak):**"
+
+# ── Setup UI ──────────────────────────────────────────────────────────────────
+setup.main_title: "**Konfiguracja speakerów**"
+setup.roles_title: "**Powiązania ról**"
+setup.speakers_title: "**Powiązania speakerów** — Strona {{.Page}}/{{.Total}}"
+setup.no_speakers: "_Brak zarejestrowanych speakerów._"
+setup.speakers_count:
+  one: "_{{.Count}} speaker łącznie._"
+  few: "_{{.Count}} speakerów łącznie._"
+  many: "_{{.Count}} speakerów łącznie._"
+  other: "_{{.Count}} speakera łącznie._"
+
+setup.bind_caller_placeholder: "Powiąż bota caller z kanałem głosowym…"
+setup.bind_speaker_placeholder: "Powiąż {{.Username}} z kanałem głosowym…"
+setup.select_caller_role: "Wybierz rolę przechwytywania…"
+setup.select_manager_role: "Wybierz rolę menedżera…"
+setup.locale_placeholder: "Wybierz język bota…"
+setup.locale_auto: "🌐 Auto (język klienta użytkownika)"
+
+speaker.add_title: "**Dodaj bota speaker**"
+speaker.add_steps: "1. Kliknij **Zaproś na serwer** — bot zostanie wstępnie wybrany dla tego serwera.\n2. Dokończ autoryzację w przeglądarce.\n3. Bot zostanie zarejestrowany automatycznie, gdy dołączy do serwera."
+
+# ── Buttons ───────────────────────────────────────────────────────────────────
+btn.main_menu: "🏠 Menu główne"
+btn.bind_roles: "🎭 Powiąż role"
+btn.bind_speakers: "⚙️ Powiąż speakerów"
+btn.add_speaker: "➕ Dodaj speakera"
+btn.invite: "🔗 Zaproś na serwer"
+btn.enable: "Włącz"
+btn.disable: "Wyłącz"
+
+# ── Status (Status.Render) ────────────────────────────────────────────────────
+status.guild: "Serwer"
+status.capture_role: "Rola przechwytywania"
+status.manager_role: "Rola menedżera"
+status.owner_channel: "Kanał bota caller"
+status.not_set: "nie ustawiono"
+status.unbound: "niepowiązany"
+status.ally_code: "Kod sojusznika"
+status.raid: "Voice raid"
+status.raid_inactive: "⚫ nieaktywny"
+status.speakers_header:
+  one: "Speakerzy ({{.Count}}):"
+  few: "Speakerzy ({{.Count}}):"
+  many: "Speakerzy ({{.Count}}):"
+  other: "Speakerzy ({{.Count}}):"
+status.raid_active:
+  one: "🔴 aktywny ({{.Count}} speaker podłączony)"
+  few: "🔴 aktywny ({{.Count}} speakerów podłączonych)"
+  many: "🔴 aktywny ({{.Count}} speakerów podłączonych)"
+  other: "🔴 aktywny ({{.Count}} speakera podłączonych)"
+status.raid_active_with_guests:
+  one: "🔴 aktywny ({{.Count}} speaker podłączony) — goście: {{.Guests}}"
+  few: "🔴 aktywny ({{.Count}} speakerów podłączonych) — goście: {{.Guests}}"
+  many: "🔴 aktywny ({{.Count}} speakerów podłączonych) — goście: {{.Guests}}"
+  other: "🔴 aktywny ({{.Count}} speakera podłączonych) — goście: {{.Guests}}"
+status.raid_guest:
+  one: "🔴 relay gościa → {{.Host}} ({{.Count}} speaker podłączony)"
+  few: "🔴 relay gościa → {{.Host}} ({{.Count}} speakerów podłączonych)"
+  many: "🔴 relay gościa → {{.Host}} ({{.Count}} speakerów podłączonych)"
+  other: "🔴 relay gościa → {{.Host}} ({{.Count}} speakera podłączonych)"
+
+# ── Raid mode labels (RaidMode.Pretty) ────────────────────────────────────────
+raid_mode.one_caller_host: "Jeden mówi (host)"
+raid_mode.many_callers_host: "Wielu mówi (host)"
+raid_mode.listener_guest: "Słuchacz (gość)"
+raid_mode.caller_guest: "Mówca (gość)"
+raid_mode.one_many_callers_host: "Jeden↔Wielu (host)"
+raid_mode.one_many_caller_guest: "Jeden↔Wielu (gość)"

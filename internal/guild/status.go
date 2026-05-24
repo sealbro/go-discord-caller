@@ -48,69 +48,130 @@ func (s Status) GetSortedSpeakers() []*Speaker {
 	}, func(a, b *Speaker) int { return strings.Compare(a.Username, b.Username) })
 }
 
-// String returns a human-readable summary of the status.
-func (s Status) String() string {
+// Render returns a human-readable, localized summary of the status. Pass a
+// localizer obtained from internal/i18n. A nil loc uses English fallbacks
+// (useful for logs and tests).
+func (s Status) Render(loc Translator) string {
+	t := func(key string, args ...any) string {
+		if loc == nil {
+			return englishStatusFallback(key, args...)
+		}
+		return loc.T(key, args...)
+	}
+
 	var sb strings.Builder
 
 	if s.GuildName != "" {
-		sb.WriteString(fmt.Sprintf("\n**Guild:** %s\n", s.GuildName))
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.guild"), s.GuildName)
 	}
 
 	if s.CallerRoleID != nil {
-		sb.WriteString(fmt.Sprintf("\n**Capture Role:** <@&%s>\n", s.CallerRoleID))
+		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.capture_role"), s.CallerRoleID)
 	} else {
-		sb.WriteString("\n**Capture Role:** not set\n")
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.capture_role"), t("status.not_set"))
 	}
 
 	if s.ManagerRoleID != nil {
-		sb.WriteString(fmt.Sprintf("\n**Manager Role:** <@&%s>\n", s.ManagerRoleID))
+		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.manager_role"), s.ManagerRoleID)
 	} else {
-		sb.WriteString("\n**Manager Role:** not set\n")
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.manager_role"), t("status.not_set"))
 	}
 
 	if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
-		sb.WriteString(fmt.Sprintf("\n**Owner Bot Channel:** <#%s>\n", chID))
+		fmt.Fprintf(&sb, "\n**%s:** <#%s>\n", t("status.owner_channel"), chID)
 	} else {
-		sb.WriteString("\n**Owner Bot Channel:** not set\n")
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.owner_channel"), t("status.not_set"))
 	}
 
 	speakers := s.GetSortedSpeakers()
 
-	sb.WriteString(fmt.Sprintf("\n**Speakers (%d):**\n", len(speakers)))
+	fmt.Fprintf(&sb, "\n**%s**\n", t("status.speakers_header", "Count", len(speakers)))
+	unbound := t("status.unbound")
 	for _, sp := range speakers {
 		enabled := "🔊"
 		if !sp.Enabled {
 			enabled = "🔇"
 		}
-		bound := "unbound"
+		bound := unbound
 		if chID, ok := s.BoundChannels[sp.ID]; ok {
 			bound = fmt.Sprintf("<#%s>", chID)
 		}
-		sb.WriteString(fmt.Sprintf("- %s <@%s> → %s\n", enabled, sp.ID, bound))
+		fmt.Fprintf(&sb, "- %s <@%s> → %s\n", enabled, sp.ID, bound)
 	}
 
 	if s.AllyCode != "" {
-		sb.WriteString(fmt.Sprintf("\n**Ally Code:** `%s`\n", s.AllyCode))
+		fmt.Fprintf(&sb, "\n**%s:** `%s`\n", t("status.ally_code"), s.AllyCode)
 	}
 
+	raidLabel := t("status.raid")
 	if s.Session != nil {
 		if s.Session.IsGuest {
 			host := s.Session.AllyCode
 			if s.HostGuildName != "" {
 				host = fmt.Sprintf("%s (`%s`)", s.HostGuildName, s.Session.AllyCode)
 			}
-			sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 guest relay → %s (%d speakers joined)\n", host, len(s.Session.Speakers)))
+			fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel,
+				t("status.raid_guest", "Count", len(s.Session.Speakers), "Host", host))
+		} else if len(s.GuestGuildNames) > 0 {
+			fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel,
+				t("status.raid_active_with_guests", "Count", len(s.Session.Speakers), "Guests", strings.Join(s.GuestGuildNames, ", ")))
 		} else {
-			if len(s.GuestGuildNames) > 0 {
-				sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined) — guests: %s\n",
-					len(s.Session.Speakers), strings.Join(s.GuestGuildNames, ", ")))
-			} else {
-				sb.WriteString(fmt.Sprintf("\n**Voice Raid:** 🔴 active (%d speakers joined)\n", len(s.Session.Speakers)))
-			}
+			fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel,
+				t("status.raid_active", "Count", len(s.Session.Speakers)))
 		}
 	} else {
-		sb.WriteString("\n**Voice Raid:** ⚫ inactive\n")
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel, t("status.raid_inactive"))
 	}
 
 	return sb.String()
+}
+
+// englishStatusFallback renders status labels using en.yaml-equivalent strings
+// when no localizer is supplied. Keep keys in sync with en.yaml.
+func englishStatusFallback(key string, args ...any) string {
+	count := -1
+	host := ""
+	guests := ""
+	for i := 0; i+1 < len(args); i += 2 {
+		name, _ := args[i].(string)
+		switch name {
+		case "Count":
+			if n, ok := args[i+1].(int); ok {
+				count = n
+			}
+		case "Host":
+			host, _ = args[i+1].(string)
+		case "Guests":
+			guests, _ = args[i+1].(string)
+		}
+	}
+	switch key {
+	case "status.guild":
+		return "Guild"
+	case "status.capture_role":
+		return "Capture Role"
+	case "status.manager_role":
+		return "Manager Role"
+	case "status.owner_channel":
+		return "Owner Bot Channel"
+	case "status.not_set":
+		return "not set"
+	case "status.unbound":
+		return "unbound"
+	case "status.ally_code":
+		return "Ally Code"
+	case "status.raid":
+		return "Voice Raid"
+	case "status.raid_inactive":
+		return "⚫ inactive"
+	case "status.speakers_header":
+		return fmt.Sprintf("Speakers (%d):", count)
+	case "status.raid_active":
+		return fmt.Sprintf("🔴 active (%d speakers joined)", count)
+	case "status.raid_active_with_guests":
+		return fmt.Sprintf("🔴 active (%d speakers joined) — guests: %s", count, guests)
+	case "status.raid_guest":
+		return fmt.Sprintf("🔴 guest relay → %s (%d speakers joined)", host, count)
+	}
+	return key
 }

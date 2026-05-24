@@ -1,0 +1,101 @@
+# English — source of truth for all i18n keys.
+# Every other locale file must define exactly these keys (enforced by bundle_test.go).
+
+# ── Slash command descriptions ────────────────────────────────────────────────
+cmd.setup.description: "List and configure all speaker bots in this server"
+
+cmd.start.description: "Start a voice raid, or join an existing one as a guest using a relay code"
+cmd.start.opt.code.description: "Relay code from another server's active voice raid (leave empty to start a new one)"
+cmd.start.opt.mode.description: "Audio mode: One Caller / Many Callers / One↔Many. Default: One Caller."
+cmd.start.opt.mode.choice.one: "One Caller"
+cmd.start.opt.mode.choice.many: "Many Callers"
+cmd.start.opt.mode.choice.one_many: "One↔Many Callers"
+
+cmd.stop.description: "Make all active speakers leave their voice channels"
+cmd.status.description: "Show current speaker bindings and voice raid state"
+
+# ── Generic errors ────────────────────────────────────────────────────────────
+err.need_manager: "❌ You need the Manage Server permission or the server's manager role to use this command."
+err.need_admin: "❌ You need the Administrator permission or the server's manager role to use this command."
+err.guild_only: "this command can only be used inside a server"
+err.unexpected_data_type: "unexpected interaction data type"
+err.invalid_speaker_id: "invalid speaker ID"
+err.speaker_not_found: "❌ Speaker not found in this guild."
+err.no_more_tokens: "❌ All speaker tokens from the pool have already been added."
+
+# ── Voice raid responses ──────────────────────────────────────────────────────
+setup.blocked_active_raid: "⚠️ Setup is not available while a voice raid is active. Stop the raid first."
+
+raid.already_active: "⚠️ A voice raid is already active in this server."
+raid.none_active: "⚠️ There is no active voice raid in this server."
+raid.join_blocked_permissions: "❌ Cannot join relay session: fix bot permissions first."
+raid.start_blocked_permissions: "❌ Cannot start voice raid: fix bot permissions first."
+raid.join_failed: "❌ Failed to join relay session `{{.Code}}`: {{.Err}}"
+raid.start_failed: "❌ Failed to start voice raid: {{.Err}}"
+raid.stop_failed: "❌ Failed to stop voice raid: {{.Err}}"
+raid.joined: "🔴 **Joined relay session** `{{.Code}}` as {{.Mode}}. Speakers are connecting to their bound channels."
+raid.started: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels."
+raid.started_with_code: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Relay code: `{{.Code}}`"
+raid.stopped: "⚫ **Voice raid stopped.** All speakers have left their channels."
+
+# ── Permissions warning ───────────────────────────────────────────────────────
+permissions.warning_header: "\n\n⚠️ **Some bots cannot access their channel (Connect/Speak permission missing):**"
+
+# ── Setup UI ──────────────────────────────────────────────────────────────────
+setup.main_title: "**Speaker Setup**"
+setup.roles_title: "**Role Bindings**"
+setup.speakers_title: "**Speaker Bindings** — Page {{.Page}}/{{.Total}}"
+setup.no_speakers: "_No speakers registered yet._"
+setup.speakers_count:
+  one: "_{{.Count}} speaker total._"
+  other: "_{{.Count}} speakers total._"
+
+setup.bind_caller_placeholder: "Bind caller bot to a voice channel…"
+setup.bind_speaker_placeholder: "Bind {{.Username}} to a voice channel…"
+setup.select_caller_role: "Select capture role…"
+setup.select_manager_role: "Select manager role…"
+setup.locale_placeholder: "Select bot language…"
+setup.locale_auto: "🌐 Auto (user's client language)"
+
+speaker.add_title: "**Add Speaker Bot**"
+speaker.add_steps: "1. Click **Invite to Server** — the bot will be pre-selected for this server.\n2. Complete the authorisation in the browser.\n3. The bot will be registered automatically once it joins the server."
+
+# ── Buttons ───────────────────────────────────────────────────────────────────
+btn.main_menu: "🏠 Main Menu"
+btn.bind_roles: "🎭 Bind Roles"
+btn.bind_speakers: "⚙️ Bind Speakers"
+btn.add_speaker: "➕ Add Speaker"
+btn.invite: "🔗 Invite to Server"
+btn.enable: "Enable"
+btn.disable: "Disable"
+
+# ── Status (Status.Render) ────────────────────────────────────────────────────
+status.guild: "Guild"
+status.capture_role: "Capture Role"
+status.manager_role: "Manager Role"
+status.owner_channel: "Owner Bot Channel"
+status.not_set: "not set"
+status.unbound: "unbound"
+status.ally_code: "Ally Code"
+status.raid: "Voice Raid"
+status.raid_inactive: "⚫ inactive"
+status.speakers_header:
+  one: "Speakers ({{.Count}}):"
+  other: "Speakers ({{.Count}}):"
+status.raid_active:
+  one: "🔴 active ({{.Count}} speaker joined)"
+  other: "🔴 active ({{.Count}} speakers joined)"
+status.raid_active_with_guests:
+  one: "🔴 active ({{.Count}} speaker joined) — guests: {{.Guests}}"
+  other: "🔴 active ({{.Count}} speakers joined) — guests: {{.Guests}}"
+status.raid_guest:
+  one: "🔴 guest relay → {{.Host}} ({{.Count}} speaker joined)"
+  other: "🔴 guest relay → {{.Host}} ({{.Count}} speakers joined)"
+
+# ── Raid mode labels (RaidMode.Pretty) ────────────────────────────────────────
+raid_mode.one_caller_host: "One Caller (host)"
+raid_mode.many_callers_host: "Many Callers (host)"
+raid_mode.listener_guest: "Listener (guest)"
+raid_mode.caller_guest: "Caller (guest)"
+raid_mode.one_many_callers_host: "One↔Many Callers (host)"
+raid_mode.one_many_caller_guest: "One↔Many Caller (guest)"

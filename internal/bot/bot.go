@@ -19,6 +19,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/i18n"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
@@ -47,6 +48,9 @@ type BindingManager interface {
 	UnbindChannel(guildID, userID snowflake.ID)
 	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
 	OwnerBotID() snowflake.ID
+	BindLocale(guildID snowflake.ID, locale string)
+	UnbindLocale(guildID snowflake.ID)
+	GetLocale(guildID snowflake.ID) string
 }
 
 // SpeakerManager handles speaker registration and configuration.
@@ -96,6 +100,7 @@ type Bot struct {
 	poolSvc       *pool.Service
 	speakerTokens []string
 	guildReadyCh  chan []snowflake.ID
+	bundle        *i18n.Bundle
 }
 
 // New creates and configures a new Bot instance. It performs no network I/O —
@@ -149,8 +154,14 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	poolSvc := pool.NewService(&metrics.Pool)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
 
+	bundle, err := i18n.NewBundle()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load i18n bundle: %w", err)
+	}
+	slog.Info("i18n bundle loaded", slog.Int("locales", len(bundle.Tags())))
+
 	// Wire command handlers.
-	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot)
+	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot, bundle)
 	cmdHandlers.Register(r)
 
 	client.AddEventListeners(EventListeners(managerSvc, &metrics.Bot)...)
@@ -162,6 +173,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 		poolSvc:       poolSvc,
 		speakerTokens: cfg.SpeakerTokens,
 		guildReadyCh:  guildReadyCh,
+		bundle:        bundle,
 	}, nil
 }
 
@@ -195,7 +207,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		slog.WarnContext(ctx, "timed out waiting for Ready event, syncing commands globally")
 	}
 	slog.InfoContext(ctx, "discovered guilds for command sync", slog.Int("count", len(guildIDs)))
-	if err := handler.SyncCommands(b.client, Commands, guildIDs); err != nil {
+	if err := handler.SyncCommands(b.client, BuildCommands(b.bundle), guildIDs); err != nil {
 		slog.WarnContext(ctx, "failed to sync slash commands", slog.Any("err", err))
 	}
 

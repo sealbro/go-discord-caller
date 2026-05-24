@@ -111,8 +111,9 @@ func TestRaidMode_Pretty(t *testing.T) {
 		{RaidMode("unknown"), "unknown"},
 	}
 	for _, tc := range cases {
-		if got := tc.mode.Pretty(); got != tc.want {
-			t.Errorf("%s.Pretty() = %q, want %q", tc.mode, got, tc.want)
+		// nil translator → English fallback (matches en.yaml).
+		if got := tc.mode.Pretty(nil); got != tc.want {
+			t.Errorf("%s.Pretty(nil) = %q, want %q", tc.mode, got, tc.want)
 		}
 	}
 }

@@ -1,6 +1,6 @@
 module github.com/sealbro/go-discord-caller
 
-go 1.26.2
+go 1.26.3
 
 require (
 	github.com/disgoorg/disgo v0.19.3

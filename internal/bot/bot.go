@@ -158,6 +158,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to load i18n bundle: %w", err)
 	}
+	slog.Info("i18n bundle loaded", slog.Int("locales", len(bundle.Tags())))
 
 	// Wire command handlers.
 	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot, bundle)

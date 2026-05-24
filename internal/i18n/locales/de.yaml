@@ -5,19 +5,13 @@ cmd.setup.description: "Alle Speaker-Bots auf diesem Server auflisten und konfig
 
 cmd.start.description: "Einen Voice-Raid starten oder einem bestehenden als Gast mit einem Relay-Code beitreten"
 cmd.start.opt.code.description: "Relay-Code eines aktiven Voice-Raids eines anderen Servers (leer lassen, um einen neuen zu starten)"
-cmd.start.opt.mode.description: "Ein Sprecher: nur Owner nimmt auf. Viele: alle gemischt. Eins↔Viele: Sterntopologie. (Standard: Ein Sprecher)"
+cmd.start.opt.mode.description: "Modus: Ein Sprecher / Viele Sprecher / Eins↔Viele. Standard: Ein Sprecher."
 cmd.start.opt.mode.choice.one: "Ein Sprecher"
 cmd.start.opt.mode.choice.many: "Viele Sprecher"
 cmd.start.opt.mode.choice.one_many: "Eins↔Viele Sprecher"
 
 cmd.stop.description: "Alle aktiven Speaker dazu bringen, ihre Sprachkanäle zu verlassen"
 cmd.status.description: "Aktuelle Speaker-Bindungen und den Voice-Raid-Status anzeigen"
-
-cmd.bind_role.description: "Die Rolle festlegen, deren Mitglieder aufgenommen und weitergeleitet werden"
-cmd.bind_role.opt.role.description: "Die Rolle, deren Stimme aufgenommen wird"
-
-cmd.bind_manager_role.description: "Die Rolle festlegen, deren Mitglieder den Bot einrichten, starten und stoppen dürfen"
-cmd.bind_manager_role.opt.role.description: "Die Manager-Rolle"
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Du benötigst die Berechtigung „Server verwalten“ oder die Manager-Rolle des Servers, um diesen Befehl zu nutzen."
@@ -42,10 +36,6 @@ raid.joined: "🔴 **Relay-Sitzung beigetreten** `{{.Code}}` als {{.Mode}}. Spea
 raid.started: "🔴 **Voice-Raid gestartet.** Alle aktivierten Speaker haben ihre Kanäle betreten."
 raid.started_with_code: "🔴 **Voice-Raid gestartet.** Alle aktivierten Speaker haben ihre Kanäle betreten. Relay-Code: `{{.Code}}`"
 raid.stopped: "⚫ **Voice-Raid gestoppt.** Alle Speaker haben ihre Kanäle verlassen."
-
-# ── Role binding responses ────────────────────────────────────────────────────
-role.caller_set: "✅ Aufnahmerolle auf <@&{{.RoleID}}> gesetzt. Nur Mitglieder mit dieser Rolle werden weitergeleitet."
-role.manager_set: "✅ Manager-Rolle auf <@&{{.RoleID}}> gesetzt. Mitglieder mit dieser Rolle dürfen den Bot einrichten, starten und stoppen."
 
 # ── Permissions warning ───────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Einige Bots können nicht auf ihren Kanal zugreifen (Connect/Speak-Berechtigung fehlt):**"

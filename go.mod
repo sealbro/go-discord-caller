@@ -5,7 +5,6 @@ go 1.26.2
 require (
 	github.com/disgoorg/disgo v0.19.3
 	github.com/disgoorg/godave/golibdave v0.1.0
-	github.com/disgoorg/omit v1.0.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/hraban/opus v0.0.0-20251117090126-c76ea7e21bf3
 	github.com/joho/godotenv v1.5.1
@@ -32,6 +31,7 @@ require (
 	github.com/disgoorg/godave v0.1.0 // indirect
 	github.com/disgoorg/godave/libdave v0.1.0 // indirect
 	github.com/disgoorg/json/v2 v2.0.0 // indirect
+	github.com/disgoorg/omit v1.0.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

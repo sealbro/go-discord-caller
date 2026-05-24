@@ -6,19 +6,13 @@ cmd.setup.description: "List and configure all speaker bots in this server"
 
 cmd.start.description: "Start a voice raid, or join an existing one as a guest using a relay code"
 cmd.start.opt.code.description: "Relay code from another server's active voice raid (leave empty to start a new one)"
-cmd.start.opt.mode.description: "One Caller: owner captures. Many Callers: all mix. One↔Many: star topology. (default: One Caller)"
+cmd.start.opt.mode.description: "Audio mode: One Caller / Many Callers / One↔Many. Default: One Caller."
 cmd.start.opt.mode.choice.one: "One Caller"
 cmd.start.opt.mode.choice.many: "Many Callers"
 cmd.start.opt.mode.choice.one_many: "One↔Many Callers"
 
 cmd.stop.description: "Make all active speakers leave their voice channels"
 cmd.status.description: "Show current speaker bindings and voice raid state"
-
-cmd.bind_role.description: "Set the role whose members' voice will be captured and relayed"
-cmd.bind_role.opt.role.description: "The role to capture voice from"
-
-cmd.bind_manager_role.description: "Set the role whose members are allowed to setup, start and stop the bot"
-cmd.bind_manager_role.opt.role.description: "The manager role"
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ You need the Manage Server permission or the server's manager role to use this command."
@@ -43,10 +37,6 @@ raid.joined: "🔴 **Joined relay session** `{{.Code}}` as {{.Mode}}. Speakers a
 raid.started: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels."
 raid.started_with_code: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Relay code: `{{.Code}}`"
 raid.stopped: "⚫ **Voice raid stopped.** All speakers have left their channels."
-
-# ── Role binding responses ────────────────────────────────────────────────────
-role.caller_set: "✅ Capture role set to <@&{{.RoleID}}>. Only members with this role will be relayed."
-role.manager_set: "✅ Manager role set to <@&{{.RoleID}}>. Members with this role can setup, start and stop the bot."
 
 # ── Permissions warning ───────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Some bots cannot access their channel (Connect/Speak permission missing):**"

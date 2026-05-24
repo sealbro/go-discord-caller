@@ -5,19 +5,13 @@ cmd.setup.description: "Lista y configura todos los bots speaker de este servido
 
 cmd.start.description: "Iniciar un voice raid o unirse a uno existente como invitado usando un código de relay"
 cmd.start.opt.code.description: "Código de relay de un voice raid activo de otro servidor (déjalo vacío para iniciar uno nuevo)"
-cmd.start.opt.mode.description: "Un orador: solo el dueño captura. Muchos: mezcla todos. Uno↔Muchos: topología en estrella. (por defecto: Un orador)"
+cmd.start.opt.mode.description: "Modo: Un orador / Muchos oradores / Uno↔Muchos. Por defecto: Un orador."
 cmd.start.opt.mode.choice.one: "Un orador"
 cmd.start.opt.mode.choice.many: "Muchos oradores"
 cmd.start.opt.mode.choice.one_many: "Uno↔Muchos"
 
 cmd.stop.description: "Hacer que todos los speakers activos salgan de sus canales de voz"
 cmd.status.description: "Mostrar las vinculaciones actuales de speakers y el estado del voice raid"
-
-cmd.bind_role.description: "Establecer el rol cuyos miembros serán capturados y retransmitidos"
-cmd.bind_role.opt.role.description: "El rol del que capturar la voz"
-
-cmd.bind_manager_role.description: "Establecer el rol cuyos miembros pueden configurar, iniciar y detener el bot"
-cmd.bind_manager_role.opt.role.description: "El rol de gestor"
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Necesitas el permiso «Administrar servidor» o el rol de gestor para usar este comando."
@@ -42,10 +36,6 @@ raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. L
 raid.started: "🔴 **Voice raid iniciado.** Todos los speakers activos se han unido a sus canales."
 raid.started_with_code: "🔴 **Voice raid iniciado.** Todos los speakers activos se han unido a sus canales. Código de relay: `{{.Code}}`"
 raid.stopped: "⚫ **Voice raid detenido.** Todos los speakers han abandonado sus canales."
-
-# ── Role binding responses ────────────────────────────────────────────────────
-role.caller_set: "✅ Rol de captura establecido a <@&{{.RoleID}}>. Solo los miembros con este rol serán retransmitidos."
-role.manager_set: "✅ Rol de gestor establecido a <@&{{.RoleID}}>. Los miembros con este rol pueden configurar, iniciar y detener el bot."
 
 # ── Permissions warning ───────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Algunos bots no pueden acceder a su canal (falta permiso Connect/Speak):**"

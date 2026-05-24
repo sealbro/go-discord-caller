@@ -5,19 +5,13 @@ cmd.setup.description: "Wyświetl i skonfiguruj wszystkie boty speaker na tym se
 
 cmd.start.description: "Rozpocznij voice raid lub dołącz do istniejącego jako gość, używając kodu relay"
 cmd.start.opt.code.description: "Kod relay aktywnego voice raidu z innego serwera (zostaw pusty, aby rozpocząć nowy)"
-cmd.start.opt.mode.description: "Jeden mówi: tylko właściciel przechwytuje. Wielu: miks wszystkich. Jeden↔Wielu: topologia gwiazdy. (domyślnie: Jeden mówi)"
+cmd.start.opt.mode.description: "Tryb: Jeden mówi / Wielu mówi / Jeden↔Wielu. Domyślnie: Jeden mówi."
 cmd.start.opt.mode.choice.one: "Jeden mówi"
 cmd.start.opt.mode.choice.many: "Wielu mówi"
 cmd.start.opt.mode.choice.one_many: "Jeden↔Wielu"
 
 cmd.stop.description: "Każ wszystkim aktywnym speakerom opuścić swoje kanały głosowe"
 cmd.status.description: "Pokaż bieżące powiązania speakerów i stan voice raidu"
-
-cmd.bind_role.description: "Ustaw rolę, której członkowie będą przechwytywani i przekazywani"
-cmd.bind_role.opt.role.description: "Rola, z której przechwytywać głos"
-
-cmd.bind_manager_role.description: "Ustaw rolę, której członkowie mogą konfigurować, uruchamiać i zatrzymywać bota"
-cmd.bind_manager_role.opt.role.description: "Rola menedżera"
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Potrzebujesz uprawnienia „Zarządzaj serwerem” lub roli menedżera serwera, aby użyć tego polecenia."
@@ -42,10 +36,6 @@ raid.joined: "🔴 **Dołączono do sesji relay** `{{.Code}}` jako {{.Mode}}. Sp
 raid.started: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów."
 raid.started_with_code: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów. Kod relay: `{{.Code}}`"
 raid.stopped: "⚫ **Voice raid zatrzymany.** Wszyscy speakerzy opuścili swoje kanały."
-
-# ── Role binding responses ────────────────────────────────────────────────────
-role.caller_set: "✅ Rola przechwytywania ustawiona na <@&{{.RoleID}}>. Tylko członkowie z tą rolą będą przekazywani."
-role.manager_set: "✅ Rola menedżera ustawiona na <@&{{.RoleID}}>. Członkowie z tą rolą mogą konfigurować, uruchamiać i zatrzymywać bota."
 
 # ── Permissions warning ───────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Niektóre boty nie mogą uzyskać dostępu do swojego kanału (brak uprawnień Connect/Speak):**"

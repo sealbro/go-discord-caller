@@ -9,7 +9,6 @@ import (
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/handler"
-	"github.com/disgoorg/omit"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
@@ -24,84 +23,54 @@ import (
 // BuildCommands returns the slash command list with localized descriptions
 // (and option choice names) attached from the i18n bundle. Command names stay
 // in English; only descriptions and option choices are localized.
+//
+// Top-level Description fields render in English (Discord shows these to users
+// whose client locale is not present in DescriptionLocalizations). The
+// per-locale Localizations map covers every other supported locale.
 func BuildCommands(bundle *i18n.Bundle) []discord.ApplicationCommandCreate {
-	en := bundle.For("", "")
+	def := bundle.For("", "")
 
 	return []discord.ApplicationCommandCreate{
 		discord.SlashCommandCreate{
 			Name:                     "setup",
-			Description:              en.T("cmd.setup.description"),
+			Description:              def.T("cmd.setup.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.setup.description"),
 		},
 		discord.SlashCommandCreate{
 			Name:                     "start",
-			Description:              en.T("cmd.start.description"),
+			Description:              def.T("cmd.start.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.start.description"),
 			Options: []discord.ApplicationCommandOption{
 				discord.ApplicationCommandOptionString{
 					Name:                     "code",
-					Description:              en.T("cmd.start.opt.code.description"),
+					Description:              def.T("cmd.start.opt.code.description"),
 					DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.start.opt.code.description"),
 					Required:                 false,
 				},
 				discord.ApplicationCommandOptionString{
 					Name:                     "mode",
-					Description:              en.T("cmd.start.opt.mode.description"),
+					Description:              def.T("cmd.start.opt.mode.description"),
 					DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.start.opt.mode.description"),
 					Required:                 false,
 					Choices: []discord.ApplicationCommandOptionChoiceString{
-						{Name: en.T("cmd.start.opt.mode.choice.one"), NameLocalizations: bundle.NameLocalizations("cmd.start.opt.mode.choice.one"), Value: callerModeOne},
-						{Name: en.T("cmd.start.opt.mode.choice.many"), NameLocalizations: bundle.NameLocalizations("cmd.start.opt.mode.choice.many"), Value: callerModeMany},
-						{Name: en.T("cmd.start.opt.mode.choice.one_many"), NameLocalizations: bundle.NameLocalizations("cmd.start.opt.mode.choice.one_many"), Value: callerModeOneMany},
+						{Name: def.T("cmd.start.opt.mode.choice.one"), NameLocalizations: bundle.NameLocalizations("cmd.start.opt.mode.choice.one"), Value: callerModeOne},
+						{Name: def.T("cmd.start.opt.mode.choice.many"), NameLocalizations: bundle.NameLocalizations("cmd.start.opt.mode.choice.many"), Value: callerModeMany},
+						{Name: def.T("cmd.start.opt.mode.choice.one_many"), NameLocalizations: bundle.NameLocalizations("cmd.start.opt.mode.choice.one_many"), Value: callerModeOneMany},
 					},
 				},
 			},
 		},
 		discord.SlashCommandCreate{
 			Name:                     "stop",
-			Description:              en.T("cmd.stop.description"),
+			Description:              def.T("cmd.stop.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.stop.description"),
 		},
 		discord.SlashCommandCreate{
 			Name:                     "status",
-			Description:              en.T("cmd.status.description"),
+			Description:              def.T("cmd.status.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.status.description"),
 		},
-		discord.SlashCommandCreate{
-			Name:                     "bind-role",
-			Description:              en.T("cmd.bind_role.description"),
-			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.bind_role.description"),
-			DefaultMemberPermissions: permPtr(discord.PermissionAdministrator),
-			Options: []discord.ApplicationCommandOption{
-				discord.ApplicationCommandOptionRole{
-					Name:                     "role",
-					Description:              en.T("cmd.bind_role.opt.role.description"),
-					DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.bind_role.opt.role.description"),
-					Required:                 true,
-				},
-			},
-		},
-		discord.SlashCommandCreate{
-			Name:                     "bind-manager-role",
-			Description:              en.T("cmd.bind_manager_role.description"),
-			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.bind_manager_role.description"),
-			DefaultMemberPermissions: permPtr(discord.PermissionAdministrator),
-			Options: []discord.ApplicationCommandOption{
-				discord.ApplicationCommandOptionRole{
-					Name:                     "role",
-					Description:              en.T("cmd.bind_manager_role.opt.role.description"),
-					DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.bind_manager_role.opt.role.description"),
-					Required:                 true,
-				},
-			},
-		},
 	}
-}
-
-// permPtr wraps a Permissions value into the omit.Omit[*discord.Permissions] type
-// required by SlashCommandCreate.DefaultMemberPermissions.
-func permPtr(p discord.Permissions) omit.Omit[*discord.Permissions] {
-	return omit.New(&p)
 }
 
 // CommandHandlers wires all slash command and component routes to the manager service.
@@ -128,8 +97,6 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	r.SlashCommand("/start", h.withManager(h.handleStartVoiceRaid))
 	r.SlashCommand("/stop", h.withManager(h.handleStopVoiceRaid))
 	r.SlashCommand("/status", h.withGuild(h.handleStatus))
-	r.SlashCommand("/bind-role", h.withGuild(h.handleBindRole))
-	r.SlashCommand("/bind-manager-role", h.withGuild(h.handleBindManagerRole))
 
 	// Main setup menu components
 	r.SelectMenuComponent("/setup/bind-role", h.withGuildSelectMenu(h.handleBindRoleMenu))
@@ -288,12 +255,17 @@ func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID, loc *i18n.
 	return loc.T("setup.main_title") + "\n" + status.Render(loc), components
 }
 
+// localeAutoValue is the sentinel select-menu value for "no guild pin — use
+// each user's interaction locale". A non-empty value is required by Discord's
+// StringSelectMenuOption validation (must be 1-100 chars).
+const localeAutoValue = "auto"
+
 // buildLocaleSelect builds the per-guild language select menu. The currently
 // pinned locale (if any) is marked as default; "Auto" represents no pin.
 func (h *CommandHandlers) buildLocaleSelect(guildID snowflake.ID, loc *i18n.Localizer) discord.StringSelectMenuComponent {
 	pinned := h.manager.GetLocale(guildID)
 
-	autoOpt := discord.NewStringSelectMenuOption(loc.T("setup.locale_auto"), "")
+	autoOpt := discord.NewStringSelectMenuOption(loc.T("setup.locale_auto"), localeAutoValue)
 	if pinned == "" {
 		autoOpt = autoOpt.WithDefault(true)
 	}
@@ -571,28 +543,6 @@ func (h *CommandHandlers) handleStatus(guildID snowflake.ID, loc *i18n.Localizer
 	})
 }
 
-// handleBindRole sets the capture role directly via the /bind-role slash command.
-func (h *CommandHandlers) handleBindRole(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	roleID := data.Role("role").ID
-	h.manager.BindRole(guildID, store.RoleTypeCaller, roleID)
-
-	return e.CreateMessage(discord.MessageCreate{
-		Content: loc.T("role.caller_set", "RoleID", roleID.String()),
-		Flags:   discord.MessageFlagEphemeral,
-	})
-}
-
-// handleBindManagerRole sets the manager role directly via the /bind-manager-role slash command.
-func (h *CommandHandlers) handleBindManagerRole(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	roleID := data.Role("role").ID
-	h.manager.BindRole(guildID, store.RoleTypeManager, roleID)
-
-	return e.CreateMessage(discord.MessageCreate{
-		Content: loc.T("role.manager_set", "RoleID", roleID.String()),
-		Flags:   discord.MessageFlagEphemeral,
-	})
-}
-
 // ── Component handlers ───────────────────────────────────────────────────────
 
 // handleSpeakersPage opens (or navigates to) a speaker bind page.
@@ -646,7 +596,7 @@ func (h *CommandHandlers) handleBindLocale(guildID snowflake.ID, _ *i18n.Localiz
 	}
 
 	values := stringData.Values
-	if len(values) == 0 || values[0] == "" {
+	if len(values) == 0 || values[0] == localeAutoValue {
 		h.manager.UnbindLocale(guildID)
 	} else {
 		h.manager.BindLocale(guildID, values[0])

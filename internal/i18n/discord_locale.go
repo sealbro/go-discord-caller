@@ -41,7 +41,7 @@ func SupportedBundleLocales() []string {
 func DisplayName(bundleLocale string) string {
 	switch bundleLocale {
 	case "en":
-		return "🇺🇸 English"
+		return "🇬🇧 English"
 	case "es":
 		return "🇪🇸 Español"
 	case "de":

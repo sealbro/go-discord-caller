@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-05-24
+
+### Added
+- **Multi-language support (7 locales)**: every user-facing string — slash command descriptions, ephemeral responses, status output, raid mode labels, and `/setup` UI — is now translated into English, Russian, Spanish, German, French, Brazilian Portuguese, and Polish. CLDR plural forms handle Russian and Polish noun declension. Translations are embedded into the binary via `go:embed`, so no runtime files are required
+- **Per-guild language pin via `/setup`**: server admins can pin the bot's response language from a dropdown on the main setup page; the choice is persisted in the YAML store. Falls back to each user's Discord client locale when unpinned, and to English when the user's client locale is not in the bundle
+- **i18n test guards**: a bundle parity test fails CI if any non-English locale file is missing a key from `en.yaml`; a Discord-limits test validates that every command/option/choice name and description (across all locales) fits Discord's documented length limits — catches translation overruns before they reach Discord's command sync
+
+### Changed
+- **`Status.String()` → `Status.Render(loc)` and `RaidMode.Pretty()` → `Pretty(loc)`**: both renderers now take an `i18n.Translator` so status output and mode labels render in the active locale; passing `nil` falls back to English (used for logs and tests). Slash command descriptions also gain `DescriptionLocalizations` so Discord renders them per user automatically
+- **`bot.Commands` global → `BuildCommands(bundle)` factory**: the slash command list is now built at runtime from the i18n bundle so localizations stay in lockstep with the YAML files
+
+### Removed
+- **`/bind-role` and `/bind-manager-role` slash commands**: these duplicated functionality already covered by the `/setup` → "Bind Roles" sub-page, where role-select menus are pre-filled with the current binding. The interactive flow remains the only way to bind roles, removing the unused `omit` dependency and 42 dead translation strings (6 keys × 7 locales)
+
 ## [0.7.5] - 2026-05-09
 
 ### Added

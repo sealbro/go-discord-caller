@@ -164,6 +164,7 @@ func TestYAMLStore_Persistence(t *testing.T) {
 	s.BindChannel(guild1, user1, chan1)
 	s.BindRole(guild1, RoleTypeCaller, role1)
 	code := s.GetOrCreateAllyCode(guild1)
+	s.BindLocale(guild1, "ru")
 
 	s2 := reopen(t, s)
 
@@ -175,6 +176,88 @@ func TestYAMLStore_Persistence(t *testing.T) {
 	}
 	if got, ok := s2.GetAllyCode(guild1); !ok || got != code {
 		t.Errorf("ally code not persisted: %q,%v", got, ok)
+	}
+	if got, ok := s2.GetLocale(guild1); !ok || got != "ru" {
+		t.Errorf("locale not persisted: %q,%v", got, ok)
+	}
+}
+
+// TestYAMLStore_LocaleBindUnbind covers BindLocale, GetLocale, UnbindLocale,
+// and the "BindLocale with empty string clears the pin" shortcut.
+func TestYAMLStore_LocaleBindUnbind(t *testing.T) {
+	s := newTestStore(t)
+
+	// Initially unset.
+	if _, ok := s.GetLocale(guild1); ok {
+		t.Error("expected no locale set on a fresh store")
+	}
+
+	// Bind a real locale.
+	s.BindLocale(guild1, "ru")
+	if got, ok := s.GetLocale(guild1); !ok || got != "ru" {
+		t.Errorf("GetLocale after BindLocale(ru) = %q,%v; want %q,true", got, ok, "ru")
+	}
+
+	// Overwrite with a different locale.
+	s.BindLocale(guild1, "de")
+	if got, ok := s.GetLocale(guild1); !ok || got != "de" {
+		t.Errorf("GetLocale after BindLocale(de) = %q,%v; want %q,true", got, ok, "de")
+	}
+
+	// UnbindLocale clears the pin.
+	s.UnbindLocale(guild1)
+	if _, ok := s.GetLocale(guild1); ok {
+		t.Error("expected locale cleared after UnbindLocale")
+	}
+
+	// BindLocale("") is equivalent to UnbindLocale (documented shortcut).
+	s.BindLocale(guild1, "ru")
+	s.BindLocale(guild1, "")
+	if _, ok := s.GetLocale(guild1); ok {
+		t.Error("expected BindLocale(\"\") to clear the pin")
+	}
+}
+
+// TestYAMLStore_LocaleGuildIsolation verifies locale pins are per-guild.
+func TestYAMLStore_LocaleGuildIsolation(t *testing.T) {
+	s := newTestStore(t)
+
+	s.BindLocale(guild1, "ru")
+	s.BindLocale(guild2, "de")
+
+	if got, _ := s.GetLocale(guild1); got != "ru" {
+		t.Errorf("guild1 locale = %q; want %q", got, "ru")
+	}
+	if got, _ := s.GetLocale(guild2); got != "de" {
+		t.Errorf("guild2 locale = %q; want %q", got, "de")
+	}
+
+	// Unbinding guild1 must not affect guild2.
+	s.UnbindLocale(guild1)
+	if _, ok := s.GetLocale(guild1); ok {
+		t.Error("guild1 locale should be cleared")
+	}
+	if got, _ := s.GetLocale(guild2); got != "de" {
+		t.Errorf("guild2 locale unexpectedly changed to %q; want %q", got, "de")
+	}
+}
+
+// TestYAMLStore_LocaleUnbindPersisted verifies that clearing a locale survives
+// reopen (the unbind itself is persisted, not just the absence).
+func TestYAMLStore_LocaleUnbindPersisted(t *testing.T) {
+	s := newTestStore(t)
+
+	s.BindLocale(guild1, "ru")
+	s.BindLocale(guild2, "de")
+	s.UnbindLocale(guild1)
+
+	s2 := reopen(t, s)
+
+	if _, ok := s2.GetLocale(guild1); ok {
+		t.Error("unbound locale should not be persisted")
+	}
+	if got, ok := s2.GetLocale(guild2); !ok || got != "de" {
+		t.Errorf("surviving locale = %q,%v; want %q,true", got, ok, "de")
 	}
 }
 
@@ -285,6 +368,7 @@ func unmarshalYAML(data []byte) error {
 		channels:   make(map[channelKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
+		locales:    make(map[snowflake.ID]string),
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		flushed:    make(chan struct{}),

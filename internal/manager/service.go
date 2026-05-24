@@ -305,7 +305,12 @@ func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice
 // all enabled, bound speaker bots in guildID. Returns one ChannelAccessWarning for
 // each bot whose permissions are definitively denied. Relies on the cache pre-warmed
 // by warmGuildCache at startup; bots or channels not yet cached are skipped silently.
+// In test mode (AllowBots=true) the check is skipped entirely — test bot accounts
+// may not have full Discord permissions configured.
 func (m *Service) CheckGuildChannelAccess(guildID snowflake.ID) []ChannelAccessWarning {
+	if m.test.AllowBots {
+		return nil
+	}
 	speakers, err := m.snapshotSpeakers(guildID)
 	if err != nil {
 		return nil

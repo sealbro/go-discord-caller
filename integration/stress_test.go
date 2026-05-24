@@ -11,6 +11,44 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
+// TestStress_AllBotsPlayAudio connects all three harness bots to voice channels and plays
+// audio files for a fixed duration so the output can be verified by ear. The bot code
+// (manager/raid) is not started — run it manually before executing this test.
+//
+// Bot assignments:
+//   - E2E_SOURCE_BOT_TOKEN   → E2E_SPEAKER_CHANNEL_ID
+//   - E2E_SOURCE_BOT_TOKEN_2 → E2E_SPEAKER2_CHANNEL_ID
+//   - E2E_LISTENER_BOT_TOKEN → E2E_SPEAKER_CHANNEL_ID
+//
+// Run explicitly:
+//
+//	go test --tags=stress -run TestStress_AllBotsPlayAudio -v -timeout 7m ./integration/
+func TestStress_AllBotsPlayAudio(t *testing.T) {
+	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
+	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
+
+	const runDuration = 50 * time.Minute
+
+	ctx, cancel := context.WithTimeout(t.Context(), runDuration+30*time.Second)
+	defer cancel()
+
+	stopSource1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.Speaker1ChannelID)
+	defer stopSource1()
+	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.Speaker2ChannelID)
+	defer stopSource2()
+	stopListener := h.MustStartPlayingListener(t, ctx, h.Cfg.OwnerChannelID)
+	defer stopListener()
+
+	t.Logf("all 3 bots playing audio for %s in guild %s — verify quality by ear", runDuration, h.Cfg.GuildID)
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(runDuration):
+	}
+
+	t.Log("TestStress_AllBotsPlayAudio complete")
+}
+
 // TestStress_OneManyStarTopologyLong runs the star-topology scenario for 5 minutes
 // and checks for audio quality regressions that manifest as robotic or choppy voice.
 //

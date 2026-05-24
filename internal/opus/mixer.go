@@ -32,6 +32,28 @@ const (
 	mixerBitrate    = 48000 // bits per second sent to Opus encoder
 )
 
+// mixerComplexity is the Opus encoder complexity (0–10).
+// 5 is a good middle ground: significantly better quality than 3 for mixed
+// multi-source paths with modest additional CPU (~15% over complexity 3).
+const mixerComplexity = 5
+
+// mixerInputDrainThreshold is the maximum number of queued frames per input
+// (beyond the one just read) before the mixer drains to the latest.
+// 4 frames × 20 ms = 80 ms of tolerated jitter before drain kicks in.
+const mixerInputDrainThreshold = 3
+
+// encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
+// calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
+// Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
+//
+//	= 48000 × 20 / 1000 / 8 = 120 bytes  →  pool cap = 480 bytes.
+//
+// frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
+const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
+
+// encodedBuf is a fixed-size array backing encoded-frame pool entries (single allocation on miss).
+type encodedBuf [encodedFrameCap]byte
+
 // pcmBuf is a fixed-size array backing PCM pool entries (single allocation on miss).
 type pcmBuf [mixerPCMBuf]int16
 
@@ -48,18 +70,6 @@ func GetPCM() []int16 { return pcmPool.Get().(*pcmBuf)[:] }
 // PutPCM returns a PCM buffer to the pool for reuse.
 // The caller must not access the slice after this call.
 func PutPCM(s []int16) { pcmPool.Put((*pcmBuf)(s[:mixerPCMBuf])) }
-
-// encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
-// calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
-// Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
-//
-//	= 48000 × 20 / 1000 / 8 = 120 bytes  →  pool cap = 480 bytes.
-//
-// frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
-const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
-
-// encodedBuf is a fixed-size array backing encoded-frame pool entries (single allocation on miss).
-type encodedBuf [encodedFrameCap]byte
 
 var encodedFramePool = &sync.Pool{
 	New: func() any { return new(encodedBuf) },
@@ -136,16 +146,6 @@ type Mixer struct {
 	pcm        []int16
 	encodeBuf  []byte
 }
-
-// mixerComplexity is the Opus encoder complexity (0–10).
-// 5 is a good middle ground: significantly better quality than 3 for mixed
-// multi-source paths with modest additional CPU (~15% over complexity 3).
-const mixerComplexity = 5
-
-// mixerInputDrainThreshold is the maximum number of queued frames per input
-// (beyond the one just read) before the mixer drains to the latest.
-// 4 frames × 20 ms = 80 ms of tolerated jitter before drain kicks in.
-const mixerInputDrainThreshold = 3
 
 // NewMixer creates a Mixer ready to accept inputs and run.
 // metrics is a pre-baked recorder (guild_id already embedded); obtain one via

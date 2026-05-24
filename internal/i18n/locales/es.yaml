@@ -1,0 +1,110 @@
+# Spanish translations. Plural forms: one, other (CLDR es rules).
+
+# ── Slash command descriptions ────────────────────────────────────────────────
+cmd.setup.description: "Lista y configura todos los bots speaker de este servidor"
+
+cmd.start.description: "Iniciar un voice raid o unirse a uno existente como invitado usando un código de relay"
+cmd.start.opt.code.description: "Código de relay de un voice raid activo de otro servidor (déjalo vacío para iniciar uno nuevo)"
+cmd.start.opt.mode.description: "Un orador: solo el dueño captura. Muchos: mezcla todos. Uno↔Muchos: topología en estrella. (por defecto: Un orador)"
+cmd.start.opt.mode.choice.one: "Un orador"
+cmd.start.opt.mode.choice.many: "Muchos oradores"
+cmd.start.opt.mode.choice.one_many: "Uno↔Muchos"
+
+cmd.stop.description: "Hacer que todos los speakers activos salgan de sus canales de voz"
+cmd.status.description: "Mostrar las vinculaciones actuales de speakers y el estado del voice raid"
+
+cmd.bind_role.description: "Establecer el rol cuyos miembros serán capturados y retransmitidos"
+cmd.bind_role.opt.role.description: "El rol del que capturar la voz"
+
+cmd.bind_manager_role.description: "Establecer el rol cuyos miembros pueden configurar, iniciar y detener el bot"
+cmd.bind_manager_role.opt.role.description: "El rol de gestor"
+
+# ── Generic errors ────────────────────────────────────────────────────────────
+err.need_manager: "❌ Necesitas el permiso «Administrar servidor» o el rol de gestor para usar este comando."
+err.need_admin: "❌ Necesitas el permiso «Administrador» o el rol de gestor para usar este comando."
+err.guild_only: "este comando solo se puede usar dentro de un servidor"
+err.unexpected_data_type: "tipo de datos de interacción inesperado"
+err.invalid_speaker_id: "ID de speaker inválido"
+err.speaker_not_found: "❌ Speaker no encontrado en este servidor."
+err.no_more_tokens: "❌ Todos los tokens de speaker del pool ya han sido añadidos."
+
+# ── Voice raid responses ──────────────────────────────────────────────────────
+setup.blocked_active_raid: "⚠️ La configuración no está disponible mientras un voice raid está activo. Detén el raid primero."
+
+raid.already_active: "⚠️ Ya hay un voice raid activo en este servidor."
+raid.none_active: "⚠️ No hay ningún voice raid activo en este servidor."
+raid.join_blocked_permissions: "❌ No se puede unir a la sesión de relay: corrige primero los permisos de los bots."
+raid.start_blocked_permissions: "❌ No se puede iniciar el voice raid: corrige primero los permisos de los bots."
+raid.join_failed: "❌ Error al unirse a la sesión de relay `{{.Code}}`: {{.Err}}"
+raid.start_failed: "❌ Error al iniciar el voice raid: {{.Err}}"
+raid.stop_failed: "❌ Error al detener el voice raid: {{.Err}}"
+raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. Los speakers se están conectando a sus canales."
+raid.started: "🔴 **Voice raid iniciado.** Todos los speakers activos se han unido a sus canales."
+raid.started_with_code: "🔴 **Voice raid iniciado.** Todos los speakers activos se han unido a sus canales. Código de relay: `{{.Code}}`"
+raid.stopped: "⚫ **Voice raid detenido.** Todos los speakers han abandonado sus canales."
+
+# ── Role binding responses ────────────────────────────────────────────────────
+role.caller_set: "✅ Rol de captura establecido a <@&{{.RoleID}}>. Solo los miembros con este rol serán retransmitidos."
+role.manager_set: "✅ Rol de gestor establecido a <@&{{.RoleID}}>. Los miembros con este rol pueden configurar, iniciar y detener el bot."
+
+# ── Permissions warning ───────────────────────────────────────────────────────
+permissions.warning_header: "\n\n⚠️ **Algunos bots no pueden acceder a su canal (falta permiso Connect/Speak):**"
+
+# ── Setup UI ──────────────────────────────────────────────────────────────────
+setup.main_title: "**Configuración de speakers**"
+setup.roles_title: "**Vinculación de roles**"
+setup.speakers_title: "**Vinculación de speakers** — Página {{.Page}}/{{.Total}}"
+setup.no_speakers: "_Aún no hay speakers registrados._"
+setup.speakers_count:
+  one: "_{{.Count}} speaker en total._"
+  other: "_{{.Count}} speakers en total._"
+
+setup.bind_caller_placeholder: "Vincular bot caller a un canal de voz…"
+setup.bind_speaker_placeholder: "Vincular {{.Username}} a un canal de voz…"
+setup.select_caller_role: "Seleccionar rol de captura…"
+setup.select_manager_role: "Seleccionar rol de gestor…"
+setup.locale_placeholder: "Selecciona el idioma del bot…"
+setup.locale_auto: "🌐 Automático (idioma del cliente del usuario)"
+
+speaker.add_title: "**Añadir bot speaker**"
+speaker.add_steps: "1. Pulsa **Invitar al servidor** — el bot estará preseleccionado para este servidor.\n2. Completa la autorización en el navegador.\n3. El bot se registrará automáticamente al unirse al servidor."
+
+# ── Buttons ───────────────────────────────────────────────────────────────────
+btn.main_menu: "🏠 Menú principal"
+btn.bind_roles: "🎭 Vincular roles"
+btn.bind_speakers: "⚙️ Vincular speakers"
+btn.add_speaker: "➕ Añadir speaker"
+btn.invite: "🔗 Invitar al servidor"
+btn.enable: "Activar"
+btn.disable: "Desactivar"
+
+# ── Status (Status.Render) ────────────────────────────────────────────────────
+status.guild: "Servidor"
+status.capture_role: "Rol de captura"
+status.manager_role: "Rol de gestor"
+status.owner_channel: "Canal del bot caller"
+status.not_set: "no establecido"
+status.unbound: "sin vincular"
+status.ally_code: "Código aliado"
+status.raid: "Voice raid"
+status.raid_inactive: "⚫ inactivo"
+status.speakers_header:
+  one: "Speakers ({{.Count}}):"
+  other: "Speakers ({{.Count}}):"
+status.raid_active:
+  one: "🔴 activo ({{.Count}} speaker conectado)"
+  other: "🔴 activo ({{.Count}} speakers conectados)"
+status.raid_active_with_guests:
+  one: "🔴 activo ({{.Count}} speaker conectado) — invitados: {{.Guests}}"
+  other: "🔴 activo ({{.Count}} speakers conectados) — invitados: {{.Guests}}"
+status.raid_guest:
+  one: "🔴 relay invitado → {{.Host}} ({{.Count}} speaker conectado)"
+  other: "🔴 relay invitado → {{.Host}} ({{.Count}} speakers conectados)"
+
+# ── Raid mode labels (RaidMode.Pretty) ────────────────────────────────────────
+raid_mode.one_caller_host: "Un orador (anfitrión)"
+raid_mode.many_callers_host: "Muchos oradores (anfitrión)"
+raid_mode.listener_guest: "Oyente (invitado)"
+raid_mode.caller_guest: "Orador (invitado)"
+raid_mode.one_many_callers_host: "Uno↔Muchos (anfitrión)"
+raid_mode.one_many_caller_guest: "Uno↔Muchos (invitado)"

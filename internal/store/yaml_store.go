@@ -28,6 +28,7 @@ type yamlRoleEntry struct {
 type yamlGuildEntry struct {
 	GuildID  uint64             `yaml:"guild_id"`
 	AllyCode string             `yaml:"ally_code,omitempty"`
+	Locale   string             `yaml:"locale,omitempty"`
 	Channels []yamlChannelEntry `yaml:"channels,omitempty"`
 	Roles    []yamlRoleEntry    `yaml:"roles,omitempty"`
 }
@@ -49,6 +50,7 @@ type YAMLStore struct {
 	channels   map[channelKey]snowflake.ID
 	roles      map[roleKey]snowflake.ID
 	relayCodes map[snowflake.ID]string
+	locales    map[snowflake.ID]string
 
 	dirtyCh chan struct{} // signals the flush goroutine
 	done    chan struct{} // closed by Close to stop the flush goroutine
@@ -62,6 +64,7 @@ func NewYAMLStore(path string) (*YAMLStore, error) {
 		channels:   make(map[channelKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
+		locales:    make(map[snowflake.ID]string),
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		flushed:    make(chan struct{}),
@@ -157,6 +160,9 @@ func (s *YAMLStore) load() error {
 		if g.AllyCode != "" {
 			s.relayCodes[guildID] = g.AllyCode
 		}
+		if g.Locale != "" {
+			s.locales[guildID] = g.Locale
+		}
 	}
 	return nil
 }
@@ -192,6 +198,10 @@ func (s *YAMLStore) save() error {
 	for guildID, code := range s.relayCodes {
 		g := ensureGuild(guildID)
 		g.AllyCode = code
+	}
+	for guildID, locale := range s.locales {
+		g := ensureGuild(guildID)
+		g.Locale = locale
 	}
 
 	// Sort by guild ID for deterministic output.
@@ -304,4 +314,29 @@ func (s *YAMLStore) GetAllyCode(guildID snowflake.ID) (string, bool) {
 	defer s.mu.RUnlock()
 	code, ok := s.relayCodes[guildID]
 	return code, ok
+}
+
+func (s *YAMLStore) BindLocale(guildID snowflake.ID, locale string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if locale == "" {
+		delete(s.locales, guildID)
+	} else {
+		s.locales[guildID] = locale
+	}
+	s.markDirty()
+}
+
+func (s *YAMLStore) UnbindLocale(guildID snowflake.ID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.locales, guildID)
+	s.markDirty()
+}
+
+func (s *YAMLStore) GetLocale(guildID snowflake.ID) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	loc, ok := s.locales[guildID]
+	return loc, ok
 }

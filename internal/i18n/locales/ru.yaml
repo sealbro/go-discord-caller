@@ -1,0 +1,120 @@
+# Russian translations. Plural forms: one, few, many, other (CLDR ru rules).
+
+# ── Slash command descriptions ────────────────────────────────────────────────
+cmd.setup.description: "Список и настройка всех speaker-ботов на этом сервере"
+
+cmd.start.description: "Запустить голосовой рейд или присоединиться к существующему как гость, используя relay-код"
+cmd.start.opt.code.description: "Relay-код активного рейда другого сервера (оставьте пустым, чтобы начать новый)"
+cmd.start.opt.mode.description: "Один говорит: захват только владельца. Много: микс всех каналов. Один↔Много: звезда. (по умолчанию: Один говорит)"
+cmd.start.opt.mode.choice.one: "Один говорит"
+cmd.start.opt.mode.choice.many: "Много говорят"
+cmd.start.opt.mode.choice.one_many: "Один↔Много"
+
+cmd.stop.description: "Отключить всех активных speaker-ботов от голосовых каналов"
+cmd.status.description: "Показать текущие привязки speaker-ботов и состояние рейда"
+
+cmd.bind_role.description: "Назначить роль, чьи члены будут захватываться и транслироваться"
+cmd.bind_role.opt.role.description: "Роль для захвата голоса"
+
+cmd.bind_manager_role.description: "Назначить роль, чьи члены могут настраивать, запускать и останавливать бота"
+cmd.bind_manager_role.opt.role.description: "Роль менеджера"
+
+# ── Generic errors ────────────────────────────────────────────────────────────
+err.need_manager: "❌ Требуется право «Управление сервером» или роль менеджера сервера, чтобы использовать эту команду."
+err.need_admin: "❌ Требуется право «Администратор» или роль менеджера сервера, чтобы использовать эту команду."
+err.guild_only: "эту команду можно использовать только внутри сервера"
+err.unexpected_data_type: "неожиданный тип данных взаимодействия"
+err.invalid_speaker_id: "некорректный ID speaker-бота"
+err.speaker_not_found: "❌ Speaker-бот не найден на этом сервере."
+err.no_more_tokens: "❌ Все speaker-токены из пула уже добавлены."
+
+# ── Voice raid responses ──────────────────────────────────────────────────────
+setup.blocked_active_raid: "⚠️ Настройка недоступна во время активного рейда. Сначала остановите рейд."
+
+raid.already_active: "⚠️ На этом сервере уже идёт голосовой рейд."
+raid.none_active: "⚠️ На этом сервере нет активного голосового рейда."
+raid.join_blocked_permissions: "❌ Невозможно подключиться к relay-сессии: сначала исправьте права ботов."
+raid.start_blocked_permissions: "❌ Невозможно запустить рейд: сначала исправьте права ботов."
+raid.join_failed: "❌ Не удалось подключиться к relay-сессии `{{.Code}}`: {{.Err}}"
+raid.start_failed: "❌ Не удалось запустить голосовой рейд: {{.Err}}"
+raid.stop_failed: "❌ Не удалось остановить голосовой рейд: {{.Err}}"
+raid.joined: "🔴 **Подключено к relay-сессии** `{{.Code}}` как {{.Mode}}. Speaker-боты подключаются к своим каналам."
+raid.started: "🔴 **Голосовой рейд запущен.** Все активные speaker-боты подключились к своим каналам."
+raid.started_with_code: "🔴 **Голосовой рейд запущен.** Все активные speaker-боты подключились к своим каналам. Relay-код: `{{.Code}}`"
+raid.stopped: "⚫ **Голосовой рейд остановлен.** Все speaker-боты покинули свои каналы."
+
+# ── Role binding responses ────────────────────────────────────────────────────
+role.caller_set: "✅ Роль захвата установлена: <@&{{.RoleID}}>. Только участники с этой ролью будут транслироваться."
+role.manager_set: "✅ Роль менеджера установлена: <@&{{.RoleID}}>. Участники с этой ролью могут настраивать, запускать и останавливать бота."
+
+# ── Permissions warning ───────────────────────────────────────────────────────
+permissions.warning_header: "\n\n⚠️ **Некоторые боты не могут получить доступ к своему каналу (нет прав Connect/Speak):**"
+
+# ── Setup UI ──────────────────────────────────────────────────────────────────
+setup.main_title: "**Настройка Speaker-ботов**"
+setup.roles_title: "**Привязка ролей**"
+setup.speakers_title: "**Привязка Speaker-ботов** — страница {{.Page}}/{{.Total}}"
+setup.no_speakers: "_Speaker-боты ещё не зарегистрированы._"
+setup.speakers_count:
+  one: "_Всего {{.Count}} speaker-бот._"
+  few: "_Всего {{.Count}} speaker-бота._"
+  many: "_Всего {{.Count}} speaker-ботов._"
+  other: "_Всего {{.Count}} speaker-бота._"
+
+setup.bind_caller_placeholder: "Привязать caller-бота к голосовому каналу…"
+setup.bind_speaker_placeholder: "Привязать {{.Username}} к голосовому каналу…"
+setup.select_caller_role: "Выбрать роль захвата…"
+setup.select_manager_role: "Выбрать роль менеджера…"
+setup.locale_placeholder: "Выберите язык бота…"
+setup.locale_auto: "🌐 Авто (язык клиента пользователя)"
+
+speaker.add_title: "**Добавить Speaker-бота**"
+speaker.add_steps: "1. Нажмите **Пригласить на сервер** — этот сервер будет выбран автоматически.\n2. Завершите авторизацию в браузере.\n3. Бот будет зарегистрирован автоматически, как только присоединится к серверу."
+
+# ── Buttons ───────────────────────────────────────────────────────────────────
+btn.main_menu: "🏠 Главное меню"
+btn.bind_roles: "🎭 Привязать роли"
+btn.bind_speakers: "⚙️ Привязать speaker-ботов"
+btn.add_speaker: "➕ Добавить speaker-бота"
+btn.invite: "🔗 Пригласить на сервер"
+btn.enable: "Включить"
+btn.disable: "Выключить"
+
+# ── Status (Status.Render) ────────────────────────────────────────────────────
+status.guild: "Сервер"
+status.capture_role: "Роль захвата"
+status.manager_role: "Роль менеджера"
+status.owner_channel: "Канал caller-бота"
+status.not_set: "не задано"
+status.unbound: "не привязан"
+status.ally_code: "Ally-код"
+status.raid: "Голосовой рейд"
+status.raid_inactive: "⚫ неактивен"
+status.speakers_header:
+  one: "Speaker-боты ({{.Count}}):"
+  few: "Speaker-боты ({{.Count}}):"
+  many: "Speaker-боты ({{.Count}}):"
+  other: "Speaker-боты ({{.Count}}):"
+status.raid_active:
+  one: "🔴 активен ({{.Count}} speaker подключён)"
+  few: "🔴 активен ({{.Count}} speaker-а подключено)"
+  many: "🔴 активен ({{.Count}} speaker-ов подключено)"
+  other: "🔴 активен ({{.Count}} speaker-а подключено)"
+status.raid_active_with_guests:
+  one: "🔴 активен ({{.Count}} speaker подключён) — гости: {{.Guests}}"
+  few: "🔴 активен ({{.Count}} speaker-а подключено) — гости: {{.Guests}}"
+  many: "🔴 активен ({{.Count}} speaker-ов подключено) — гости: {{.Guests}}"
+  other: "🔴 активен ({{.Count}} speaker-а подключено) — гости: {{.Guests}}"
+status.raid_guest:
+  one: "🔴 гостевая relay-сессия → {{.Host}} ({{.Count}} speaker подключён)"
+  few: "🔴 гостевая relay-сессия → {{.Host}} ({{.Count}} speaker-а подключено)"
+  many: "🔴 гостевая relay-сессия → {{.Host}} ({{.Count}} speaker-ов подключено)"
+  other: "🔴 гостевая relay-сессия → {{.Host}} ({{.Count}} speaker-а подключено)"
+
+# ── Raid mode labels (RaidMode.Pretty) ────────────────────────────────────────
+raid_mode.one_caller_host: "Один говорит (хост)"
+raid_mode.many_callers_host: "Много говорят (хост)"
+raid_mode.listener_guest: "Слушатель (гость)"
+raid_mode.caller_guest: "Говорящий (гость)"
+raid_mode.one_many_callers_host: "Один↔Много (хост)"
+raid_mode.one_many_caller_guest: "Один↔Много (гость)"

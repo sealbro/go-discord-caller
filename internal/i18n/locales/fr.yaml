@@ -1,0 +1,110 @@
+# French translations. Plural forms: one (0, 1), other (CLDR fr rules).
+
+# ── Slash command descriptions ────────────────────────────────────────────────
+cmd.setup.description: "Lister et configurer tous les bots speaker de ce serveur"
+
+cmd.start.description: "Démarrer un voice raid, ou en rejoindre un existant en tant qu'invité avec un code relay"
+cmd.start.opt.code.description: "Code relay d'un voice raid actif d'un autre serveur (laisser vide pour en démarrer un nouveau)"
+cmd.start.opt.mode.description: "Un orateur : seul le propriétaire capture. Plusieurs : tout est mixé. Un↔Plusieurs : topologie en étoile. (par défaut : Un orateur)"
+cmd.start.opt.mode.choice.one: "Un orateur"
+cmd.start.opt.mode.choice.many: "Plusieurs orateurs"
+cmd.start.opt.mode.choice.one_many: "Un↔Plusieurs orateurs"
+
+cmd.stop.description: "Faire quitter leurs salons vocaux à tous les speakers actifs"
+cmd.status.description: "Afficher les associations actuelles des speakers et l'état du voice raid"
+
+cmd.bind_role.description: "Définir le rôle dont les membres seront capturés et retransmis"
+cmd.bind_role.opt.role.description: "Le rôle dont capturer la voix"
+
+cmd.bind_manager_role.description: "Définir le rôle dont les membres peuvent configurer, démarrer et arrêter le bot"
+cmd.bind_manager_role.opt.role.description: "Le rôle de gestionnaire"
+
+# ── Generic errors ────────────────────────────────────────────────────────────
+err.need_manager: "❌ Vous avez besoin de la permission « Gérer le serveur » ou du rôle de gestionnaire du serveur pour utiliser cette commande."
+err.need_admin: "❌ Vous avez besoin de la permission « Administrateur » ou du rôle de gestionnaire du serveur pour utiliser cette commande."
+err.guild_only: "cette commande ne peut être utilisée que dans un serveur"
+err.unexpected_data_type: "type de données d'interaction inattendu"
+err.invalid_speaker_id: "ID de speaker invalide"
+err.speaker_not_found: "❌ Speaker introuvable sur ce serveur."
+err.no_more_tokens: "❌ Tous les jetons de speaker du pool ont déjà été ajoutés."
+
+# ── Voice raid responses ──────────────────────────────────────────────────────
+setup.blocked_active_raid: "⚠️ La configuration n'est pas disponible pendant qu'un voice raid est actif. Arrêtez d'abord le raid."
+
+raid.already_active: "⚠️ Un voice raid est déjà actif sur ce serveur."
+raid.none_active: "⚠️ Aucun voice raid actif sur ce serveur."
+raid.join_blocked_permissions: "❌ Impossible de rejoindre la session relay : corrigez d'abord les permissions des bots."
+raid.start_blocked_permissions: "❌ Impossible de démarrer le voice raid : corrigez d'abord les permissions des bots."
+raid.join_failed: "❌ Échec de la connexion à la session relay `{{.Code}}` : {{.Err}}"
+raid.start_failed: "❌ Échec du démarrage du voice raid : {{.Err}}"
+raid.stop_failed: "❌ Échec de l'arrêt du voice raid : {{.Err}}"
+raid.joined: "🔴 **Connecté à la session relay** `{{.Code}}` en tant que {{.Mode}}. Les speakers se connectent à leurs salons."
+raid.started: "🔴 **Voice raid démarré.** Tous les speakers activés ont rejoint leurs salons."
+raid.started_with_code: "🔴 **Voice raid démarré.** Tous les speakers activés ont rejoint leurs salons. Code relay : `{{.Code}}`"
+raid.stopped: "⚫ **Voice raid arrêté.** Tous les speakers ont quitté leurs salons."
+
+# ── Role binding responses ────────────────────────────────────────────────────
+role.caller_set: "✅ Rôle de capture défini sur <@&{{.RoleID}}>. Seuls les membres avec ce rôle seront retransmis."
+role.manager_set: "✅ Rôle de gestionnaire défini sur <@&{{.RoleID}}>. Les membres avec ce rôle peuvent configurer, démarrer et arrêter le bot."
+
+# ── Permissions warning ───────────────────────────────────────────────────────
+permissions.warning_header: "\n\n⚠️ **Certains bots ne peuvent pas accéder à leur salon (permission Connect/Speak manquante) :**"
+
+# ── Setup UI ──────────────────────────────────────────────────────────────────
+setup.main_title: "**Configuration des speakers**"
+setup.roles_title: "**Associations de rôles**"
+setup.speakers_title: "**Associations de speakers** — Page {{.Page}}/{{.Total}}"
+setup.no_speakers: "_Aucun speaker enregistré pour le moment._"
+setup.speakers_count:
+  one: "_{{.Count}} speaker au total._"
+  other: "_{{.Count}} speakers au total._"
+
+setup.bind_caller_placeholder: "Associer le bot caller à un salon vocal…"
+setup.bind_speaker_placeholder: "Associer {{.Username}} à un salon vocal…"
+setup.select_caller_role: "Sélectionner le rôle de capture…"
+setup.select_manager_role: "Sélectionner le rôle de gestionnaire…"
+setup.locale_placeholder: "Sélectionnez la langue du bot…"
+setup.locale_auto: "🌐 Auto (langue du client de l'utilisateur)"
+
+speaker.add_title: "**Ajouter un bot speaker**"
+speaker.add_steps: "1. Cliquez sur **Inviter sur le serveur** — le bot sera pré-sélectionné pour ce serveur.\n2. Complétez l'autorisation dans le navigateur.\n3. Le bot sera enregistré automatiquement dès qu'il rejoindra le serveur."
+
+# ── Buttons ───────────────────────────────────────────────────────────────────
+btn.main_menu: "🏠 Menu principal"
+btn.bind_roles: "🎭 Associer les rôles"
+btn.bind_speakers: "⚙️ Associer les speakers"
+btn.add_speaker: "➕ Ajouter un speaker"
+btn.invite: "🔗 Inviter sur le serveur"
+btn.enable: "Activer"
+btn.disable: "Désactiver"
+
+# ── Status (Status.Render) ────────────────────────────────────────────────────
+status.guild: "Serveur"
+status.capture_role: "Rôle de capture"
+status.manager_role: "Rôle de gestionnaire"
+status.owner_channel: "Salon du bot caller"
+status.not_set: "non défini"
+status.unbound: "non associé"
+status.ally_code: "Code allié"
+status.raid: "Voice raid"
+status.raid_inactive: "⚫ inactif"
+status.speakers_header:
+  one: "Speakers ({{.Count}}) :"
+  other: "Speakers ({{.Count}}) :"
+status.raid_active:
+  one: "🔴 actif ({{.Count}} speaker connecté)"
+  other: "🔴 actif ({{.Count}} speakers connectés)"
+status.raid_active_with_guests:
+  one: "🔴 actif ({{.Count}} speaker connecté) — invités : {{.Guests}}"
+  other: "🔴 actif ({{.Count}} speakers connectés) — invités : {{.Guests}}"
+status.raid_guest:
+  one: "🔴 relay invité → {{.Host}} ({{.Count}} speaker connecté)"
+  other: "🔴 relay invité → {{.Host}} ({{.Count}} speakers connectés)"
+
+# ── Raid mode labels (RaidMode.Pretty) ────────────────────────────────────────
+raid_mode.one_caller_host: "Un orateur (hôte)"
+raid_mode.many_callers_host: "Plusieurs orateurs (hôte)"
+raid_mode.listener_guest: "Auditeur (invité)"
+raid_mode.caller_guest: "Orateur (invité)"
+raid_mode.one_many_callers_host: "Un↔Plusieurs orateurs (hôte)"
+raid_mode.one_many_caller_guest: "Un↔Plusieurs orateurs (invité)"

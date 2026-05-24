@@ -154,6 +154,29 @@ func (m *Service) UnbindRole(guildID snowflake.ID, roleType store.RoleType) {
 	)
 }
 
+// BindLocale pins the bot's response language for guildID. Pass "" to clear.
+func (m *Service) BindLocale(guildID snowflake.ID, locale string) {
+	m.store.BindLocale(guildID, locale)
+	slog.Info("locale bound",
+		slog.String("guildID", guildID.String()),
+		slog.String("locale", locale),
+	)
+}
+
+// UnbindLocale clears the pinned locale for guildID, reverting to per-user.
+func (m *Service) UnbindLocale(guildID snowflake.ID) {
+	m.store.UnbindLocale(guildID)
+	slog.Info("locale unbound", slog.String("guildID", guildID.String()))
+}
+
+// GetLocale returns the pinned locale for guildID, or "" if none is set.
+func (m *Service) GetLocale(guildID snowflake.ID) string {
+	if loc, ok := m.store.GetLocale(guildID); ok {
+		return loc
+	}
+	return ""
+}
+
 // HasManagerRole reports whether any of the supplied role IDs matches the
 // configured manager role for the guild.
 func (m *Service) HasManagerRole(guildID snowflake.ID, memberRoleIDs []snowflake.ID) bool {

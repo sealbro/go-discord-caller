@@ -47,6 +47,14 @@ type Store interface {
 	// GetAllyCode returns the stored ally code for guildID without creating one.
 	GetAllyCode(guildID snowflake.ID) (string, bool)
 
+	// BindLocale pins the bot's response language for guildID.
+	// Pass "" or call UnbindLocale to revert to per-user interaction locale.
+	BindLocale(guildID snowflake.ID, locale string)
+	// UnbindLocale clears any pinned locale for guildID.
+	UnbindLocale(guildID snowflake.ID)
+	// GetLocale returns the pinned locale for guildID, or "" if none is set.
+	GetLocale(guildID snowflake.ID) (string, bool)
+
 	// Close flushes any pending writes and releases resources.
 	Close()
 }
@@ -79,6 +87,7 @@ type InMemoryStore struct {
 	channels   map[channelKey]snowflake.ID // (userID, guildID) -> channelID
 	roles      map[roleKey]snowflake.ID    // (guildID, roleType) -> roleID
 	relayCodes map[snowflake.ID]string     // guildID -> relay code
+	locales    map[snowflake.ID]string     // guildID -> pinned bot locale
 }
 
 func NewInMemoryStore() *InMemoryStore {
@@ -86,6 +95,7 @@ func NewInMemoryStore() *InMemoryStore {
 		channels:   make(map[channelKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
+		locales:    make(map[snowflake.ID]string),
 	}
 }
 
@@ -143,6 +153,29 @@ func (s *InMemoryStore) GetAllyCode(guildID snowflake.ID) (string, bool) {
 	defer s.mu.RUnlock()
 	code, ok := s.relayCodes[guildID]
 	return code, ok
+}
+
+func (s *InMemoryStore) BindLocale(guildID snowflake.ID, locale string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if locale == "" {
+		delete(s.locales, guildID)
+		return
+	}
+	s.locales[guildID] = locale
+}
+
+func (s *InMemoryStore) UnbindLocale(guildID snowflake.ID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.locales, guildID)
+}
+
+func (s *InMemoryStore) GetLocale(guildID snowflake.ID) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	loc, ok := s.locales[guildID]
+	return loc, ok
 }
 
 func (s *InMemoryStore) Close() {}

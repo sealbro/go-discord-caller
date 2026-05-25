@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-05-25
+
+### Added
+- **Mixer idle-pause**: mixers auto-pause after 5 s of silence and resume when audio arrives, saving CPU in quiet channels
+- **Provider/receiver middleware**: voice provider and receiver pipelines now accept middleware hooks for future use (recording, transcription, etc.)
+
+### Changed
+- **Lower audio latency**: mixer inputs replaced with ring buffers polled each tick; worst-case queue depth drops from ~100 ms to ≤ 60 ms
+- **Go 1.26.3 + multi-arch Docker**: toolchain updated; Docker release images now build for `linux/amd64` and `linux/arm64`
+
 ## [0.8.0] - 2026-05-24
 
 ### Added

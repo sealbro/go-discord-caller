@@ -231,13 +231,20 @@ func startFanoutDirect(ctx context.Context, gm telemetry.GuildMetrics, in <-chan
 				if len(pkt) == 0 {
 					continue
 				}
+				// Each consumer (VoiceProvider) independently calls PutEncodedFrame
+				// on the buffer it receives. Sending the same pkt to N consumers
+				// would cause N pool-returns for one allocation. Copy per consumer.
 				for _, out := range outs {
+					buf := opus.CopyOpusFrame(pkt)
 					select {
-					case out <- pkt:
+					case out <- buf:
 					default:
+						opus.PutEncodedFrame(buf)
 						drop()
 					}
 				}
+				// session.BroadcastFromGuild takes ownership of pkt: it copies per
+				// relay channel and returns the original to the pool itself.
 				session.BroadcastFromGuild(guildID, pkt)
 			}
 		}
@@ -270,6 +277,7 @@ func startChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 				close(out)
 			}
 		}(mx, destOuts)
+		go opus.NewDrainWatcher(mx, opus.DrainIdleTimeout).Run(ctx)
 	}
 }
 
@@ -382,10 +390,16 @@ func registerRelayInputs(ctx context.Context, gm telemetry.GuildMetrics, session
 			for _, out := range outs {
 				pcm := opus.GetPCM()[:n*opus.MixerChannels]
 				copy(pcm, scratch[:n*opus.MixerChannels])
+				// Each mixer may do single-source passthrough, forwarding Frame.Opus
+				// directly to its sink. If multiple mixers share the same Opus slice
+				// each VoiceProvider would call PutEncodedFrame on the same backing
+				// array. Copy per output so every consumer owns its buffer.
+				opusCopy := opus.CopyOpusFrame(pkt)
 				select {
-				case out <- opus.Frame{PCM: pcm, Opus: pkt, CreatedAt: now}:
+				case out <- opus.Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now}:
 				default:
-					opus.PutPCM(pcm) // channel full — drop frame
+					opus.PutPCM(pcm)
+					opus.PutEncodedFrame(opusCopy)
 					drop()
 				}
 			}

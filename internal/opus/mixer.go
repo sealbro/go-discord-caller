@@ -125,10 +125,11 @@ type inputEntry struct {
 // non-bot users). While paused, tick still drains input channels to prevent
 // upstream backpressure, but skips mixing, encoding, and output — saving CPU.
 type Mixer struct {
-	mu      sync.Mutex
-	inputs  map[snowflake.ID]*inputEntry
-	paused  atomic.Bool
-	metrics telemetry.OpusRecorder
+	mu             sync.Mutex
+	inputs         map[snowflake.ID]*inputEntry
+	paused         atomic.Bool
+	lastActivityAt atomic.Int64 // UnixNano of last tick that consumed at least one frame
+	metrics        telemetry.OpusRecorder
 
 	// sink is the destination callback for produced frames. It is invoked
 	// synchronously from tick and must not block (multicast to destination
@@ -175,7 +176,7 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 	if err := enc.SetPacketLossPerc(5); err != nil {
 		return nil, fmt.Errorf("mixer: set packet loss perc: %w", err)
 	}
-	return &Mixer{
+	mx := &Mixer{
 		inputs:    make(map[snowflake.ID]*inputEntry),
 		enc:       enc,
 		metrics:   metrics,
@@ -183,7 +184,9 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 		pcm:       make([]int16, mixerPCMBuf),
 		encodeBuf: make([]byte, 4096),
 		framesBuf: make([]Frame, 0, 8),
-	}, nil
+	}
+	mx.lastActivityAt.Store(time.Now().UnixNano())
+	return mx, nil
 }
 
 // SetSink registers the destination callback invoked once per produced frame.
@@ -220,6 +223,17 @@ func (m *Mixer) SetPaused(p bool) {
 // Paused reports whether the mixer is currently paused.
 func (m *Mixer) Paused() bool {
 	return m.paused.Load()
+}
+
+// IdleFor returns the duration since the last tick that consumed at least one
+// input frame. Returns 0 if no frames have ever been consumed (the mixer was
+// just created and the idle countdown starts from NewMixer).
+func (m *Mixer) IdleFor() time.Duration {
+	t := m.lastActivityAt.Load()
+	if t == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(0, t))
 }
 
 // Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
@@ -329,6 +343,10 @@ func (m *Mixer) tick() error {
 		if hasFrame {
 			m.framesBuf = append(m.framesBuf, latest)
 		}
+	}
+
+	if len(m.framesBuf) > 0 {
+		m.lastActivityAt.Store(time.Now().UnixNano())
 	}
 
 	// When paused (no non-bot listeners in the destination channel), skip

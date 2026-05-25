@@ -6,6 +6,7 @@ import (
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 )
 
 // Code is the unique 8-character code that identifies an ally session.
@@ -40,18 +41,24 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 
 // broadcast sends pkt to every guild except excludeGuildID.
 // Pass 0 to send to all guilds. Must be called with s.mu held for reading.
+// Takes ownership of pkt: each channel receives its own copy so that
+// VoiceProviders can independently return their buffer to the pool via
+// PutEncodedFrame. The original pkt is returned to the pool at the end.
 func (s *Session) broadcast(pkt []byte, excludeGuildID snowflake.ID) {
 	for guildID, chs := range s.outs {
 		if guildID == excludeGuildID {
 			continue
 		}
 		for _, ch := range chs {
+			buf := opus.CopyOpusFrame(pkt)
 			select {
-			case ch <- pkt:
+			case ch <- buf:
 			default:
+				opus.PutEncodedFrame(buf)
 			}
 		}
 	}
+	opus.PutEncodedFrame(pkt)
 }
 
 // Broadcast fans a packet out to every registered guild's speaker channels.

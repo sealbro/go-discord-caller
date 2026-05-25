@@ -36,6 +36,17 @@ func getRecvFrame(n int) []byte {
 	return recvFramePool.Get().(*recvBuf)[:n]
 }
 
+// CopyOpusFrame allocates a pool-backed copy of src.
+// The caller owns the returned slice and must eventually pass it to PutEncodedFrame.
+// Use this when one Opus packet must be sent to multiple independent consumers
+// (e.g. multiple VoiceProviders) to avoid returning the same backing array to
+// the pool more than once.
+func CopyOpusFrame(src []byte) []byte {
+	dst := getRecvFrame(len(src))
+	copy(dst, src)
+	return dst
+}
+
 // FanoutInstall describes the destinations a VoiceReceiver should fan each
 // incoming Opus packet to once decoding is enabled. Built once per source by
 // the wiring code (e.g. wireFanout) and applied via FanoutHandle.Install.

@@ -23,7 +23,7 @@ import (
 
 // audioChanBuf is the buffer size for Opus frame channels between the voice
 // receiver/provider and the relay fan-out goroutines.
-// 10 frames × 20 ms = 200 ms max buffer depth; drain thresholds handle jitter
+// 5 frames × 20 ms = 100 ms max buffer depth; drain thresholds handle jitter
 // without accumulating large silent latency.
 const audioChanBuf = 5
 

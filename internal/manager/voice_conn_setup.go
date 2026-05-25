@@ -27,9 +27,10 @@ func NewVoiceConnSetup(userID snowflake.ID) *VoiceConnSetup {
 // WithVoiceProvider reads opus frames from chIn and plays them.
 // metrics carries both the histogram recorder and (optionally) the drop callback —
 // build it via GuildMetrics.Provider() to wire both in one shot.
-func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder) *VoiceConnSetup {
+// Optional mw wrappers are applied in order after construction (e.g. for recording).
+func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder, mw ...opus.ProviderMiddleware) *VoiceConnSetup {
 	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.NewVoiceProvider(chIn, metrics), nil
+		return opus.ApplyProviderMiddleware(opus.NewVoiceProvider(chIn, metrics), mw), nil
 	}
 	return v
 }
@@ -37,17 +38,19 @@ func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder) *Voic
 // WithVoiceReceiver captures incoming voice frames filtered by allowUser.
 // metrics carries both the histogram recorder and (optionally) the drop callback —
 // build it via GuildMetrics.Receiver() to wire both in one shot.
+// Optional mw wrappers are applied in order after construction (e.g. for recording).
 //
 // A FanoutHandle is created and attached to the receiver so the wiring code
 // can later call handle.Install with the topology-specific targets, switching
 // the receiver from legacy chan-bytes mode to inline decode + multicast mode.
 // Topologies that do NOT need decode (RaidModeOneCaller direct passthrough)
 // simply never call Install; the receiver falls back to the chan path.
-func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder) *VoiceConnSetup {
+func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder, mw ...opus.ReceiverMiddleware) *VoiceConnSetup {
 	v.receiverFn = func() (chan []byte, voice.OpusFrameReceiver, *opus.FanoutHandle, error) {
 		ch := make(chan []byte, audioChanBuf)
 		handle := opus.NewFanoutHandle()
-		return ch, opus.NewVoiceReceiver(ch, v.userID, allowUser, metrics, handle), handle, nil
+		r := opus.ApplyReceiverMiddleware(opus.NewVoiceReceiver(ch, v.userID, allowUser, metrics, handle), mw)
+		return ch, r, handle, nil
 	}
 	return v
 }

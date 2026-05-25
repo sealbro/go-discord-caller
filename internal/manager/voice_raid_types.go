@@ -130,14 +130,13 @@ const voiceLeaveTimeout = 5 * time.Second
 // (minimum value ~4 billion) so 1 never collides with a real user/bot ID.
 const relayInputID snowflake.ID = 1
 
-// sourceEntry is one audio capture channel feeding the relay mixer graph.
+// sourceEntry is one audio capture source feeding the relay mixer graph.
 // handle is non-nil when the source's VoiceReceiver dispatches via FanoutHandle
-// (modern fanout mode). The wiring code calls handle.Install to attach mixer
+// (inline fanout mode). The wiring code calls handle.Install to attach mixer
 // inputs; handle.Close at session-end fires the install-time OnClose hook.
 type sourceEntry struct {
 	id        snowflake.ID
 	channelID snowflake.ID
-	ch        <-chan []byte
 	handle    *opus.FanoutHandle
 }
 

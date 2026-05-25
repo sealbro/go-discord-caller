@@ -22,7 +22,7 @@ type pipelineParams struct {
 	allyCode     ally.Code
 	allySession  *ally.Session
 	setup        *raidSetup
-	chIn         chan []byte        // owner capture channel (output of VoiceReceiver in legacy chan path)
+	chIn         chan []byte        // owner capture channel; used by directPipeline (RaidModeOneCaller bypass only)
 	ownerHandle  *opus.FanoutHandle // owner FanoutHandle; non-nil when owner capture is enabled
 	chOwnerOut   chan []byte        // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
 	ownerCleanup func()             // closes owner provider/receiver; called on teardown or build error
@@ -51,6 +51,15 @@ func pipelineFor(mode guild.RaidMode) hostPipeline {
 	}
 }
 
+// chain composes multiple start functions into one ordered sequence.
+func chain(fns ...func()) func() {
+	return func() {
+		for _, fn := range fns {
+			fn()
+		}
+	}
+}
+
 // directPipeline handles RaidModeOneCaller: single source, raw Opus passthrough — no mixing.
 type directPipeline struct{}
 
@@ -64,10 +73,10 @@ func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Sessi
 		AllowFilter: p.allowFilter,
 		// ChannelMixers intentionally nil: UpdateMixerPause guards for nil.
 	}
-	start := func() {
-		startFanoutDirect(ctx, p.gm, p.chIn, p.setup.outs, p.allySession)
-		startDirectSessionCleanup(ctx, p.gm, p.ownerCleanup)
-	}
+	start := chain(
+		func() { startFanoutDirect(ctx, p.gm, p.chIn, p.setup.outs, p.allySession) },
+		func() { startDirectSessionCleanup(ctx, p.gm, p.ownerCleanup) },
+	)
 	return session, start, nil
 }
 
@@ -76,7 +85,7 @@ func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Sessi
 type starPipeline struct{}
 
 func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.chIn, p.ownerHandle, p.setup.joined)
+	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
 	destinations := buildDestinations(p.setup.joined)
 	if p.chOwnerOut != nil {
 		destinations = append(destinations, &destChannel{
@@ -130,7 +139,7 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 type mixMinusPipeline struct{}
 
 func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.chIn, p.ownerHandle, p.setup.joined)
+	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
 	destinations := buildDestinations(p.setup.joined)
 	if p.chOwnerOut != nil {
 		destinations = append(destinations, &destChannel{

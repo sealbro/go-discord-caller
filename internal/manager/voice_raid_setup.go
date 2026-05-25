@@ -166,10 +166,10 @@ func iterDeduplicatedCaptures(ctx context.Context, joined []speakerResult, fn fu
 
 // buildSources returns a deduplicated list of audio sources (one capture channel per voice
 // channel). When two speaker bots share a channel the second capture is drained and discarded.
-func buildSources(ctx context.Context, ownerUserID, ownerChannelID snowflake.ID, chIn chan []byte, ownerHandle *opus.FanoutHandle, joined []speakerResult) []sourceEntry {
-	sources := []sourceEntry{{ownerUserID, ownerChannelID, chIn, ownerHandle}}
+func buildSources(ctx context.Context, ownerUserID, ownerChannelID snowflake.ID, ownerHandle *opus.FanoutHandle, joined []speakerResult) []sourceEntry {
+	sources := []sourceEntry{{ownerUserID, ownerChannelID, ownerHandle}}
 	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture, r.handle})
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.handle})
 	})
 	return sources
 }
@@ -198,7 +198,7 @@ func buildDestinations(joined []speakerResult) []*destChannel {
 func buildGuestSources(ctx context.Context, joined []speakerResult) []sourceEntry {
 	var sources []sourceEntry
 	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.chCapture, r.handle})
+		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.handle})
 	})
 	return sources
 }

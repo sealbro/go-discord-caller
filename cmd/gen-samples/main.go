@@ -48,6 +48,16 @@ var macSpeakers = []struct {
 	{"Daniel", "Daniel"},
 }
 
+// espeakSpeakers lists espeak-ng voices used on non-macOS platforms.
+var espeakSpeakers = []struct {
+	voice string
+	name  string
+}{
+	{"en", "English"},
+	{"en-us", "American"},
+	{"en-gb", "British"},
+}
+
 func main() {
 	outDir := flag.String("outdir", "integration/samples", "output directory for .dca files")
 	bitrate := flag.Int("bitrate", 64000, "Opus bitrate in bps")
@@ -63,10 +73,27 @@ func main() {
 			return
 		}
 	}
+
+	if _, err := exec.LookPath("espeak-ng"); err == nil {
+		generateWithEspeak(*outDir, *bitrate)
+		return
+	}
+
+	log.Fatal("no TTS tool found — install espeak-ng (Linux) or run on macOS (say)")
 }
 
 func generateWithSay(outDir string, bitrate int) {
 	for _, sp := range macSpeakers {
+		text := fmt.Sprintf("Hello this is %s", sp.name)
+		outFile := filepath.Join(outDir, strings.ToLower(sp.name)+".dca")
+		if err := generate(text, sp.voice, outFile, bitrate); err != nil {
+			log.Fatalf("[%s] %v", sp.voice, err)
+		}
+	}
+}
+
+func generateWithEspeak(outDir string, bitrate int) {
+	for _, sp := range espeakSpeakers {
 		text := fmt.Sprintf("Hello this is %s", sp.name)
 		outFile := filepath.Join(outDir, strings.ToLower(sp.name)+".dca")
 		if err := generate(text, sp.voice, outFile, bitrate); err != nil {

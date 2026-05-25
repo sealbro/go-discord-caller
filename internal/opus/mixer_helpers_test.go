@@ -144,12 +144,12 @@ func newTestMixer(t *testing.T) (*Mixer, *outputCollector) {
 	return m, col
 }
 
-// newSourceChan returns a buffered Frame channel sized to absorb timing jitter.
-func newSourceChan() chan Frame { return make(chan Frame, 16) }
+// newSource returns a SourceBuffer used as a mixer input in tests.
+func newSource() *SourceBuffer { return NewSourceBuffer(nil) }
 
-// startPump feeds frames from the pre-encoded slice into ch at 20ms cadence.
+// startPump feeds frames from the pre-encoded slice into src at 20ms cadence.
 // Cycles through the slice indefinitely. Returns a stop func.
-func startPump(ctx context.Context, ch chan<- Frame, frames []testFrame) (stop func()) {
+func startPump(ctx context.Context, src *SourceBuffer, frames []testFrame) (stop func()) {
 	pumpCtx, cancel := context.WithCancel(ctx)
 	go func() {
 		ticker := time.NewTicker(mixerFrameDur)
@@ -162,13 +162,9 @@ func startPump(ctx context.Context, ch chan<- Frame, frames []testFrame) (stop f
 				f := frames[i%len(frames)]
 				pcm := GetPCM()
 				copy(pcm, f.pcm)
-				opus := make([]byte, len(f.opus))
-				copy(opus, f.opus)
-				select {
-				case ch <- Frame{PCM: pcm, Opus: opus, CreatedAt: time.Now()}:
-				default:
-					PutPCM(pcm) // channel full — discard rather than block (opus is heap-only, GC handles it)
-				}
+				opusCopy := make([]byte, len(f.opus))
+				copy(opusCopy, f.opus)
+				src.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: time.Now()})
 			}
 		}
 	}()

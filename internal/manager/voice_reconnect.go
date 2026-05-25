@@ -82,10 +82,12 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
+		t := time.NewTimer(2 * time.Second)
 		select {
 		case <-reconnCtx.Done():
+			t.Stop()
 			return
-		case <-time.After(2 * time.Second):
+		case <-t.C:
 		}
 		if !m.HasActiveSession(guildID) {
 			return // session ended during backoff

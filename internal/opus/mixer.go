@@ -37,11 +37,6 @@ const (
 // multi-source paths with modest additional CPU (~15% over complexity 3).
 const mixerComplexity = 5
 
-// mixerInputDrainThreshold is the maximum number of queued frames per input
-// (beyond the one just read) before the mixer drains to the latest.
-// 4 frames × 20 ms = 80 ms of tolerated jitter before drain kicks in.
-const mixerInputDrainThreshold = 3
-
 // encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
 // calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
 // Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
@@ -110,10 +105,9 @@ type Frame struct {
 	CreatedAt time.Time
 }
 
-// inputEntry holds a single mixer input. The channel carries Frame values
-// produced by an upstream fanout goroutine.
+// inputEntry holds a single mixer input backed by an AudioSource.
 type inputEntry struct {
-	ch <-chan Frame
+	src AudioSource
 }
 
 // Mixer receives Opus frames from multiple named input channels, mixes their PCM,
@@ -125,10 +119,11 @@ type inputEntry struct {
 // non-bot users). While paused, tick still drains input channels to prevent
 // upstream backpressure, but skips mixing, encoding, and output — saving CPU.
 type Mixer struct {
-	mu      sync.Mutex
-	inputs  map[snowflake.ID]*inputEntry
-	paused  atomic.Bool
-	metrics telemetry.OpusRecorder
+	mu             sync.Mutex
+	inputs         map[snowflake.ID]*inputEntry
+	paused         atomic.Bool
+	lastActivityAt atomic.Int64 // UnixNano of last tick that consumed at least one frame
+	metrics        telemetry.OpusRecorder
 
 	// sink is the destination callback for produced frames. It is invoked
 	// synchronously from tick and must not block (multicast to destination
@@ -175,7 +170,7 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 	if err := enc.SetPacketLossPerc(5); err != nil {
 		return nil, fmt.Errorf("mixer: set packet loss perc: %w", err)
 	}
-	return &Mixer{
+	mx := &Mixer{
 		inputs:    make(map[snowflake.ID]*inputEntry),
 		enc:       enc,
 		metrics:   metrics,
@@ -183,7 +178,9 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 		pcm:       make([]int16, mixerPCMBuf),
 		encodeBuf: make([]byte, 4096),
 		framesBuf: make([]Frame, 0, 8),
-	}, nil
+	}
+	mx.lastActivityAt.Store(time.Now().UnixNano())
+	return mx, nil
 }
 
 // SetSink registers the destination callback invoked once per produced frame.
@@ -193,11 +190,10 @@ func (m *Mixer) SetSink(sink func(pkt []byte)) {
 	m.sink = sink
 }
 
-// AddInput registers a new audio source identified by id.
-// ch must carry Frame values produced by an upstream fanout goroutine.
-func (m *Mixer) AddInput(id snowflake.ID, ch <-chan Frame) error {
+// AddInput registers an AudioSource identified by id.
+func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
 	m.mu.Lock()
-	m.inputs[id] = &inputEntry{ch: ch}
+	m.inputs[id] = &inputEntry{src: src}
 	m.mu.Unlock()
 	return nil
 }
@@ -220,6 +216,17 @@ func (m *Mixer) SetPaused(p bool) {
 // Paused reports whether the mixer is currently paused.
 func (m *Mixer) Paused() bool {
 	return m.paused.Load()
+}
+
+// IdleFor returns the duration since the last tick that consumed at least one
+// input frame. Returns 0 if no frames have ever been consumed (the mixer was
+// just created and the idle countdown starts from NewMixer).
+func (m *Mixer) IdleFor() time.Duration {
+	t := m.lastActivityAt.Load()
+	if t == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(0, t))
 }
 
 // Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
@@ -271,64 +278,24 @@ func (m *Mixer) tick() error {
 	// map entry; it does not touch the inputEntry struct itself. Reading a
 	// closed or already-drained channel is always safe in Go.
 
-	// Read one frame per input. Only drain to latest when paused (to prevent
-	// upstream backpressure) or when the backlog exceeds the threshold
-	// (to cap accumulated latency). Under normal jitter (0–2 frames queued)
-	// frames are consumed one-per-tick without drops, and the channel buffer
-	// absorbs timing misalignment between upstream fanout and the mixer tick.
+	// Pull one frame per input. When paused, drain all buffered frames instead
+	// to prevent PCM/Opus buffer accumulation (SourceBuffer holds pooled memory).
+	// Overflow/jitter handling is now inside SourceBuffer.Feed (drops oldest on
+	// overflow), so no drain-threshold bleed-off logic is needed here.
 	m.framesBuf = m.framesBuf[:0]
 	for _, e := range m.entriesBuf {
-		var latest Frame
-		hasFrame := false
-
-		// Non-blocking read of one frame.
-		select {
-		case f := <-e.ch:
-			if len(f.PCM) > 0 {
-				latest = f
-				hasFrame = true
-			}
-		default:
+		if paused {
+			e.src.Drain()
+			continue
 		}
-
-		// Backlog handling.
-		//   Paused      → full flush (backpressure relief; output is suppressed
-		//                 anyway, so dropping everything has no audible effect).
-		//   Over threshold (active) → bleed off one extra frame per tick. This
-		//                 trades a one-shot N×20 ms gap for N small 20 ms gaps
-		//                 spread over N ticks, which converges on the live edge
-		//                 without producing a single audible drop-out.
-		switch {
-		case paused:
-		drain:
-			for {
-				select {
-				case f := <-e.ch:
-					if len(f.PCM) > 0 {
-						if hasFrame {
-							PutPCM(latest.PCM) // return superseded frame's buffer
-						}
-						latest = f
-						hasFrame = true
-					}
-				default:
-					break drain
-				}
-			}
-		case hasFrame && len(e.ch) > mixerInputDrainThreshold:
-			select {
-			case f := <-e.ch:
-				if len(f.PCM) > 0 {
-					PutPCM(latest.PCM) // return superseded frame's buffer
-					latest = f
-				}
-			default:
-			}
+		f, ok := e.src.Pull()
+		if ok && len(f.PCM) > 0 {
+			m.framesBuf = append(m.framesBuf, f)
 		}
+	}
 
-		if hasFrame {
-			m.framesBuf = append(m.framesBuf, latest)
-		}
+	if len(m.framesBuf) > 0 {
+		m.lastActivityAt.Store(time.Now().UnixNano())
 	}
 
 	// When paused (no non-bot listeners in the destination channel), skip

@@ -16,7 +16,7 @@ func TestMixerSoloPassthrough(t *testing.T) {
 	ctx := context.Background()
 
 	frames := generateTestFrames(t, 440, 8, testAmplitude)
-	ch := newSourceChan()
+	ch := newSource()
 	m.AddInput(newID(), ch)
 	stop := startPump(ctx, ch, frames)
 	t.Cleanup(stop)
@@ -48,7 +48,7 @@ func TestMixerTwoSpeakers(t *testing.T) {
 	framesA := generateTestFrames(t, 440, 8, testAmplitude)
 	framesB := generateTestFrames(t, 880, 8, testAmplitude)
 
-	chA, chB := newSourceChan(), newSourceChan()
+	chA, chB := newSource(), newSource()
 	m.AddInput(newID(), chA)
 	m.AddInput(newID(), chB)
 	stopA := startPump(ctx, chA, framesA)
@@ -88,7 +88,7 @@ func TestMixerThreeSpeakers(t *testing.T) {
 
 	for _, freq := range []int{440, 880, 1320} {
 		frames := generateTestFrames(t, freq, 8, testAmplitude3)
-		ch := newSourceChan()
+		ch := newSource()
 		m.AddInput(newID(), ch)
 		stop := startPump(ctx, ch, frames)
 		t.Cleanup(stop)
@@ -120,7 +120,7 @@ func TestMixerJoinMidStream(t *testing.T) {
 	framesB := generateTestFrames(t, 880, 8, testAmplitude)
 
 	// Phase 1: solo source A — passthrough must be active.
-	chA := newSourceChan()
+	chA := newSource()
 	m.AddInput(newID(), chA)
 	stopA := startPump(ctx, chA, framesA)
 	t.Cleanup(stopA)
@@ -136,7 +136,7 @@ func TestMixerJoinMidStream(t *testing.T) {
 	}
 
 	// Phase 2: add source B and allow a few ticks for the mixer to see both inputs.
-	chB := newSourceChan()
+	chB := newSource()
 	m.AddInput(newID(), chB)
 	stopB := startPump(ctx, chB, framesB)
 	t.Cleanup(stopB)
@@ -172,7 +172,7 @@ func TestMixerLeaveMidStream(t *testing.T) {
 	framesA := generateTestFrames(t, 440, 8, testAmplitude)
 	framesB := generateTestFrames(t, 880, 8, testAmplitude)
 
-	chA, chB := newSourceChan(), newSourceChan()
+	chA, chB := newSource(), newSource()
 	idB := newID()
 	m.AddInput(newID(), chA)
 	m.AddInput(idB, chB)
@@ -215,7 +215,7 @@ func TestMixerRapidJoinLeave(t *testing.T) {
 	framesC := generateTestFrames(t, 880, 8, testAmplitude)
 
 	// Phase 1: solo A.
-	chA := newSourceChan()
+	chA := newSource()
 	m.AddInput(newID(), chA)
 	stopA := startPump(ctx, chA, framesA)
 	t.Cleanup(stopA)
@@ -224,7 +224,7 @@ func TestMixerRapidJoinLeave(t *testing.T) {
 	}
 
 	// Phase 2: three simultaneous speakers.
-	chB, chC := newSourceChan(), newSourceChan()
+	chB, chC := newSource(), newSource()
 	idB, idC := newID(), newID()
 	m.AddInput(idB, chB)
 	m.AddInput(idC, chC)

@@ -1,7 +1,7 @@
 ARG GO_VERSION=latest
 ARG LIBDAVE_VERSION=v1.1.1
 
-FROM golang:${GO_VERSION} as builder
+FROM golang:${GO_VERSION} AS builder
 
 ARG LIBDAVE_VERSION
 
@@ -28,7 +28,7 @@ RUN mkdir -p /runtime-libs && \
         | awk '{print $3}' \
         | xargs -I{} cp --dereference {} /runtime-libs/
 
-FROM gcr.io/distroless/base as runtime
+FROM gcr.io/distroless/base AS runtime
 
 LABEL org.opencontainers.image.title="go-discord-caller" \
       org.opencontainers.image.description="Go Discord bot that captures voice audio and relays it live to every bound speaker bot — across one or multiple Discord servers simultaneously." \

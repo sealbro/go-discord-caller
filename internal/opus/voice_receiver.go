@@ -55,19 +55,19 @@ type FanoutInstall struct {
 	// forward packets without re-encoding (e.g. owner→speaker direct path
 	// in star topology). Each target gets its own pooled copy.
 	OpusTargets []chan<- []byte
-	// FrameTargets receive decoded Frames. Each target gets its own PCM buffer
-	// (from the pool); the original Opus bytes are shared across all Frames so
-	// the mixer's single-source passthrough optimisation can avoid re-encoding.
-	FrameTargets []chan<- Frame
+	// SourceTargets receive decoded Frames via SourceBuffer.Feed. Each target
+	// gets its own PCM and Opus copy so the mixer's single-source passthrough
+	// optimisation can safely forward Opus bytes without re-encoding.
+	// Overflow is handled inside SourceBuffer (oldest frame dropped); no
+	// select/default or separate DropFrame counter is needed here.
+	SourceTargets []*SourceBuffer
 	// OnClose is called once when the FanoutHandle is closed (session-end
-	// teardown). Use it to detach mixer inputs (RemoveInput) and release
-	// any other state. NOT called on reconnect-time receiver close.
+	// teardown). Use it to detach mixer inputs (RemoveInput) and drain any
+	// remaining SourceBuffer frames. NOT called on reconnect-time receiver close.
 	OnClose func()
 	// DropOpus is invoked each time an OpusTargets send is dropped because
 	// the destination channel is full. Optional.
 	DropOpus func()
-	// DropFrame is invoked each time a FrameTargets send is dropped. Optional.
-	DropFrame func()
 }
 
 // FanoutHandle is the session-stable dispatch state shared across reconnects
@@ -95,22 +95,20 @@ func NewFanoutHandle() *FanoutHandle { return &FanoutHandle{} }
 // fanoutDispatch is the immutable bundle stored in the handle's atomic
 // pointer once Install runs.
 type fanoutDispatch struct {
-	opusTargets  []chan<- []byte
-	frameTargets []chan<- Frame
-	onClose      func()
-	dropOpus     func()
-	dropFrame    func()
+	opusTargets   []chan<- []byte
+	sourceTargets []*SourceBuffer
+	onClose       func()
+	dropOpus      func()
 }
 
 // Install activates fanout mode for this handle. Idempotent in the sense that
 // the latest Install wins; typically called once per session.
 func (h *FanoutHandle) Install(opts FanoutInstall) {
 	h.state.Store(&fanoutDispatch{
-		opusTargets:  opts.OpusTargets,
-		frameTargets: opts.FrameTargets,
-		onClose:      opts.OnClose,
-		dropOpus:     opts.DropOpus,
-		dropFrame:    opts.DropFrame,
+		opusTargets:   opts.OpusTargets,
+		sourceTargets: opts.SourceTargets,
+		onClose:       opts.OnClose,
+		dropOpus:      opts.DropOpus,
 	})
 }
 
@@ -227,7 +225,7 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) {
 	// Lazy-init the decoder on the first frame-target dispatch. A receiver
 	// with only OpusTargets never allocates one.
-	if v.decoder == nil && len(state.frameTargets) > 0 {
+	if v.decoder == nil && len(state.sourceTargets) > 0 {
 		dec, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
 		if err != nil {
 			slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
@@ -256,7 +254,7 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		}
 	}
 
-	if len(state.frameTargets) == 0 || v.decoder == nil {
+	if len(state.sourceTargets) == 0 || v.decoder == nil {
 		return
 	}
 
@@ -266,27 +264,15 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		return
 	}
 	now := time.Now()
-	// Each frameTarget gets its own Opus buffer so that when multiple mixers
-	// do single-source passthrough, each VoiceProvider safely returns its own
-	// copy via PutEncodedFrame without double-returning the same buffer.
-	for _, t := range state.frameTargets {
+	// Each sourceTarget gets its own PCM and Opus copy. SourceBuffer.Feed
+	// handles overflow internally (drops oldest + calls its drop func).
+	// No select/done check needed: Feed is synchronous and non-blocking.
+	for _, t := range state.sourceTargets {
 		pcm := GetPCM()[:n*MixerChannels]
 		copy(pcm, v.scratch[:n*MixerChannels])
-		opus := getRecvFrame(len(opusBytes))
-		copy(opus, opusBytes)
-		select {
-		case t <- Frame{PCM: pcm, Opus: opus, CreatedAt: now}:
-		case <-v.done:
-			PutPCM(pcm)
-			PutEncodedFrame(opus)
-			return
-		default:
-			PutPCM(pcm)
-			PutEncodedFrame(opus)
-			if state.dropFrame != nil {
-				state.dropFrame()
-			}
-		}
+		opusCopy := getRecvFrame(len(opusBytes))
+		copy(opusCopy, opusBytes)
+		t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now})
 	}
 }
 

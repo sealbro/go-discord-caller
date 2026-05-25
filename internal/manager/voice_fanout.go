@@ -13,11 +13,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// relayBridgeDrainThreshold is the number of queued Opus packets in the relay
-// input channel above which the bridge goroutine drains to the latest.
-// 3 frames × 20 ms = 60 ms of tolerated relay jitter before drain kicks in.
-const relayBridgeDrainThreshold = 3
-
 // mixerRef pairs a mixer with the source ID registered in it, so the fanout
 // goroutine can call RemoveInput when the source channel is exhausted.
 type mixerRef struct {
@@ -25,17 +20,17 @@ type mixerRef struct {
 	id snowflake.ID
 }
 
-// tryAddMixerInput creates a buffered frame channel and registers it as an input
-// on mx for id. On success the channel and a removal entry are appended to
-// *fanTargets and *removals. On failure a warning is logged with label as the
-// component prefix (e.g. "relay mixer", "channel mixer").
-func tryAddMixerInput(ctx context.Context, mx *opus.Mixer, id snowflake.ID, label string, fanTargets *[]chan opus.Frame, removals *[]mixerRef) {
-	ch := make(chan opus.Frame, audioChanBuf)
-	if err := mx.AddInput(id, ch); err != nil {
+// tryAddMixerInput creates a SourceBuffer and registers it as an input on mx for id.
+// On success the buffer and a removal entry are appended to *fanSources and *removals.
+// drop is passed to NewSourceBuffer so overflow events are counted. On failure a
+// warning is logged with label as the component prefix (e.g. "relay mixer").
+func tryAddMixerInput(ctx context.Context, mx *opus.Mixer, id snowflake.ID, label string, drop func(), fanSources *[]*opus.SourceBuffer, removals *[]mixerRef) {
+	src := opus.NewSourceBuffer(drop)
+	if err := mx.AddInput(id, src); err != nil {
 		slog.WarnContext(ctx, label+": failed to add input", slog.Any("err", err))
 		return
 	}
-	*fanTargets = append(*fanTargets, ch)
+	*fanSources = append(*fanSources, src)
 	*removals = append(*removals, mixerRef{mx, id})
 }
 
@@ -49,37 +44,29 @@ func endSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 	slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", gm.GuildID().String()))
 }
 
-// installFanoutSource installs frame targets on src.handle so that every Opus
+// installFanoutSource installs SourceBuffer targets on handle so that every Opus
 // packet received by the source's VoiceReceiver is decoded inline (in
-// ReceiveOpusFrame, on disgo's UDP read goroutine) and distributed to every
-// mixer input channel in frameTargets — eliminating the per-source decode
-// goroutine and the buffered-chan hop that previously sat between the
-// receiver and the mixers.
+// ReceiveOpusFrame, on disgo's UDP read goroutine) and pushed into each
+// SourceBuffer via Feed — eliminating the per-source decode goroutine and the
+// buffered-chan hop that previously sat between the receiver and the mixers.
 //
 // On handle close (session-end teardown) OnClose calls RemoveInput on every
-// registered mixer, mirroring the deferred cleanup in the old goroutine path.
-//
-// READ-ONLY CONTRACT: the Opus bytes referenced by each Frame are shared
-// across all FrameTargets. No consumer may mutate them. The mixer copies them
-// before forwarding to its output channel (see Mixer.tick single-source path),
-// so downstream consumers always get their own slice.
-func installFanoutSource(handle *opus.FanoutHandle, frameTargets []chan opus.Frame, removals []mixerRef, drop func()) {
+// registered mixer and drains each SourceBuffer to return pooled buffers.
+func installFanoutSource(handle *opus.FanoutHandle, sources []*opus.SourceBuffer, removals []mixerRef) {
 	if handle == nil {
 		slog.Error("fanout: source has no handle, frames will not be dispatched")
 		return
 	}
-	targets := make([]chan<- opus.Frame, len(frameTargets))
-	for i, t := range frameTargets {
-		targets[i] = t
-	}
 	handle.Install(opus.FanoutInstall{
-		FrameTargets: targets,
+		SourceTargets: sources,
 		OnClose: func() {
 			for _, r := range removals {
 				r.mx.RemoveInput(r.id)
 			}
+			for _, src := range sources {
+				src.Drain()
+			}
 		},
-		DropFrame: drop,
 	})
 }
 
@@ -93,19 +80,19 @@ func installFanoutSource(handle *opus.FanoutHandle, frameTargets []chan opus.Fra
 func wireFanout(ctx context.Context, gm telemetry.GuildMetrics, sources []sourceEntry, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer) {
 	drop := gm.Drop(telemetry.DropPathMixer)
 	for _, src := range sources {
-		var fanTargets []chan opus.Frame
+		var fanSources []*opus.SourceBuffer
 		var removals []mixerRef
 
-		tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", &fanTargets, &removals)
+		tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", drop, &fanSources, &removals)
 
 		for _, dest := range dests {
 			if dest.channelID == src.channelID {
 				continue // mix-minus: don't relay audio back to its origin channel
 			}
-			tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", &fanTargets, &removals)
+			tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", drop, &fanSources, &removals)
 		}
 
-		installFanoutSource(src.handle, fanTargets, removals, drop)
+		installFanoutSource(src.handle, fanSources, removals)
 	}
 }
 
@@ -121,11 +108,11 @@ func wireFanout(ctx context.Context, gm telemetry.GuildMetrics, sources []source
 func wireFanoutOneMany(ctx context.Context, gm telemetry.GuildMetrics, sources []sourceEntry, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayMixer *opus.Mixer, ownerChannelID snowflake.ID) {
 	drop := gm.Drop(telemetry.DropPathMixer)
 	for _, src := range sources {
-		var fanTargets []chan opus.Frame
+		var fanSources []*opus.SourceBuffer
 		var removals []mixerRef
 
 		// All sources always feed the relay mixer.
-		tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", &fanTargets, &removals)
+		tryAddMixerInput(ctx, relayMixer, src.id, "relay mixer", drop, &fanSources, &removals)
 
 		if ownerChannelID != 0 {
 			if src.channelID == ownerChannelID {
@@ -134,18 +121,18 @@ func wireFanoutOneMany(ctx context.Context, gm telemetry.GuildMetrics, sources [
 					if dest.channelID == src.channelID {
 						continue
 					}
-					tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", &fanTargets, &removals)
+					tryAddMixerInput(ctx, chanMixers[dest.channelID], src.id, "channel mixer", drop, &fanSources, &removals)
 				}
 			} else {
 				// Speaker source → owner channel mixer ONLY (star spoke → hub).
 				if ownerMixer, ok := chanMixers[ownerChannelID]; ok {
-					tryAddMixerInput(ctx, ownerMixer, src.id, "channel mixer", &fanTargets, &removals)
+					tryAddMixerInput(ctx, ownerMixer, src.id, "channel mixer", drop, &fanSources, &removals)
 				}
 			}
 		}
 		// When ownerChannelID == 0 (guest star), sources go to relay only.
 
-		installFanoutSource(src.handle, fanTargets, removals, drop)
+		installFanoutSource(src.handle, fanSources, removals)
 	}
 }
 
@@ -157,22 +144,22 @@ func wireFanoutOneMany(ctx context.Context, gm telemetry.GuildMetrics, sources [
 //
 // On handle close (session end) OnClose detaches the relay mixer input and
 // closes every directOuts channel — equivalent to the old goroutine's defer.
-func installFanoutOwnerStar(handle *opus.FanoutHandle, directOuts []chan<- []byte, relayMixCh chan opus.Frame, relayMixer *opus.Mixer, srcID snowflake.ID, dropDirect, dropRelay func()) {
+func installFanoutOwnerStar(handle *opus.FanoutHandle, directOuts []chan<- []byte, relaySrc *opus.SourceBuffer, relayMixer *opus.Mixer, srcID snowflake.ID, dropDirect func()) {
 	if handle == nil {
 		slog.Error("owner star fanout: source has no handle, frames will not be dispatched")
 		return
 	}
 	handle.Install(opus.FanoutInstall{
-		OpusTargets:  directOuts,
-		FrameTargets: []chan<- opus.Frame{relayMixCh},
+		OpusTargets:   directOuts,
+		SourceTargets: []*opus.SourceBuffer{relaySrc},
 		OnClose: func() {
 			relayMixer.RemoveInput(srcID)
+			relaySrc.Drain()
 			for _, out := range directOuts {
 				close(out)
 			}
 		},
-		DropOpus:  dropDirect,
-		DropFrame: dropRelay,
+		DropOpus: dropDirect,
 	})
 }
 
@@ -186,23 +173,23 @@ func wireFanoutOneManyDirect(ctx context.Context, gm telemetry.GuildMetrics, sou
 	dropRelay := gm.Drop(telemetry.DropPathOwnerStarRelay)
 	for _, src := range sources {
 		if src.channelID == ownerChannelID {
-			relayCh := make(chan opus.Frame, audioChanBuf)
-			if err := relayMixer.AddInput(src.id, relayCh); err != nil {
+			relaySrc := opus.NewSourceBuffer(dropRelay)
+			if err := relayMixer.AddInput(src.id, relaySrc); err != nil {
 				slog.WarnContext(ctx, "relay mixer: failed to add owner input", slog.Any("err", err))
 				continue
 			}
-			installFanoutOwnerStar(src.handle, directSpeakerOuts, relayCh, relayMixer, src.id, dropDirect, dropRelay)
+			installFanoutOwnerStar(src.handle, directSpeakerOuts, relaySrc, relayMixer, src.id, dropDirect)
 		} else {
 			// Speaker source: decode once → hub mixer only (star spoke → hub).
 			// Speaker audio is NOT relayed to guests — only the owner/caller's audio is.
-			var fanTargets []chan opus.Frame
+			var fanSources []*opus.SourceBuffer
 			var removals []mixerRef
 
 			if hubMixer, ok := chanMixers[ownerChannelID]; ok {
-				tryAddMixerInput(ctx, hubMixer, src.id, "hub mixer", &fanTargets, &removals)
+				tryAddMixerInput(ctx, hubMixer, src.id, "hub mixer", drop, &fanSources, &removals)
 			}
 
-			installFanoutSource(src.handle, fanTargets, removals, drop)
+			installFanoutSource(src.handle, fanSources, removals)
 		}
 	}
 }
@@ -324,35 +311,39 @@ func startGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, sessi
 // single Opus input channel so the caller can close it on teardown (closing
 // triggers bridge goroutine exit, which then closes all downstream frame
 // channels).
-func registerRelayInputs(ctx context.Context, gm telemetry.GuildMetrics, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
-	// Register one frame output channel per destination mixer.
-	frameOuts := make([]chan opus.Frame, 0, len(dests))
+func registerRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *ally.Session, dests []*destChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
+	type relaySource struct {
+		src *opus.SourceBuffer
+		mx  *opus.Mixer
+	}
+
+	drop := gm.Drop(telemetry.DropPathRelayBridge)
+	relaySources := make([]relaySource, 0, len(dests))
 	for _, dest := range dests {
-		frameOut := make(chan opus.Frame, audioChanBuf)
-		if err := chanMixers[dest.channelID].AddInput(relayInputID, frameOut); err != nil {
+		mx := chanMixers[dest.channelID]
+		src := opus.NewSourceBuffer(drop)
+		if err := mx.AddInput(relayInputID, src); err != nil {
 			slog.Warn("relay: failed to add input to channel mixer",
 				slog.String("channelID", dest.channelID.String()),
 				slog.Any("err", err))
-			close(frameOut)
 			continue
 		}
-		frameOuts = append(frameOuts, frameOut)
+		relaySources = append(relaySources, relaySource{src: src, mx: mx})
 	}
-	if len(frameOuts) == 0 {
+	if len(relaySources) == 0 {
 		return nil
 	}
 
 	// Single Opus input channel shared across all destination mixers.
-	// Bridge: decode once, fan Frame out to every registered mixer input.
-	// Both PCM and original Opus bytes are forwarded so the mixer can apply
-	// the single-source passthrough optimisation when only one source is active.
-	// Exits when relayOpusIn is closed (session teardown closes it via toClose).
-	drop := gm.Drop(telemetry.DropPathRelayBridge)
+	// Bridge: decode once, fan Frame into every SourceBuffer via Feed.
+	// Feed handles overflow internally (drops oldest, recycles pool buffers).
+	// Exits when relayOpusIn is closed; deferred cleanup detaches mixer inputs.
 	relayOpusIn := make(chan []byte, audioChanBuf)
-	go func(ctx context.Context, in <-chan []byte, outs []chan opus.Frame) {
+	go func() {
 		defer func() {
-			for _, out := range outs {
-				close(out)
+			for _, rs := range relaySources {
+				rs.mx.RemoveInput(relayInputID)
+				rs.src.Drain()
 			}
 		}()
 		dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
@@ -361,23 +352,7 @@ func registerRelayInputs(ctx context.Context, gm telemetry.GuildMetrics, session
 			return
 		}
 		scratch := make([]int16, opus.MixerPCMBuf)
-		for pkt := range in {
-			// Bleed-off drain: when the backlog exceeds the threshold, skip
-			// just one extra packet this iteration (at most one extra 20 ms
-			// gap per iteration). Repeated iterations converge on the live
-			// edge without producing a single audible burst gap, which a
-			// full drain-to-latest would do under load.
-			if len(in) > relayBridgeDrainThreshold {
-				select {
-				case newer, ok := <-in:
-					if !ok {
-						return
-					}
-					drop()
-					pkt = newer
-				default:
-				}
-			}
+		for pkt := range relayOpusIn {
 			if len(pkt) == 0 {
 				continue
 			}
@@ -387,24 +362,14 @@ func registerRelayInputs(ctx context.Context, gm telemetry.GuildMetrics, session
 				continue
 			}
 			now := time.Now()
-			for _, out := range outs {
+			for _, rs := range relaySources {
 				pcm := opus.GetPCM()[:n*opus.MixerChannels]
 				copy(pcm, scratch[:n*opus.MixerChannels])
-				// Each mixer may do single-source passthrough, forwarding Frame.Opus
-				// directly to its sink. If multiple mixers share the same Opus slice
-				// each VoiceProvider would call PutEncodedFrame on the same backing
-				// array. Copy per output so every consumer owns its buffer.
 				opusCopy := opus.CopyOpusFrame(pkt)
-				select {
-				case out <- opus.Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now}:
-				default:
-					opus.PutPCM(pcm)
-					opus.PutEncodedFrame(opusCopy)
-					drop()
-				}
+				rs.src.Feed(opus.Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now})
 			}
 		}
-	}(ctx, relayOpusIn, frameOuts)
+	}()
 
 	session.AddGuild(gm.GuildID(), []chan<- []byte{relayOpusIn})
 	return []chan<- []byte{relayOpusIn}

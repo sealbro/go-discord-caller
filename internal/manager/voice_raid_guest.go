@@ -111,7 +111,7 @@ func (guestStarCallerPipeline) build(ctx context.Context, p guestPipelineParams)
 		AllowFilter: p.allowFilter,
 	}
 
-	sources := buildGuestSources(ctx, p.setup.joined)
+	sources := buildGuestSources(p.setup.joined)
 	if p.ownerChIn != nil {
 		sources = append(sources, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
 	}
@@ -172,7 +172,7 @@ func (guestCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*g
 		AllowFilter:   p.allowFilter,
 	}
 
-	sources := buildGuestSources(ctx, p.setup.joined)
+	sources := buildGuestSources(p.setup.joined)
 	if p.ownerChIn != nil {
 		sources = append(sources, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
 	}

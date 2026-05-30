@@ -22,7 +22,6 @@ type pipelineParams struct {
 	allyCode     ally.Code
 	allySession  *ally.Session
 	setup        *raidSetup
-	chIn         chan []byte        // owner capture channel; used by directPipeline (RaidModeOneCaller bypass only)
 	ownerHandle  *opus.FanoutHandle // owner FanoutHandle; non-nil when owner capture is enabled
 	chOwnerOut   chan []byte        // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
 	ownerCleanup func()             // closes owner provider/receiver; called on teardown or build error
@@ -74,7 +73,7 @@ func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Sessi
 		// ChannelMixers intentionally nil: UpdateMixerPause guards for nil.
 	}
 	start := chain(
-		func() { startFanoutDirect(ctx, p.gm, p.chIn, p.setup.outs, p.allySession) },
+		func() { installFanoutDirect(p.gm, p.ownerHandle, p.setup.outs, p.allySession) },
 		func() { startDirectSessionCleanup(ctx, p.gm, p.ownerCleanup) },
 	)
 	return session, start, nil
@@ -85,7 +84,7 @@ func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Sessi
 type starPipeline struct{}
 
 func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
+	sources := buildSources(p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
 	destinations := buildDestinations(p.setup.joined)
 	if p.chOwnerOut != nil {
 		destinations = append(destinations, &destChannel{
@@ -139,7 +138,7 @@ func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session
 type mixMinusPipeline struct{}
 
 func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(ctx, p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
+	sources := buildSources(p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
 	destinations := buildDestinations(p.setup.joined)
 	if p.chOwnerOut != nil {
 		destinations = append(destinations, &destChannel{

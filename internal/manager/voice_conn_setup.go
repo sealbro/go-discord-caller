@@ -15,8 +15,8 @@ import (
 // call Apply to wire everything into a voice.Conn.
 type VoiceConnSetup struct {
 	userID     snowflake.ID
-	providerFn func(chIn <-chan []byte) (voice.OpusFrameProvider, error)
-	receiverFn func() (chan []byte, voice.OpusFrameReceiver, *opus.FanoutHandle, error)
+	providerFn func(chOut <-chan []byte) (voice.OpusFrameProvider, error)
+	receiverFn func() (voice.OpusFrameReceiver, *opus.FanoutHandle, error)
 }
 
 // NewVoiceConnSetup creates a new voice session builder.
@@ -24,13 +24,13 @@ func NewVoiceConnSetup(userID snowflake.ID) *VoiceConnSetup {
 	return &VoiceConnSetup{userID: userID}
 }
 
-// WithVoiceProvider reads opus frames from chIn and plays them.
+// WithVoiceProvider reads opus frames from chOut and plays them.
 // metrics carries both the histogram recorder and (optionally) the drop callback —
 // build it via GuildMetrics.Provider() to wire both in one shot.
 // Optional mw wrappers are applied in order after construction (e.g. for recording).
 func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder, mw ...opus.ProviderMiddleware) *VoiceConnSetup {
-	v.providerFn = func(chIn <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.ApplyProviderMiddleware(opus.NewVoiceProvider(chIn, metrics), mw), nil
+	v.providerFn = func(chOut <-chan []byte) (voice.OpusFrameProvider, error) {
+		return opus.ApplyProviderMiddleware(opus.NewVoiceProvider(chOut, metrics), mw), nil
 	}
 	return v
 }
@@ -41,56 +41,52 @@ func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder, mw ..
 // Optional mw wrappers are applied in order after construction (e.g. for recording).
 //
 // A FanoutHandle is created and attached to the receiver so the wiring code
-// can later call handle.Install with the topology-specific targets, switching
-// the receiver from legacy chan-bytes mode to inline decode + multicast mode.
-// Topologies that do NOT need decode (RaidModeOneCaller direct passthrough)
-// simply never call Install; the receiver falls back to the chan path.
+// can later call handle.Install with the topology-specific targets. Frames
+// received before Install are silently dropped (brief pre-install window).
 func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder, mw ...opus.ReceiverMiddleware) *VoiceConnSetup {
-	v.receiverFn = func() (chan []byte, voice.OpusFrameReceiver, *opus.FanoutHandle, error) {
-		ch := make(chan []byte, audioChanBuf)
+	v.receiverFn = func() (voice.OpusFrameReceiver, *opus.FanoutHandle, error) {
 		handle := opus.NewFanoutHandle()
-		r := opus.ApplyReceiverMiddleware(opus.NewVoiceReceiver(ch, v.userID, allowUser, metrics, handle), mw)
-		return ch, r, handle, nil
+		r := opus.ApplyReceiverMiddleware(opus.NewVoiceReceiver(v.userID, allowUser, metrics, handle), mw)
+		return r, handle, nil
 	}
 	return v
 }
 
 // Apply configures the voice connection with the session's provider and receiver,
-// sets the speaking flag, and returns the capture output channel (nil when no
-// capture is configured), the FanoutHandle (nil when no receiver is configured),
-// and a cleanup function.
+// sets the speaking flag, and returns the FanoutHandle (nil when no receiver is
+// configured) and a cleanup function.
 //
-// The handle must be passed to the wiring code so it can call handle.Install
-// once the topology is built. The cleanup function calls handle.Close() so
-// session-end teardown fires the install-time OnClose hook (e.g. RemoveInput).
+// chOut is the playback source consumed by the provider; pass nil when no
+// provider is configured. The handle must be passed to the wiring code so it
+// can call handle.Install once the topology is built. The cleanup function
+// calls handle.Close() so session-end teardown fires the install-time OnClose
+// hook (e.g. RemoveInput).
 //
 // ctx must carry a deadline or timeout: SetSpeaking sends a gateway op and will
 // block until Discord acknowledges or the context is cancelled.
-func (v *VoiceConnSetup) Apply(ctx context.Context, conn voice.Conn, chIn <-chan []byte) (chan []byte, *opus.FanoutHandle, func(), error) {
+func (v *VoiceConnSetup) Apply(ctx context.Context, conn voice.Conn, chOut <-chan []byte) (*opus.FanoutHandle, func(), error) {
 	var provider voice.OpusFrameProvider
 	if v.providerFn == nil {
 		provider = opus.NewEmptyVoiceProvider()
 	} else {
-		p, err := v.providerFn(chIn)
+		p, err := v.providerFn(chOut)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("create voice provider: %w", err)
+			return nil, nil, fmt.Errorf("create voice provider: %w", err)
 		}
 		provider = p
 	}
 
-	var capture chan []byte
 	var receiver voice.OpusFrameReceiver
 	var handle *opus.FanoutHandle
 	if v.receiverFn == nil {
 		receiver = opus.NewEmptyVoiceReceiver()
 	} else {
-		ch, r, h, err := v.receiverFn()
+		r, h, err := v.receiverFn()
 		if err != nil {
 			provider.Close()
-			return nil, nil, nil, fmt.Errorf("create voice receiver: %w", err)
+			return nil, nil, fmt.Errorf("create voice receiver: %w", err)
 		}
 		receiver = r
-		capture = ch
 		handle = h
 	}
 
@@ -100,9 +96,6 @@ func (v *VoiceConnSetup) Apply(ctx context.Context, conn voice.Conn, chIn <-chan
 		if handle != nil {
 			handle.Close()
 		}
-		if capture != nil {
-			close(capture)
-		}
 	}
 
 	conn.SetOpusFrameProvider(provider)
@@ -110,8 +103,8 @@ func (v *VoiceConnSetup) Apply(ctx context.Context, conn voice.Conn, chIn <-chan
 
 	if err := conn.SetSpeaking(ctx, voice.SpeakingFlagMicrophone); err != nil {
 		cleanup()
-		return nil, nil, nil, fmt.Errorf("set speaking flag: %w", err)
+		return nil, nil, fmt.Errorf("set speaking flag: %w", err)
 	}
 
-	return capture, handle, cleanup, nil
+	return handle, cleanup, nil
 }

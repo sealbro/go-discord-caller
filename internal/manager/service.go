@@ -21,11 +21,13 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// audioChanBuf is the buffer size for Opus frame channels between the voice
-// receiver/provider and the relay fan-out goroutines.
-// 5 frames × 20 ms = 100 ms max buffer depth; drain thresholds handle jitter
-// without accumulating large silent latency.
-const audioChanBuf = 5
+// audioChanBuf is the buffer size for the remaining single-producer/single-consumer
+// Opus channels: the provider playback channel (chOut, drained by VoiceProvider on
+// disgo's sender goroutine) and the relay bridge input channel (relayOpusIn, drained
+// by the bridge goroutine). 3 frames × 20 ms = 60 ms, matching providerDrainThreshold
+// so the bleed-off path engages just as the buffer fills — the natural value after
+// the legacy receiver bytes-channel path was retired.
+const audioChanBuf = 3
 
 // Service orchestrates speaker bots and voice raid sessions.
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.

@@ -148,12 +148,11 @@ type destChannel struct {
 
 // speakerResult holds the outcome of a single successfully joined speaker.
 type speakerResult struct {
-	speaker   guild.Speaker
-	chOut     chan<- []byte
-	chCapture <-chan []byte      // nil when withCapture is false
-	handle    *opus.FanoutHandle // nil when withCapture is false
-	gv        pool.GuildVoice
-	cleanup   func() // closes provider/receiver; caller must invoke on teardown
+	speaker guild.Speaker
+	chOut   chan<- []byte
+	handle  *opus.FanoutHandle // nil when withCapture is false
+	gv      pool.GuildVoice
+	cleanup func() // closes provider/receiver; caller must invoke on teardown
 }
 
 // raidSetup captures the common setup result for both host and guest flows.

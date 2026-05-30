@@ -75,14 +75,14 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
 			}
 			chOut := make(chan []byte, audioChanBuf)
-			chCapture, handle, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
+			handle, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
 				return
 			}
-			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, chCapture, handle, allowUser))
-			resultCh <- speakerResult{sp, chOut, chCapture, handle, gv, cleanup}
+			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, handle, allowUser))
+			resultCh <- speakerResult{sp, chOut, handle, gv, cleanup}
 		}(sp)
 	}
 	wg.Wait()
@@ -112,11 +112,10 @@ func (m *Service) commitSession(session *guild.Session) error {
 
 // consumeSpeaker sets up audio provider and receiver for a speaker's voice connection.
 // chOut is the provider channel (frames to play). When withCapture is true the
-// returned channel receives frames captured from the speaker's channel, filtered
-// by allowUser (shared filter built once at session start), and the returned
-// FanoutHandle must be passed to the topology wiring code so it can call Install.
+// receiver decodes incoming frames inline via the returned FanoutHandle, which
+// the topology wiring code must Install with mixer/raw targets.
 // The caller is responsible for calling the returned cleanup function.
-func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (chan []byte, *opus.FanoutHandle, func(), error) {
+func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (*opus.FanoutHandle, func(), error) {
 	gm := m.metrics.ForGuild(ctx, guildID)
 	session := NewVoiceConnSetup(speakerID)
 	session.WithVoiceProvider(gm.Provider())
@@ -125,38 +124,25 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 		session.WithVoiceReceiver(allowUser, gm.Receiver())
 	}
 
-	capture, handle, cleanup, err := session.Apply(ctx, conn, chOut)
+	handle, cleanup, err := session.Apply(ctx, conn, chOut)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	return capture, handle, cleanup, nil
+	return handle, cleanup, nil
 }
 
-// iterDeduplicatedCaptures calls fn for the first capture channel per voice
-// channel across joined. Any subsequent capture from the same channel is drained
-// in a background goroutine to prevent the VoiceReceiver from blocking.
-// ctx is threaded through so the drain goroutine exits promptly on cancellation
-// rather than waiting for the channel to close.
-func iterDeduplicatedCaptures(ctx context.Context, joined []speakerResult, fn func(speakerResult)) {
+// iterDeduplicatedCaptures calls fn for the first capturing speaker per voice
+// channel across joined. Subsequent speakers in the same channel keep their
+// FanoutHandle uninstalled — frames received by their VoiceReceiver are silently
+// dropped in dispatchFanout (state == nil), so no drain goroutine is needed.
+func iterDeduplicatedCaptures(joined []speakerResult, fn func(speakerResult)) {
 	seen := map[snowflake.ID]bool{}
 	for _, r := range joined {
-		if r.chCapture == nil {
+		if r.handle == nil {
 			continue
 		}
 		if seen[r.gv.ChannelID()] {
-			go func(ch <-chan []byte) {
-				for {
-					select {
-					case _, ok := <-ch:
-						if !ok {
-							return
-						}
-					case <-ctx.Done():
-						return
-					}
-				}
-			}(r.chCapture)
 			continue
 		}
 		seen[r.gv.ChannelID()] = true
@@ -164,11 +150,12 @@ func iterDeduplicatedCaptures(ctx context.Context, joined []speakerResult, fn fu
 	}
 }
 
-// buildSources returns a deduplicated list of audio sources (one capture channel per voice
-// channel). When two speaker bots share a channel the second capture is drained and discarded.
-func buildSources(ctx context.Context, ownerUserID, ownerChannelID snowflake.ID, ownerHandle *opus.FanoutHandle, joined []speakerResult) []sourceEntry {
+// buildSources returns a deduplicated list of audio sources (one capturing
+// speaker per voice channel). When two speaker bots share a channel only the
+// first is wired into the mixer graph.
+func buildSources(ownerUserID, ownerChannelID snowflake.ID, ownerHandle *opus.FanoutHandle, joined []speakerResult) []sourceEntry {
 	sources := []sourceEntry{{ownerUserID, ownerChannelID, ownerHandle}}
-	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
+	iterDeduplicatedCaptures(joined, func(r speakerResult) {
 		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.handle})
 	})
 	return sources
@@ -194,10 +181,10 @@ func buildDestinations(joined []speakerResult) []*destChannel {
 
 // buildGuestSources returns deduplicated capture sources from speaker joins.
 // Unlike the host's buildSources, the guest owner bot is provider-only so
-// it contributes no capture channel.
-func buildGuestSources(ctx context.Context, joined []speakerResult) []sourceEntry {
+// it contributes no capture handle.
+func buildGuestSources(joined []speakerResult) []sourceEntry {
 	var sources []sourceEntry
-	iterDeduplicatedCaptures(ctx, joined, func(r speakerResult) {
+	iterDeduplicatedCaptures(joined, func(r speakerResult) {
 		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.handle})
 	})
 	return sources

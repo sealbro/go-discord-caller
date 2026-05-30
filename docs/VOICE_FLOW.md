@@ -6,15 +6,14 @@ State as of v0.8.1: inline fanout decode in `VoiceReceiver.dispatchFanout`, pull
 
 ## RaidModeOneCaller — direct passthrough (no mixer pipeline)
 
-Only the owner bot has a `VoiceReceiver` and it uses the **legacy bytes-channel path** (no `FanoutHandle` installed). Speakers are `VoiceProvider`-only.
-Single source → **entire mixer pipeline is bypassed**. Raw Opus bytes flow from the owner `chIn` to all speaker `chOut`s and `ally.Session` via `startFanoutDirect`.
-No PCM decode, no `Mixer`, no re-encode. `chOwnerOut` is not created (owner does not play back audio into its own channel).
+Only the owner bot has a `VoiceReceiver`; speakers are `VoiceProvider`-only.
+Single source → **entire mixer pipeline is bypassed**. The owner's `FanoutHandle` is installed by `installFanoutDirect` with `OpusTargets` pointing at each speaker `chOut` (raw Opus, per-target pooled copy) and an `OpusCallback` that calls `ally.Session.BroadcastFromGuild`. Everything runs **inline on disgo's UDP goroutine**: no fanout goroutine, no `chIn` hop, no decode, no mix, no re-encode. `chOwnerOut` is not created (owner does not play back audio into its own channel).
 
 ```mermaid
 flowchart TD
     subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A (owner)"]
-            OwnerVR["Owner VoiceReceiver<br/>(legacy chan mode)"]
+            OwnerVR["Owner VoiceReceiver<br/>(fanout: OpusTargets + OpusCallback)"]
         end
         subgraph ChB["Discord Channel B"]
             Spk1VP["Speaker1 VoiceProvider"]
@@ -23,25 +22,19 @@ flowchart TD
             Spk2VP["Speaker2 VoiceProvider"]
         end
 
-        chIn["chIn (owner capture)"]
-        OwnerVR --> chIn
-
-        Direct["startFanoutDirect goroutine<br/>no decode · no mixer · no encode"]
-        chIn --> Direct
-
         chOutB["chOut (spk1)"]
         chOutC["chOut (spk2)"]
 
-        Direct -- "raw Opus (per-target copy)" --> chOutB
-        Direct -- "raw Opus (per-target copy)" --> chOutC
+        OwnerVR -- "raw Opus" --> chOutB
+        OwnerVR -- "raw Opus" --> chOutC
 
         chOutB --> Spk1VP
         chOutC --> Spk2VP
     end
 
     subgraph RELAY["Inter-Guild Relay"]
-        AllySession["ally.Session.BroadcastFromGuild"]
-        Direct -- "raw Opus" --> AllySession
+        AllySession["ally.Session.BroadcastFromGuild<br/>(invoked via OpusCallback)"]
+        OwnerVR -- "raw Opus" --> AllySession
     end
 
     subgraph GUEST_GUILD["Guest Guild (AllyListener)"]
@@ -51,24 +44,18 @@ flowchart TD
         AllySession --> GuestSpkVP
     end
 
-    %% Owner capture path — blue
-    linkStyle 0 stroke:#0d47a1,stroke-width:2px
-    linkStyle 1 stroke:#1565c0,stroke-width:2px
+    %% Owner → Speaker B — green
+    linkStyle 0 stroke:#1b5e20,stroke-width:2px
+    linkStyle 2 stroke:#a5d6a7,stroke-width:2px
 
-    %% Direct → Speaker B — green
-    linkStyle 2 stroke:#1b5e20,stroke-width:2px
-    linkStyle 5 stroke:#a5d6a7,stroke-width:2px
+    %% Owner → Speaker C — orange
+    linkStyle 1 stroke:#e65100,stroke-width:2px
+    linkStyle 3 stroke:#ffcc80,stroke-width:2px
 
-    %% Direct → Speaker C — orange
-    linkStyle 3 stroke:#e65100,stroke-width:2px
-    linkStyle 6 stroke:#ffcc80,stroke-width:2px
-
-    %% Relay path — purple
+    %% Owner → Relay → guest — purple/red
     linkStyle 4 stroke:#4a148c,stroke-width:2px
-
-    %% Guest delivery — red
-    linkStyle 7 stroke:#b71c1c,stroke-width:2px
-    linkStyle 8 stroke:#e57373,stroke-width:2px
+    linkStyle 5 stroke:#b71c1c,stroke-width:2px
+    linkStyle 6 stroke:#e57373,stroke-width:2px
 ```
 
 ---
@@ -542,9 +529,8 @@ In star mode the rule tightens further:
 
 | Stage              | Component                                                | Description                                                                                                                                       |
 |--------------------|----------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| Capture (fanout)   | `VoiceReceiver.dispatchFanout`                           | Inline on disgo's UDP goroutine: role filter → Opus decode (once) → `Feed` each registered `SourceBuffer` and copy raw Opus to each `OpusTarget`. |
-| Capture (legacy)   | `VoiceReceiver` → `chIn`                                 | **OneCaller only**: no `FanoutHandle`; raw Opus bytes pushed into a buffered chan for `startFanoutDirect`.                                        |
-| Direct fanout      | `startFanoutDirect` goroutine                            | **OneCaller only**: raw Opus forwarded to speaker `chOut`s + relay, zero decode/encode.                                                           |
+| Capture            | `VoiceReceiver.dispatchFanout`                           | Inline on disgo's UDP goroutine: role filter → Opus decode (once, if any `SourceTargets`) → `Feed` each registered `SourceBuffer`, copy raw Opus to each `OpusTarget`, and invoke `OpusCallback`. |
+| Direct fanout      | `installFanoutDirect`                                    | **OneCaller**: installs `OpusTargets` (raw → speaker chOuts) + `OpusCallback` (→ `ally.Session.BroadcastFromGuild`) on the owner's `FanoutHandle`. No decode, no goroutine. |
 | Owner star fanout  | `installFanoutOwnerStar`                                 | **OneMany host**: installs `OpusTargets` (raw → speaker chOuts) + one `SourceBuffer` (decoded → relay mixer) on the owner's `FanoutHandle`.       |
 | Mixer input        | `SourceBuffer` (cap 3)                                   | Lock-protected ring; `Feed` evicts the oldest frame on overflow so the mixer is always within 60ms of the live edge.                              |
 | Per-channel mix    | `Mixer.tick` (20ms timer, `startChannelMixers`)          | Pulls one `Frame` per input; single-source passthrough forwards `Frame.Opus` directly; multi-source mixes PCM and re-encodes.                     |

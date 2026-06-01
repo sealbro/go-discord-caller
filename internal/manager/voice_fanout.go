@@ -194,48 +194,32 @@ func wireFanoutOneManyDirect(ctx context.Context, gm telemetry.GuildMetrics, sou
 	}
 }
 
-// startFanoutDirect is the bypass path for RaidModeOneCaller.
-// Raw Opus packets are read from in and copied to every speaker output channel
-// and the relay session without any PCM decode/encode step.
-// The goroutine closes all outs when it exits so VoiceProviders shut down cleanly.
-func startFanoutDirect(ctx context.Context, gm telemetry.GuildMetrics, in <-chan []byte, outs []chan<- []byte, session *ally.Session) {
+// installFanoutDirect is the bypass path for RaidModeOneCaller.
+// Each Opus packet received by the owner's VoiceReceiver is forwarded inline
+// (on disgo's UDP goroutine) to every speaker output channel and to the relay
+// session, with zero decode/encode work. Speaker outs are closed via OnClose
+// when the FanoutHandle is closed at session teardown.
+func installFanoutDirect(gm telemetry.GuildMetrics, handle *opus.FanoutHandle, outs []chan<- []byte, session *ally.Session) {
+	if handle == nil {
+		slog.Error("fanout direct: owner has no handle, frames will not be dispatched")
+		return
+	}
 	drop := gm.Drop(telemetry.DropPathDirect)
 	guildID := gm.GuildID()
-	go func() {
-		defer func() {
+	handle.Install(opus.FanoutInstall{
+		OpusTargets: outs,
+		OpusCallback: func(pkt []byte) {
+			// BroadcastFromGuild takes ownership of pkt: it copies per relay
+			// channel and returns the original to the pool itself.
+			session.BroadcastFromGuild(guildID, pkt)
+		},
+		OnClose: func() {
 			for _, out := range outs {
 				close(out)
 			}
-		}()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case pkt, ok := <-in:
-				if !ok {
-					return
-				}
-				if len(pkt) == 0 {
-					continue
-				}
-				// Each consumer (VoiceProvider) independently calls PutEncodedFrame
-				// on the buffer it receives. Sending the same pkt to N consumers
-				// would cause N pool-returns for one allocation. Copy per consumer.
-				for _, out := range outs {
-					buf := opus.CopyOpusFrame(pkt)
-					select {
-					case out <- buf:
-					default:
-						opus.PutEncodedFrame(buf)
-						drop()
-					}
-				}
-				// session.BroadcastFromGuild takes ownership of pkt: it copies per
-				// relay channel and returns the original to the pool itself.
-				session.BroadcastFromGuild(guildID, pkt)
-			}
-		}
-	}()
+		},
+		DropOpus: drop,
+	})
 }
 
 // startChannelMixers runs each per-channel mixer with a sink that distributes

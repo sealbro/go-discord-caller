@@ -61,6 +61,11 @@ type FanoutInstall struct {
 	// Overflow is handled inside SourceBuffer (oldest frame dropped); no
 	// select/default or separate DropFrame counter is needed here.
 	SourceTargets []*SourceBuffer
+	// OpusCallback is invoked once per packet with a pool-backed copy of the
+	// raw Opus bytes. Used by the OneCaller direct passthrough to broadcast
+	// frames to ally.Session without a goroutine + channel hop. The callee
+	// takes ownership of the buffer and must return it via PutEncodedFrame.
+	OpusCallback func([]byte)
 	// OnClose is called once when the FanoutHandle is closed (session-end
 	// teardown). Use it to detach mixer inputs (RemoveInput) and drain any
 	// remaining SourceBuffer frames. NOT called on reconnect-time receiver close.
@@ -97,6 +102,7 @@ func NewFanoutHandle() *FanoutHandle { return &FanoutHandle{} }
 type fanoutDispatch struct {
 	opusTargets   []chan<- []byte
 	sourceTargets []*SourceBuffer
+	opusCallback  func([]byte)
 	onClose       func()
 	dropOpus      func()
 }
@@ -107,6 +113,7 @@ func (h *FanoutHandle) Install(opts FanoutInstall) {
 	h.state.Store(&fanoutDispatch{
 		opusTargets:   opts.OpusTargets,
 		sourceTargets: opts.SourceTargets,
+		opusCallback:  opts.OpusCallback,
 		onClose:       opts.OnClose,
 		dropOpus:      opts.DropOpus,
 	})
@@ -123,31 +130,28 @@ func (h *FanoutHandle) Close() {
 	})
 }
 
-// VoiceReceiver forwards incoming Opus frames into a channel (legacy mode) or
-// directly fans them out to mixer inputs after Opus decode (fanout mode).
-// Mode is selected at construction by the presence of a FanoutHandle.
+// VoiceReceiver decodes incoming Opus frames inline and fans them out to mixer
+// inputs (or raw Opus targets) via the FanoutHandle.
 type VoiceReceiver struct {
 	voice.OpusFrameReceiver
-	ch        chan<- []byte // legacy bytes mode; may be nil when fanout-only
-	fanout    *FanoutHandle // when non-nil, ReceiveOpusFrame decodes + dispatches
+	fanout    *FanoutHandle
 	done      chan struct{}
 	botID     snowflake.ID
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
 
 	// Per-receiver decoder + scratch buffer for fanout-mode dispatch.
-	// Lazy-init on first FrameTargets dispatch. Single-producer (disgo
+	// Lazy-init on first SourceTargets dispatch. Single-producer (disgo
 	// serialises ReceiveOpusFrame per receiver) so no synchronisation needed.
 	decoder *hraban.Decoder
 	scratch []int16
 }
 
-// NewVoiceReceiver constructs a VoiceReceiver. Pass a non-nil fanout handle to
-// activate inline decode + fanout (the wiring code must call handle.Install
-// after building the topology). Pass nil to use legacy chan-based forwarding.
-func NewVoiceReceiver(ch chan<- []byte, botID snowflake.ID, allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder, fanout *FanoutHandle) *VoiceReceiver {
+// NewVoiceReceiver constructs a VoiceReceiver. The wiring code must call
+// handle.Install after building the topology — frames received before Install
+// are silently dropped (the brief pre-install window).
+func NewVoiceReceiver(botID snowflake.ID, allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder, fanout *FanoutHandle) *VoiceReceiver {
 	return &VoiceReceiver{
-		ch:        ch,
 		fanout:    fanout,
 		done:      make(chan struct{}),
 		botID:     botID,
@@ -173,56 +177,32 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 		return nil
 	}
 
-	start := time.Now()
+	receivedAt := time.Now()
 
 	// Apply optional role/user filter.
 	if v.allowUser != nil && !v.allowUser(userID) {
 		return nil
 	}
 
-	// Fanout mode: decode + multicast inline. Removes a buffered chan hop and
-	// the dedicated fanout goroutine that previously sat between us and the
-	// mixers (~2–10 ms scheduler wake-up cost eliminated per frame).
-	// Topologies that never install (RaidModeOneCaller direct passthrough)
-	// fall through to the legacy chan path below.
+	// Decode + multicast inline on disgo's UDP goroutine. Frames received before
+	// the FanoutHandle is Installed (brief pre-install window) are silently dropped.
 	if v.fanout != nil {
 		if state := v.fanout.state.Load(); state != nil {
-			v.dispatchFanout(state, packet.Opus)
-			v.recordReceiveLatency(start)
-			return nil
+			v.dispatchFanout(state, packet.Opus, receivedAt)
 		}
 	}
 
-	// Legacy chan-bytes mode (RaidModeOneCaller / direct passthrough, or the
-	// brief pre-install window for fanout pipelines).
-	// Copy the opus bytes before sending because the backing array may be reused
-	// by the voice library. Use the pool to avoid a fresh allocation per frame.
-	// VoiceProvider.ProvideOpusFrame returns the buffer via PutEncodedFrame after
-	// the UDP send completes, so the pool recycles it safely.
-	if v.ch == nil {
-		v.recordReceiveLatency(start)
-		return nil
-	}
-	data := getRecvFrame(len(packet.Opus))
-	copy(data, packet.Opus)
-
-	// Try to forward the frame. Selecting on done prevents a send to a
-	// channel that the relay goroutine has already stopped draining.
-	select {
-	case v.ch <- data:
-	case <-v.done:
-	default:
-		v.metrics.RecordDrop()
-	}
-
-	v.recordReceiveLatency(start)
+	v.recordReceiveLatency(receivedAt)
 	return nil
 }
 
 // dispatchFanout decodes once and multicasts the packet to all configured
 // targets. Allocates exactly one shared pooled Opus buffer (referenced by all
 // frame and opus targets) and one PCM buffer per frame target.
-func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) {
+// receivedAt is the timestamp captured at the top of ReceiveOpusFrame before any
+// filtering or decode work — used as Frame.CreatedAt so gdc.mixer.pipeline.latency
+// measures the full Discord-receive → mixer-output span.
+func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte, receivedAt time.Time) {
 	// Lazy-init the decoder on the first frame-target dispatch. A receiver
 	// with only OpusTargets never allocates one.
 	if v.decoder == nil && len(state.sourceTargets) > 0 {
@@ -254,6 +234,14 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		}
 	}
 
+	// OpusCallback (e.g. ally.Session.BroadcastFromGuild for OneCaller) takes
+	// ownership of its pool-backed copy and returns it via PutEncodedFrame.
+	if state.opusCallback != nil {
+		buf := getRecvFrame(len(opusBytes))
+		copy(buf, opusBytes)
+		state.opusCallback(buf)
+	}
+
 	if len(state.sourceTargets) == 0 || v.decoder == nil {
 		return
 	}
@@ -263,7 +251,6 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		slog.Debug("voice receiver: decode failed", slog.Any("err", err))
 		return
 	}
-	now := time.Now()
 	// Each sourceTarget gets its own PCM and Opus copy. SourceBuffer.Feed
 	// handles overflow internally (drops oldest + calls its drop func).
 	// No select/done check needed: Feed is synchronous and non-blocking.
@@ -272,7 +259,7 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte) 
 		copy(pcm, v.scratch[:n*MixerChannels])
 		opusCopy := getRecvFrame(len(opusBytes))
 		copy(opusCopy, opusBytes)
-		t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now})
+		t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt})
 	}
 }
 

@@ -54,7 +54,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	ownerVoice := m.ownerVoice(guestGuildID)
 	var ownerCleanup func()
 	var ownerChOut chan []byte
-	var ownerChIn chan []byte
 	var ownerHandle *opus.FanoutHandle
 	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
@@ -65,15 +64,14 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerSetup.WithVoiceReceiver(allowUser.Check, guestGm.Receiver())
 		}
 		ownerChOut = make(chan []byte, audioChanBuf)
-		chIn, handle, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
+		handle, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
 		if err != nil {
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
 			ownerChOut = nil
 		} else {
 			ownerCleanup = cleanup
-			ownerChIn = chIn
 			ownerHandle = handle
-			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, ownerChIn, handle, allowUser.Check))
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, handle, allowUser.Check))
 		}
 	}
 	guestCleanupOwner := func() {
@@ -95,7 +93,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		allySession:    allySession,
 		setup:          setup,
 		ownerChOut:     ownerChOut,
-		ownerChIn:      ownerChIn,
 		ownerHandle:    ownerHandle,
 		guestGm:        guestGm,
 		allowFilter:    allowUser,
@@ -223,13 +220,13 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		chOwnerOut = make(chan []byte, audioChanBuf)
 		ownerSetup.WithVoiceProvider(gm.Provider())
 	}
-	chIn, ownerHandle, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
+	ownerHandle, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
 	if err != nil {
 		setup.speakerCleanup()
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
-	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, chIn, ownerHandle, allowUser.Check))
+	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Check))
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(
@@ -251,7 +248,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		allyCode:     allyCode,
 		allySession:  allySession,
 		setup:        setup,
-		chIn:         chIn,
 		ownerHandle:  ownerHandle,
 		chOwnerOut:   chOwnerOut,
 		ownerCleanup: ownerCleanup,

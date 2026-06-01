@@ -128,16 +128,15 @@ func (m *Service) clearAppliers(guildID snowflake.ID) {
 
 // buildApplier returns a reconnectApplier that re-wires provider/receiver on a fresh conn.
 //
-//   - chOut nil:     empty provider (owner-as-listener mode).
-//   - chCapture nil: empty receiver (no audio capture).
+//   - chOut nil:  empty provider (owner-as-listener mode).
+//   - handle nil: empty receiver (no audio capture).
 //   - handle non-nil: the new receiver dispatches via the same FanoutHandle as
 //     the original, so the topology wired at session start keeps receiving
 //     frames after reconnect — no re-install required.
-//   - botID is a test bot: file provider plays a fixed DCA loop.
 //
 // FrameDropper is created lazily inside the closure using the call-time ctx so
 // metrics never attach to a stale session-start span.
-func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte, chCapture chan []byte, handle *opus.FanoutHandle, allowUser func(snowflake.ID) bool) reconnectApplier {
+func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte, handle *opus.FanoutHandle, allowUser func(snowflake.ID) bool) reconnectApplier {
 	return func(ctx context.Context, conn voice.Conn) {
 		gm := m.metrics.ForGuild(ctx, guildID)
 		var provider voice.OpusFrameProvider
@@ -150,8 +149,8 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 		conn.SetOpusFrameProvider(provider)
 
 		var receiver voice.OpusFrameReceiver = opus.NewEmptyVoiceReceiver()
-		if chCapture != nil {
-			receiver = opus.NewVoiceReceiver(chCapture, botID, allowUser, gm.Receiver(), handle)
+		if handle != nil {
+			receiver = opus.NewVoiceReceiver(botID, allowUser, gm.Receiver(), handle)
 		}
 		conn.SetOpusFrameReceiver(receiver)
 	}

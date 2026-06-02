@@ -205,6 +205,19 @@ func (m *Mixer) RemoveInput(id snowflake.ID) {
 	m.mu.Unlock()
 }
 
+// InputIDs returns the IDs of all currently registered inputs in unspecified order.
+// Intended for tests and observability — the result is a snapshot taken under
+// the mixer's lock and not safe to mutate.
+func (m *Mixer) InputIDs() []snowflake.ID {
+	m.mu.Lock()
+	ids := make([]snowflake.ID, 0, len(m.inputs))
+	for id := range m.inputs {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	return ids
+}
+
 // SetPaused controls whether the mixer is paused. While paused, tick drains
 // input channels (preventing upstream backpressure) but skips mixing, encoding,
 // and output. Use this to suspend mixers whose destination channel has no

@@ -74,6 +74,31 @@ func TestSourceBufferDrain(t *testing.T) {
 	}
 }
 
+// TestSourceBufferLenTracksOccupancy verifies Len reflects Feed/Pull/Drain.
+func TestSourceBufferLenTracksOccupancy(t *testing.T) {
+	t.Parallel()
+	s := NewSourceBuffer(nil)
+	if got := s.Len(); got != 0 {
+		t.Fatalf("empty Len: want 0 got %d", got)
+	}
+	s.Feed(Frame{PCM: GetPCM(), Opus: getEncodedFrame(8)})
+	s.Feed(Frame{PCM: GetPCM(), Opus: getEncodedFrame(8)})
+	if got := s.Len(); got != 2 {
+		t.Fatalf("after 2 Feeds: want Len 2 got %d", got)
+	}
+	if f, ok := s.Pull(); ok {
+		PutPCM(f.PCM)
+		PutEncodedFrame(f.Opus)
+	}
+	if got := s.Len(); got != 1 {
+		t.Fatalf("after 1 Pull: want Len 1 got %d", got)
+	}
+	s.Drain()
+	if got := s.Len(); got != 0 {
+		t.Fatalf("after Drain: want Len 0 got %d", got)
+	}
+}
+
 // TestSourceBufferNilDropCallback ensures a nil drop func does not panic on overflow.
 func TestSourceBufferNilDropCallback(t *testing.T) {
 	t.Parallel()

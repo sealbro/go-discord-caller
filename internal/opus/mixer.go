@@ -122,7 +122,8 @@ type Mixer struct {
 	mu             sync.Mutex
 	inputs         map[snowflake.ID]*inputEntry
 	paused         atomic.Bool
-	lastActivityAt atomic.Int64 // UnixNano of last tick that consumed at least one frame
+	lastActivityAt atomic.Int64  // UnixNano of last tick that consumed at least one frame
+	pausedDrops    atomic.Uint64 // diagnostic: frames discarded by tick because the mixer was paused
 	metrics        telemetry.OpusRecorder
 
 	// sink is the destination callback for produced frames. It is invoked
@@ -226,6 +227,14 @@ func (m *Mixer) SetPaused(p bool) {
 	m.paused.Store(p)
 }
 
+// PausedDrops returns the cumulative number of input frames discarded by
+// tick because the mixer was paused at tick time. Useful for tests and
+// diagnostic dashboards — non-zero values indicate upstream packets are
+// arriving but being silently dropped at the mixer boundary.
+func (m *Mixer) PausedDrops() uint64 {
+	return m.pausedDrops.Load()
+}
+
 // Paused reports whether the mixer is currently paused.
 func (m *Mixer) Paused() bool {
 	return m.paused.Load()
@@ -298,6 +307,14 @@ func (m *Mixer) tick() error {
 	m.framesBuf = m.framesBuf[:0]
 	for _, e := range m.entriesBuf {
 		if paused {
+			// Count what we're about to discard so diagnostic readers (tests,
+			// PausedDrops accessor) can detect "upstream is feeding, downstream
+			// is silently throwing it away" without enabling debug logging.
+			if sb, ok := e.src.(*SourceBuffer); ok {
+				if n := sb.Len(); n > 0 {
+					m.pausedDrops.Add(uint64(n))
+				}
+			}
 			e.src.Drain()
 			continue
 		}

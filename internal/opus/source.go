@@ -69,6 +69,16 @@ func (s *SourceBuffer) Feed(f Frame) {
 	s.mu.Unlock()
 }
 
+// Len returns the number of frames currently buffered. Intended for
+// diagnostic reads (e.g. the mixer's paused-drain detection); racey by
+// nature — callers must not depend on the value for correctness.
+func (s *SourceBuffer) Len() int {
+	s.mu.Lock()
+	n := s.n
+	s.mu.Unlock()
+	return n
+}
+
 // Pull removes and returns the oldest frame. Returns (Frame{}, false) on underrun.
 func (s *SourceBuffer) Pull() (Frame, bool) {
 	s.mu.Lock()

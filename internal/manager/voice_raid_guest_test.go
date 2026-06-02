@@ -81,12 +81,13 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 		t.Fatalf("ally.Manager.Join: %v", err)
 	}
 
-	// Owner relay enabled only when the guest captures.
-	var ownerChOut, ownerChIn chan []byte
+	// Owner relay enabled only when the guest captures — matches the production
+	// JoinSession flow where ownerHandle is the gate for "include the guest
+	// owner as a fanout source".
+	var ownerChOut chan []byte
 	var ownerHandle *opus.FanoutHandle
 	if guestMode.WithCapture() {
 		ownerChOut = make(chan []byte, audioChanBuf)
-		ownerChIn = make(chan []byte, audioChanBuf)
 		ownerHandle = opus.NewFanoutHandle()
 	}
 
@@ -100,7 +101,6 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 		allySession:    allySession,
 		setup:          setup,
 		ownerChOut:     ownerChOut,
-		ownerChIn:      ownerChIn,
 		ownerHandle:    ownerHandle,
 		guestGm:        gm,
 		allowFilter:    &AllowFilter{},
@@ -195,7 +195,7 @@ func TestGuestCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	})
 
 	// Mix-minus on each destination channel mixer. Guest sources are: owner
-	// (since ownerChIn is set) + each speaker.
+	// (since ownerHandle is set) + each speaker.
 	tests := []struct {
 		chID            snowflake.ID
 		wantInputs      []snowflake.ID

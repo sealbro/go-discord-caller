@@ -23,8 +23,7 @@ type guestPipelineParams struct {
 	allySession    *ally.Session
 	setup          *raidSetup
 	ownerChOut     chan []byte
-	ownerChIn      chan []byte
-	ownerHandle    *opus.FanoutHandle
+	ownerHandle    *opus.FanoutHandle // non-nil iff the guest owner bot has an inline-capture VoiceReceiver wired up
 	guestGm        telemetry.GuildMetrics
 	allowFilter    *AllowFilter
 }
@@ -112,7 +111,7 @@ func (guestStarCallerPipeline) build(ctx context.Context, p guestPipelineParams)
 	}
 
 	sources := buildGuestSources(p.setup.joined)
-	if p.ownerChIn != nil {
+	if p.ownerHandle != nil {
 		sources = append(sources, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
 	}
 
@@ -173,7 +172,7 @@ func (guestCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*g
 	}
 
 	sources := buildGuestSources(p.setup.joined)
-	if p.ownerChIn != nil {
+	if p.ownerHandle != nil {
 		sources = append(sources, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
 	}
 

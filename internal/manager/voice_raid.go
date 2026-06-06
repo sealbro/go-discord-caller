@@ -115,6 +115,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if session.ChannelMixers != nil {
 		m.syncMixerPauseState(guestGuildID, session)
 	}
+	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	start()
 
 	guestGm.SessionStarted(len(setup.joined))
@@ -269,6 +270,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if !mode.IsDirectPassthrough() {
 		m.syncMixerPauseState(guildID, session)
 	}
+	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	gm.SessionStarted(len(setup.joined))
 	logMsg := "voice raid started"
 	if mode.IsDirectPassthrough() {

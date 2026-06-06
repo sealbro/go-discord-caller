@@ -153,6 +153,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 
 	poolSvc := pool.NewService(&metrics.Pool)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
+	managerSvc.SetSessionIdleTimeout(cfg.SessionIdleTimeout)
 
 	bundle, err := i18n.NewBundle()
 	if err != nil {

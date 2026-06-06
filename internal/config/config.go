@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/joho/godotenv"
 )
@@ -31,9 +32,15 @@ type Config struct {
 	OtelEndpoint string
 	// LogLevel is the minimum log level (default: info); controlled by LOG_LEVEL env var
 	LogLevel slog.Level
+	// SessionIdleTimeout is how long every channel mixer in a voice raid may stay
+	// continuously paused (no audible activity) before the session auto-stops.
+	// Default: 10m. Set SESSION_IDLE_TIMEOUT=0 to disable.
+	SessionIdleTimeout time.Duration
 	// Test holds optional test/debug audio overrides
 	Test TestConfig
 }
+
+const defaultSessionIdleTimeout = 10 * time.Minute
 
 var speakerTokenPattern = regexp.MustCompile(`^DISCORD_SPEAKER_BOT_TOKEN_(\d+)$`)
 
@@ -66,15 +73,35 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		OwnerBotToken: ownerToken,
-		SpeakerTokens: speakerTokens,
-		StorePath:     storePath(),
-		OtelEndpoint:  os.Getenv("OTEL_ENDPOINT"),
-		LogLevel:      parseLogLevel(os.Getenv("LOG_LEVEL")),
+		OwnerBotToken:      ownerToken,
+		SpeakerTokens:      speakerTokens,
+		StorePath:          storePath(),
+		OtelEndpoint:       os.Getenv("OTEL_ENDPOINT"),
+		LogLevel:           parseLogLevel(os.Getenv("LOG_LEVEL")),
+		SessionIdleTimeout: parseSessionIdleTimeout(os.Getenv("SESSION_IDLE_TIMEOUT")),
 		Test: TestConfig{
 			AllowBots: os.Getenv("TEST_ALLOW_BOTS") == "true",
 		},
 	}, nil
+}
+
+// parseSessionIdleTimeout parses SESSION_IDLE_TIMEOUT (e.g. "10m", "0s") into a
+// Duration. Empty defaults to defaultSessionIdleTimeout; "0" disables.
+// Invalid input falls back to the default with a warning.
+func parseSessionIdleTimeout(s string) time.Duration {
+	if s == "" {
+		return defaultSessionIdleTimeout
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		slog.Warn("invalid SESSION_IDLE_TIMEOUT; using default",
+			slog.String("value", s),
+			slog.Duration("default", defaultSessionIdleTimeout),
+			slog.Any("err", err),
+		)
+		return defaultSessionIdleTimeout
+	}
+	return d
 }
 
 // loadSpeakerTokens scans all environment variables for DISCORD_SPEAKER_N_BOT_TOKEN

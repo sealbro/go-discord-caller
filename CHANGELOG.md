@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-06-07
+
+### Added
+- **Session idle timeout**: voice raids now auto-stop after a configurable period of continuous silence, freeing speaker bots when a session is forgotten. Tunable via `SESSION_IDLE_TIMEOUT` (default `10m`; set `0` to disable).
+- **Paused-frame diagnostics**: new metrics track how often mixers and per-source buffers stay paused, making it easier to spot stuck or under-running channels in dashboards.
+
+### Changed
+- **Voice connection pipeline streamlined**: legacy capture channels removed and buffer handling reworked, reducing internal hops between receiver and provider for lower audio latency.
+
 ## [0.8.1] - 2026-05-25
 
 ### Added

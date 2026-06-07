@@ -105,6 +105,7 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | `DISCORD_SPEAKER_BOT_TOKEN_1` | ⚠️       | Token for the first speaker bot                                                                         |
 | `DISCORD_SPEAKER_BOT_TOKEN_2` | ⚠️       | Token for the second speaker bot                                                                        |
 | `DISCORD_SPEAKER_BOT_TOKEN_N` | ⚠️       | … any numeric suffix; gaps in numbering are supported                                                   |
+| `SESSION_IDLE_TIMEOUT`        | ❌        | How long a voice raid may stay continuously idle (default: `10m`; set `0` to disable)                   |
 | `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)                                               |
 | `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
 | `LOG_LEVEL`                   | ❌        | Minimum log level: `debug`, `info`, `warn`, `error` (default: `info`)                                   |

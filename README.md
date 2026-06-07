@@ -7,6 +7,13 @@ If this project is useful to you, please consider giving it a ⭐ on GitHub — 
 [![GitHub stars](https://img.shields.io/github/stars/sealbro/go-discord-caller?style=social)](https://github.com/sealbro/go-discord-caller)
 [![GitHub release](https://badgen.net/github/release/sealbro/go-discord-caller?icon=github&label=go-discord-caller)](https://github.com/sealbro/go-discord-caller/)
 [![Docker pulls](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
+[![Try the bot](https://img.shields.io/badge/Try%20the%20bot-Invite%20to%20Discord-5865F2?logo=discord&logoColor=white)](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565762894144)
+
+## Try it out
+
+Want to see it in action without hosting anything? Click the **Try the bot** badge above to invite a hosted owner bot to your server, then follow [Discord app setup → step 2](#2-start-the-bot-and-finish-setup) to bind roles and add **one speaker bot** via `/setup`. A single speaker is enough to verify the relay end-to-end.
+
+> The hosted instance is intended for evaluation. For production use, self-host with your own owner + speaker bot tokens.
 
 ## How it works
 

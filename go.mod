@@ -3,7 +3,7 @@ module github.com/sealbro/go-discord-caller
 go 1.26.3
 
 require (
-	github.com/disgoorg/disgo v0.19.5
+	github.com/disgoorg/disgo v0.19.3
 	github.com/disgoorg/godave/golibdave v0.1.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/hraban/opus v0.0.0-20251117090126-c76ea7e21bf3

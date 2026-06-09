@@ -15,6 +15,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
@@ -35,14 +36,15 @@ type Service struct {
 	mu       sync.RWMutex
 	statuses map[snowflake.ID]*guild.Status // protected by mu
 
-	store       store.Store
-	poolSvc     pool.PoolService
-	ownerClient *bot.Client
-	ownerBotID  snowflake.ID
-	test        config.TestConfig
-	sessions    *ally.Manager
-	metrics     *telemetry.Metrics
-	reconnect   reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
+	store              store.Store
+	poolSvc            pool.PoolService
+	ownerClient        *bot.Client
+	ownerBotID         snowflake.ID
+	test               config.TestConfig
+	sessions           *ally.Manager
+	metrics            *telemetry.Metrics
+	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
+	sessionIdleTimeout time.Duration  // 0 disables; set via SetSessionIdleTimeout
 }
 
 // NewService creates a new manager Service.
@@ -58,6 +60,34 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		metrics:     metrics,
 		reconnect:   newReconnectState(),
 	}
+}
+
+// SetSessionIdleTimeout configures the duration after which a session whose
+// every channel mixer has been continuously paused is auto-stopped.
+// Pass 0 to disable. Call once at startup, before any session is started.
+func (m *Service) SetSessionIdleTimeout(d time.Duration) {
+	m.sessionIdleTimeout = d
+}
+
+// startSessionIdleWatcher launches a goroutine that cancels the session when
+// every channel mixer has been paused continuously for m.sessionIdleTimeout.
+// Safe to call for any session — it no-ops when the timeout is disabled, the
+// session has no channel mixers (direct-passthrough mode), or no mixer
+// satisfies opus.PauseProbe.
+func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc context.CancelFunc, session *guild.Session) {
+	if m.sessionIdleTimeout <= 0 || len(session.ChannelMixers) == 0 {
+		return
+	}
+	probes := make([]opus.PauseProbe, 0, len(session.ChannelMixers))
+	for _, mx := range session.ChannelMixers {
+		if p, ok := mx.(opus.PauseProbe); ok {
+			probes = append(probes, p)
+		}
+	}
+	if len(probes) == 0 {
+		return
+	}
+	go opus.NewSessionIdleWatcher(probes, cancelFunc, m.sessionIdleTimeout).Run(ctx)
 }
 
 // StartMetrics registers OTel observable metric callbacks.

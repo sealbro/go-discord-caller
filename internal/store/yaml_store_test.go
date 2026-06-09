@@ -336,15 +336,24 @@ func TestYAMLStore_DebounceFlush(t *testing.T) {
 
 	s.BindChannel(guild1, user1, chan1)
 
-	// Wait longer than saveDebounce for the background flush to fire.
+	// Poll the file directly — opening a second YAMLStore would start its own
+	// flushLoop whose Close() final-flush could overwrite the file with empty
+	// content and race against s's debounced save.
 	deadline := time.Now().Add(saveDebounce + 1500*time.Millisecond)
 	for time.Now().Before(deadline) {
-		s2, err := NewYAMLStore(path)
-		if err == nil {
-			_, ok := s2.GetBoundChannel(guild1, user1)
-			s2.Close()
-			if ok {
-				return
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			probe := &YAMLStore{
+				path:       path,
+				channels:   make(map[channelKey]snowflake.ID),
+				roles:      make(map[roleKey]snowflake.ID),
+				relayCodes: make(map[snowflake.ID]string),
+				locales:    make(map[snowflake.ID]string),
+			}
+			if probe.load() == nil {
+				if _, ok := probe.GetBoundChannel(guild1, user1); ok {
+					return
+				}
 			}
 		}
 		time.Sleep(10 * time.Millisecond)

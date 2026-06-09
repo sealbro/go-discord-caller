@@ -60,6 +60,14 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 		}
 	}
 
+	// Wait for the speaker bot's own gateway listener to observe the move/leave
+	// before we recreate the conn. The owner bot's listener (which fired this
+	// handler) and the speaker bot's listener consume independent gateway
+	// queues; if we tear down the speaker's OLD conn before its listener has
+	// drained the triggering VStateU, that stale event hits the NEW conn and
+	// derails the reconnect (e.g. it opens to the wrong channel).
+	m.waitSpeakerConnDrained(guildID, botUserID, channelID)
+
 	// Close the existing (possibly broken) voice connection so conn.Open starts
 	// fresh instead of re-using stale internal state that causes a timeout.
 	leaveCtx, leaveCancel := context.WithTimeout(ctx, voiceLeaveTimeout)
@@ -153,5 +161,33 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 			receiver = opus.NewVoiceReceiver(botID, allowUser, gm.Receiver(), handle)
 		}
 		conn.SetOpusFrameReceiver(receiver)
+	}
+}
+
+// waitSpeakerConnDrained briefly waits for the speaker bot's voice gateway
+// listener to observe an external move/leave that took the bot out of
+// boundChID. The owner bot's listener (which fires this reconnect) and the
+// speaker bot's listener consume independent Discord gateway queues, so a
+// reconnect can race the speaker bot's processing of the same VStateU; if the
+// speaker's OLD conn is torn down before its listener processes the event,
+// the residual VStateU hits the NEW conn and corrupts its target channel.
+// Polls the speaker's conn for up to 500ms; returns immediately once the
+// move is observed or if the conn is already gone.
+func (m *Service) waitSpeakerConnDrained(guildID, botUserID, boundChID snowflake.ID) {
+	client, ok := m.poolSvc.GetClientByID(botUserID)
+	if !ok || client.VoiceManager == nil {
+		return
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		conn := client.VoiceManager.GetConn(guildID)
+		if conn == nil {
+			return
+		}
+		cur := conn.ChannelID()
+		if cur == nil || *cur != boundChID {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

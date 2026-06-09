@@ -34,7 +34,7 @@ func TestStress_AllBotsPlayAudio(t *testing.T) {
 
 	stopSource1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.Speaker1ChannelID)
 	defer stopSource1()
-	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.Speaker2ChannelID)
+	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.Speaker1ChannelID)
 	defer stopSource2()
 	stopListener := h.MustStartPlayingListener(t, ctx, h.Cfg.OwnerChannelID)
 	defer stopListener()

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-06-09
+
+### Added
+- **Session idle timeout**: voice raids now auto-stop after a configurable period of continuous silence, freeing speaker bots when a session is forgotten. Tunable via `SESSION_IDLE_TIMEOUT` (default `10m`; set `0` to disable).
+- **Paused-frame diagnostics**: new metrics track how often mixers and per-source buffers stay paused, making it easier to spot stuck or under-running channels in dashboards.
+
+### Changed
+- **Voice connection pipeline streamlined**: legacy capture channels removed and buffer handling reworked, reducing internal hops between receiver and provider for lower audio latency.
+- **Go 1.26.4 + dependency refresh**: toolchain updated and indirect deps bumped.
+- **Clearer onboarding docs**: README now spells out the owner-bot invitation flow step by step.
+
+### Fixed
+- **Speaker reconnect race after admin-move**: when an admin dragged a speaker bot to a different voice channel, the owner-driven reconnect could race the speaker bot's own gateway listener and end up opening to the wrong channel, timing the reconnect out. The reconnect now briefly waits for the speaker's own listener to acknowledge the move before tearing down the old voice connection, so audio resumes within a few seconds.
+
 ## [0.8.1] - 2026-05-25
 
 ### Added

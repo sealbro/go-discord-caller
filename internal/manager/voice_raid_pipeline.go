@@ -28,6 +28,7 @@ type pipelineParams struct {
 	ov           pool.GuildVoice
 	gm           telemetry.GuildMetrics
 	allowFilter  *AllowFilter
+	voiceProbe   CallerCounter // production: *cacheVoiceProbe; consumed by the auto-router
 }
 
 // hostPipeline builds the audio wiring for one topology and returns the
@@ -42,41 +43,16 @@ type hostPipeline interface {
 func pipelineFor(mode guild.RaidMode) hostPipeline {
 	switch {
 	case mode.IsDirectPassthrough():
-		return directPipeline{}
+		// RaidModeOneCaller now runs through the always-on mixer graph + auto
+		// router (oneCallerPipeline). The legacy directPipeline is retained
+		// below only as a reference for the star/mixMinus pipelines until
+		// they are migrated in a follow-up commit.
+		return oneCallerPipeline{}
 	case mode.IsStarTopology():
 		return starPipeline{}
 	default:
 		return mixMinusPipeline{}
 	}
-}
-
-// chain composes multiple start functions into one ordered sequence.
-func chain(fns ...func()) func() {
-	return func() {
-		for _, fn := range fns {
-			fn()
-		}
-	}
-}
-
-// directPipeline handles RaidModeOneCaller: single source, raw Opus passthrough — no mixing.
-type directPipeline struct{}
-
-func (directPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	session := &guild.Session{
-		GuildID:     p.guildID,
-		Cancel:      p.cancelFunc,
-		Cleanup:     p.setup.speakerCleanup,
-		AllyCode:    p.allyCode,
-		Speakers:    p.setup.speakers,
-		AllowFilter: p.allowFilter,
-		// ChannelMixers intentionally nil: UpdateMixerPause guards for nil.
-	}
-	start := chain(
-		func() { installFanoutDirect(p.gm, p.ownerHandle, p.setup.outs, p.allySession) },
-		func() { startDirectSessionCleanup(ctx, p.gm, p.ownerCleanup) },
-	)
-	return session, start, nil
 }
 
 // starPipeline handles RaidModeOneManyGuildCaller: hub mixer at the owner channel only.

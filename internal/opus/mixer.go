@@ -223,8 +223,15 @@ func (m *Mixer) InputIDs() []snowflake.ID {
 // input channels (preventing upstream backpressure) but skips mixing, encoding,
 // and output. Use this to suspend mixers whose destination channel has no
 // non-bot listeners.
+//
+// On paused → running transition the activity timestamp is reset to "now" so
+// that DrainWatcher does not immediately re-pause a freshly-unpaused mixer
+// based on idle time accumulated while it was paused.
 func (m *Mixer) SetPaused(p bool) {
-	m.paused.Store(p)
+	prev := m.paused.Swap(p)
+	if prev && !p {
+		m.lastActivityAt.Store(time.Now().UnixNano())
+	}
 }
 
 // PausedDrops returns the cumulative number of input frames discarded by

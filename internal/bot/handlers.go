@@ -142,6 +142,12 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 
 		// A non-bot user appeared — resume the mixer for this channel if paused.
 		m.UpdateMixerPause(guildID)
+		// Trigger an auto-route recompute on the channel the user joined.
+		// Debounced inside the router so a burst of join/leave events on the
+		// same channel coalesces into one pipeline re-Install.
+		if e.VoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.VoiceState.ChannelID)
+		}
 	}
 }
 
@@ -169,6 +175,12 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 
 		// A non-bot user left — pause the mixer if this was the last listener.
 		m.UpdateMixerPause(guildID)
+		// Trigger an auto-route recompute on the channel the user vacated.
+		// e.VoiceState.ChannelID is nil after a leave (no channel); the
+		// pre-event channel lives on e.OldVoiceState.
+		if e.OldVoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.OldVoiceState.ChannelID)
+		}
 	}
 }
 
@@ -186,5 +198,15 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 
 		// Both the old and new channel may need mixer pause state updated.
 		m.UpdateMixerPause(guildID)
+		// Auto-route both channels: the source channel loses a caller, the
+		// destination gains one. The router debounces, so two same-instant
+		// triggers on different channels still collapse to one Recompute per
+		// channel after the window.
+		if e.OldVoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.OldVoiceState.ChannelID)
+		}
+		if e.VoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.VoiceState.ChannelID)
+		}
 	}
 }

@@ -21,7 +21,18 @@ type AllowFilter struct {
 	allowed  sync.Map // snowflake.ID → bool
 	fallback func(snowflake.ID) bool
 	metrics  telemetry.OpusRecorder
+	// roleID is the configured caller role for the guild this filter belongs
+	// to. Zero when no caller role is configured (the filter then allows all
+	// non-bot users). Exposed via RoleID() so the auto-router can capture
+	// it at session start without a second store lookup.
+	roleID snowflake.ID
 }
+
+// RoleID returns the caller role ID this filter was built for. Returns 0 when
+// no caller role is configured. The router uses this to compute per-channel
+// caller counts; a zero value means "every non-bot is a caller" (consistent
+// with Check semantics).
+func (f *AllowFilter) RoleID() snowflake.ID { return f.roleID }
 
 // Check returns true if userID is allowed to send audio.
 // Uses the local map when a decision is cached, otherwise falls back to the
@@ -67,6 +78,7 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
 
 	return &AllowFilter{
 		metrics: rec,
+		roleID:  roleID,
 		fallback: func(userID snowflake.ID) bool {
 			member, ok := caches.Member(guildID, userID)
 			if !ok || m.IsBot(member.User) {

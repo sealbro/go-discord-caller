@@ -107,7 +107,7 @@ func TestPipelineFor_ReturnsExpectedImpl(t *testing.T) {
 		mode guild.RaidMode
 		want string
 	}{
-		{guild.RaidModeOneCaller, "manager.directPipeline"},
+		{guild.RaidModeOneCaller, "manager.oneCallerPipeline"},
 		{guild.RaidModeGuildCaller, "manager.mixMinusPipeline"},
 		{guild.RaidModeOneManyGuildCaller, "manager.starPipeline"},
 	}
@@ -123,9 +123,11 @@ func TestPipelineFor_ReturnsExpectedImpl(t *testing.T) {
 	}
 }
 
-// TestDirectPipeline_NoChannelMixers verifies RaidModeOneCaller bypasses the
-// mixer graph entirely — no per-channel mixers are constructed.
-func TestDirectPipeline_NoChannelMixers(t *testing.T) {
+// TestOneCallerPipeline_AlwaysOnGraph verifies RaidModeOneCaller now builds
+// the full per-speaker-channel + relay mixer graph up-front (started paused)
+// and attaches an AutoRouter to the session. Replaces the prior
+// TestDirectPipeline_NoChannelMixers which asserted the now-removed bypass.
+func TestOneCallerPipeline_AlwaysOnGraph(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -136,8 +138,15 @@ func TestDirectPipeline_NoChannelMixers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if session.ChannelMixers != nil {
-		t.Errorf("RaidModeOneCaller must not create ChannelMixers; got %d entries", len(session.ChannelMixers))
+	if session.ChannelMixers == nil {
+		t.Fatal("OneCaller must now expose ChannelMixers (channel + relay)")
+	}
+	wantMixers := len(fx.speakerChIDs) + 1 // one per speaker channel + relay
+	if got := len(session.ChannelMixers); got != wantMixers {
+		t.Errorf("ChannelMixers count: want %d (%d channels + relay), got %d", wantMixers, len(fx.speakerChIDs), got)
+	}
+	if session.AutoRouter == nil {
+		t.Error("OneCaller pipeline must attach AutoRouter to the session")
 	}
 	if start == nil {
 		t.Fatal("build returned nil start func")

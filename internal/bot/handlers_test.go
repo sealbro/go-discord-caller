@@ -34,11 +34,13 @@ type fakeManager struct {
 	removeSpeakerCalls  []snowflakePair
 	notifyMemberCalls   []snowflakePair
 	updateMixerCalls    []snowflake.ID
+	autoRouteCalls      []autoRouteCall
 	reconnectCalls      []snowflakePair
 	onBotVoiceMoveCalls []botMoveCall
 }
 
 type snowflakePair struct{ guild, user snowflake.ID }
+type autoRouteCall struct{ guild, channel snowflake.ID }
 type botMoveCall struct {
 	guild, bot snowflake.ID
 	chID       *snowflake.ID
@@ -88,6 +90,11 @@ func (f *fakeManager) UpdateMixerPause(g snowflake.ID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.updateMixerCalls = append(f.updateMixerCalls, g)
+}
+func (f *fakeManager) AutoRoute(g, ch snowflake.ID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.autoRouteCalls = append(f.autoRouteCalls, autoRouteCall{g, ch})
 }
 func (f *fakeManager) ReconnectBotChannel(_ context.Context, g, b snowflake.ID) {
 	f.mu.Lock()

@@ -255,6 +255,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		ov:           ov,
 		gm:           gm,
 		allowFilter:  allowUser,
+		voiceProbe:   &cacheVoiceProbe{svc: m, guildID: guildID},
 	}
 	session, start, err := pipelineFor(mode).build(ctx, p)
 	if err != nil {

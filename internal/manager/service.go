@@ -229,6 +229,46 @@ func (m *Service) IsBot(user discord.User) bool {
 	return user.Bot && !m.test.AllowBots
 }
 
+// cacheVoiceProbe is the production CallerCounter used by the auto-router. It
+// reads the owner bot's voice-state and member caches to count role-bearing
+// users currently in a channel.
+//
+// Held by the router for the session lifetime. The guildID is captured at
+// construction so the router only needs to pass channelID + roleID on each
+// query.
+type cacheVoiceProbe struct {
+	svc     *Service
+	guildID snowflake.ID
+}
+
+// CountCallers returns the number of cached non-bot members in channelID
+// whose role set contains roleID. When roleID == 0 (no caller role bound)
+// every non-bot in the channel counts — matching AllowFilter semantics.
+func (p *cacheVoiceProbe) CountCallers(channelID, roleID snowflake.ID) int {
+	caches := p.svc.ownerClient.Caches
+	var n int
+	for vs := range caches.VoiceStates(p.guildID) {
+		if vs.ChannelID == nil || *vs.ChannelID != channelID {
+			continue
+		}
+		member, ok := caches.Member(p.guildID, vs.UserID)
+		if !ok || p.svc.IsBot(member.User) {
+			continue
+		}
+		if roleID == 0 {
+			n++
+			continue
+		}
+		for _, rID := range member.RoleIDs {
+			if rID == roleID {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
 // channelHasListeners returns true if channelID contains at least one listener
 // user according to the owner bot's voice-state cache.
 func (m *Service) channelHasListeners(guildID, channelID snowflake.ID) bool {
@@ -250,6 +290,27 @@ func (m *Service) syncMixerPauseState(guildID snowflake.ID, session *guild.Sessi
 	for chID, mx := range session.ChannelMixers {
 		mx.SetPaused(!m.channelHasListeners(guildID, chID))
 	}
+}
+
+// AutoRoute notifies the auto-router that a voice state event has touched
+// channelID. The router debounces bursts (250 ms by default) before
+// recomputing per-source modes. Safe to call when there is no active session
+// or no router attached to the session — both paths are no-ops.
+//
+// Called from voice and member event handlers alongside UpdateMixerPause.
+// While UpdateMixerPause continues to own listener-driven pause state, the
+// router owns copy↔mix mode transitions. (Plan §3.6; coexistence ends once
+// the listener check is folded into the router's destMix decision.)
+func (m *Service) AutoRoute(guildID, channelID snowflake.ID) {
+	m.mu.RLock()
+	st := m.statuses[guildID]
+	if st == nil || st.Session == nil || st.Session.AutoRouter == nil {
+		m.mu.RUnlock()
+		return
+	}
+	router := st.Session.AutoRouter
+	m.mu.RUnlock()
+	router.Debounce(channelID)
 }
 
 // UpdateMixerPause is called on voice state changes (join/leave/move) to
@@ -314,6 +375,7 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 		sessionCopy.Cancel = nil
 		sessionCopy.Cleanup = nil
 		sessionCopy.ChannelMixers = nil
+		sessionCopy.AutoRouter = nil
 		sessionCopy.Speakers = make([]guild.Speaker, len(st.Session.Speakers))
 		copy(sessionCopy.Speakers, st.Session.Speakers)
 		snap.Session = &sessionCopy

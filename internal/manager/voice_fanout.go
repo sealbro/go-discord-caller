@@ -44,6 +44,28 @@ func endSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 	slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", gm.GuildID().String()))
 }
 
+// buildFanoutSourceSpec returns the FanoutInstall spec for a source whose Opus
+// frames must be decoded inline and pushed into one SourceBuffer per
+// destination mixer. The returned OnClose detaches every registered mixer
+// input and drains the buffers.
+//
+// Pulled out of installFanoutSource so the auto-router (Phase A commit 2) can
+// rebuild the spec on caller-count change without going through the install
+// helper.
+func buildFanoutSourceSpec(sources []*opus.SourceBuffer, removals []mixerRef) opus.FanoutInstall {
+	return opus.FanoutInstall{
+		SourceTargets: map[snowflake.ID][]*opus.SourceBuffer{opus.BroadcastUserID: sources},
+		OnClose: func() {
+			for _, r := range removals {
+				r.mx.RemoveInput(r.id)
+			}
+			for _, src := range sources {
+				src.Drain()
+			}
+		},
+	}
+}
+
 // installFanoutSource installs SourceBuffer targets on handle so that every Opus
 // packet received by the source's VoiceReceiver is decoded inline (in
 // ReceiveOpusFrame, on disgo's UDP read goroutine) and pushed into each
@@ -57,17 +79,7 @@ func installFanoutSource(handle *opus.FanoutHandle, sources []*opus.SourceBuffer
 		slog.Error("fanout: source has no handle, frames will not be dispatched")
 		return
 	}
-	handle.Install(opus.FanoutInstall{
-		SourceTargets: sources,
-		OnClose: func() {
-			for _, r := range removals {
-				r.mx.RemoveInput(r.id)
-			}
-			for _, src := range sources {
-				src.Drain()
-			}
-		},
-	})
+	handle.Install(buildFanoutSourceSpec(sources, removals))
 }
 
 // wireFanout starts a goroutine per source that decodes each incoming Opus packet
@@ -136,6 +148,27 @@ func wireFanoutOneMany(ctx context.Context, gm telemetry.GuildMetrics, sources [
 	}
 }
 
+// buildFanoutOwnerStarSpec returns the FanoutInstall spec for the owner-star
+// topology: raw Opus to every speaker chOut, decoded frame to the relay
+// mixer's per-owner SourceBuffer.
+//
+// Pulled out of installFanoutOwnerStar so the auto-router can rebuild it on
+// transitions without going through the install helper.
+func buildFanoutOwnerStarSpec(directOuts []chan<- []byte, relaySrc *opus.SourceBuffer, relayMixer *opus.Mixer, srcID snowflake.ID, dropDirect func()) opus.FanoutInstall {
+	return opus.FanoutInstall{
+		OpusTargets:   directOuts,
+		SourceTargets: map[snowflake.ID][]*opus.SourceBuffer{opus.BroadcastUserID: {relaySrc}},
+		OnClose: func() {
+			relayMixer.RemoveInput(srcID)
+			relaySrc.Drain()
+			for _, out := range directOuts {
+				close(out)
+			}
+		},
+		DropOpus: dropDirect,
+	}
+}
+
 // installFanoutOwnerStar installs the owner-star fanout on handle: raw Opus
 // bytes are forwarded directly to every speaker chOut in directOuts (no
 // re-encode — owner is the only source feeding those channels), and the
@@ -149,18 +182,7 @@ func installFanoutOwnerStar(handle *opus.FanoutHandle, directOuts []chan<- []byt
 		slog.Error("owner star fanout: source has no handle, frames will not be dispatched")
 		return
 	}
-	handle.Install(opus.FanoutInstall{
-		OpusTargets:   directOuts,
-		SourceTargets: []*opus.SourceBuffer{relaySrc},
-		OnClose: func() {
-			relayMixer.RemoveInput(srcID)
-			relaySrc.Drain()
-			for _, out := range directOuts {
-				close(out)
-			}
-		},
-		DropOpus: dropDirect,
-	})
+	handle.Install(buildFanoutOwnerStarSpec(directOuts, relaySrc, relayMixer, srcID, dropDirect))
 }
 
 // wireFanoutOneManyDirect implements host star-topology fanout with direct speaker delivery.
@@ -192,34 +214,6 @@ func wireFanoutOneManyDirect(ctx context.Context, gm telemetry.GuildMetrics, sou
 			installFanoutSource(src.handle, fanSources, removals)
 		}
 	}
-}
-
-// installFanoutDirect is the bypass path for RaidModeOneCaller.
-// Each Opus packet received by the owner's VoiceReceiver is forwarded inline
-// (on disgo's UDP goroutine) to every speaker output channel and to the relay
-// session, with zero decode/encode work. Speaker outs are closed via OnClose
-// when the FanoutHandle is closed at session teardown.
-func installFanoutDirect(gm telemetry.GuildMetrics, handle *opus.FanoutHandle, outs []chan<- []byte, session *ally.Session) {
-	if handle == nil {
-		slog.Error("fanout direct: owner has no handle, frames will not be dispatched")
-		return
-	}
-	drop := gm.Drop(telemetry.DropPathDirect)
-	guildID := gm.GuildID()
-	handle.Install(opus.FanoutInstall{
-		OpusTargets: outs,
-		OpusCallback: func(pkt []byte) {
-			// BroadcastFromGuild takes ownership of pkt: it copies per relay
-			// channel and returns the original to the pool itself.
-			session.BroadcastFromGuild(guildID, pkt)
-		},
-		OnClose: func() {
-			for _, out := range outs {
-				close(out)
-			}
-		},
-		DropOpus: drop,
-	})
 }
 
 // startChannelMixers runs each per-channel mixer with a sink that distributes
@@ -264,14 +258,6 @@ func startRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMi
 	go func() {
 		defer endSession(ctx, ownerCleanup, gm)
 		relayMixer.Run(ctx)
-	}()
-}
-
-// startDirectSessionCleanup waits for ctx cancellation then runs teardown.
-func startDirectSessionCleanup(ctx context.Context, gm telemetry.GuildMetrics, ownerCleanup func()) {
-	go func() {
-		defer endSession(ctx, ownerCleanup, gm)
-		<-ctx.Done()
 	}()
 }
 

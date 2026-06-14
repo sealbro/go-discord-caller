@@ -59,31 +59,12 @@ func TestE2_GuildCallerMixMinus(t *testing.T) {
 	t.Log("E2 passed: cross-channel relay confirmed via speaker bot frames in ch1")
 }
 
-// TestE3_PauseResume verifies that calling UpdateMixerPause toggles the mixer
-// off and on, and that the listener observes a frame gap then a resumption.
-func TestE3_PauseResume(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-	defer cancel()
-
-	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
-
-	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID)
-	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
-
-	speakerIDs := h.RequireSpeakers(t)
-	h.RegisterCleanup(t, mgr, stopSource, stopListener)
-
-	// Wait for steady-state audio flow before pausing.
-	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
-
-	mgr.UpdateMixerPause(h.Cfg.GuildID) // pause
-
-	AssertFrameGap(t, h.Listener, speakerIDs[0], 2*time.Second, 5*time.Second, func() {
-		mgr.UpdateMixerPause(h.Cfg.GuildID) // resume
-	})
-	t.Log("E3 passed: pause/resume state machine works")
-}
+// TestE3_PauseResume was removed when UpdateMixerPause was deprecated. The
+// router now owns pause state and exposes no direct "pause/resume" API — the
+// equivalent voice-event-driven scenario is covered by E11
+// (TestE11_MixerPauseResumeViaVoiceEvents): a listener leaving triggers
+// onVoiceLeave → AutoRoute → router pauses the destination mixer because
+// HasListeners returns false; the listener rejoining unpauses it.
 
 // TestE4_RaidRestart verifies that stopping and restarting a voice raid resumes
 // audio delivery. This exercises the voice-connection teardown and re-setup path

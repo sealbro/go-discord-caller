@@ -92,6 +92,11 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
 // NotifyMemberUpdate pushes a fresh allow decision into the active session's
 // AllowFilter. Called by event handlers when a member's roles change or they
 // join a voice channel; no-op when there is no active session.
+//
+// Also nudges the auto-router (if any) so that a mid-session role grant /
+// revoke on a user currently in a captured voice channel flips C(channel) and
+// re-runs the cascade. Without this hop the router would only see the change
+// when the user next moved between channels.
 func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member) {
 	m.mu.RLock()
 	st := m.statuses[guildID]
@@ -100,6 +105,7 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 		return
 	}
 	filter := st.Session.AllowFilter
+	router := st.Session.AutoRouter
 	m.mu.RUnlock()
 
 	roleID, hasRole := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
@@ -108,6 +114,19 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 		allowed = slices.Contains(member.RoleIDs, roleID)
 	}
 	filter.Set(member.User.ID, allowed)
+
+	if router == nil {
+		return
+	}
+	// Look up the user's current voice channel from the cache; only nudge
+	// the router when the user is in voice (a role change for someone not in
+	// voice has no effect on per-channel caller counts).
+	for vs := range m.ownerClient.Caches.VoiceStates(guildID) {
+		if vs.UserID == member.User.ID && vs.ChannelID != nil {
+			router.Debounce(*vs.ChannelID)
+			return
+		}
+	}
 }
 
 // prefetchChannelMembers fetches full member data for every user currently in

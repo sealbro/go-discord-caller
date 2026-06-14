@@ -104,6 +104,9 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 		ownerHandle:    ownerHandle,
 		guestGm:        gm,
 		allowFilter:    &AllowFilter{},
+		// Drive the router into mix mode so topology assertions can observe
+		// the post-install state without simulating voice events.
+		voiceProbe: stubCallerCounter(2),
 	}
 }
 
@@ -171,8 +174,9 @@ func TestGuestCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// Expect a mixer for each speaker channel + the owner relay channel.
-	wantChIDs := []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1]}
+	// Expect a mixer for each speaker channel + the owner relay channel +
+	// the relay mixer (router-driven build always exposes it).
+	wantChIDs := []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1], relayDestID}
 	if got := len(session.ChannelMixers); got != len(wantChIDs) {
 		t.Fatalf("ChannelMixers count: want %d got %d", len(wantChIDs), got)
 	}
@@ -180,6 +184,9 @@ func TestGuestCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 		if _, ok := session.ChannelMixers[chID]; !ok {
 			t.Errorf("missing channel mixer for %s", chID)
 		}
+	}
+	if session.AutoRouter == nil {
+		t.Error("guest caller pipeline must attach AutoRouter to the session")
 	}
 
 	start()
@@ -194,38 +201,26 @@ func TestGuestCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 		}
 	})
 
-	// Mix-minus on each destination channel mixer. Guest sources are: owner
-	// (since ownerHandle is set) + each speaker.
-	tests := []struct {
-		chID            snowflake.ID
-		wantInputs      []snowflake.ID
-		forbiddenInputs []snowflake.ID
-	}{
-		{fx.ownerChannelID, []snowflake.ID{fx.speakerIDs[0], fx.speakerIDs[1]}, []snowflake.ID{fx.ownerBotID}},
-		{fx.speakerChIDs[0], []snowflake.ID{fx.ownerBotID, fx.speakerIDs[1]}, []snowflake.ID{fx.speakerIDs[0]}},
-		{fx.speakerChIDs[1], []snowflake.ID{fx.ownerBotID, fx.speakerIDs[0]}, []snowflake.ID{fx.speakerIDs[1]}},
-	}
-	for _, tc := range tests {
-		mx := mixerOf(t, session.ChannelMixers[tc.chID])
-		got := mx.InputIDs()
-		for _, want := range tc.wantInputs {
-			if !slices.Contains(got, want) {
-				t.Errorf("channel %s: missing expected input %s; got %v", tc.chID, want, got)
-			}
-		}
-		for _, forbidden := range tc.forbiddenInputs {
-			if slices.Contains(got, forbidden) {
-				t.Errorf("channel %s: contains forbidden mix-minus input %s; got %v", tc.chID, forbidden, got)
-			}
-		}
-	}
-
-	// The relay-input registration also added the synthetic relayInputID to
-	// each channel mixer so packets broadcast from the host reach guest speakers.
-	for _, chID := range wantChIDs {
+	// Per-user keying: each non-own source contributes 2 synth inputs (stub
+	// reports 2 callers per channel). 3 sources total minus the own source
+	// → 2 sources × 2 users = 4 synth inputs per channel mixer. relayInputID
+	// is added by registerRelayInputs so the host's broadcast reaches guest
+	// speakers.
+	const wantSynthInputs = 4
+	for _, chID := range []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1]} {
 		mx := mixerOf(t, session.ChannelMixers[chID])
-		if !slices.Contains(mx.InputIDs(), relayInputID) {
-			t.Errorf("channel %s: missing relay input %d; got %v", chID, relayInputID, mx.InputIDs())
+		got := mx.InputIDs()
+		synthCount := 0
+		for _, id := range got {
+			if uint64(id)>>63 == 1 {
+				synthCount++
+			}
+		}
+		if synthCount != wantSynthInputs {
+			t.Errorf("channel %s: want %d synth inputs (mix-minus), got %d in %v", chID, wantSynthInputs, synthCount, got)
+		}
+		if !slices.Contains(got, relayInputID) {
+			t.Errorf("channel %s: missing relay input %d; got %v", chID, relayInputID, got)
 		}
 	}
 }
@@ -252,12 +247,20 @@ func TestGuestStarCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	// Star guest creates no channel mixers (session.ChannelMixers stays nil).
-	if session.ChannelMixers != nil {
-		t.Errorf("star guest must not create ChannelMixers; got %d entries", len(session.ChannelMixers))
+	// Star guest exposes only the relay mixer via ChannelMixers (the local
+	// destination channels are fed by the host's broadcast through AddGuild,
+	// not by any local mixer).
+	if got := len(session.ChannelMixers); got != 1 {
+		t.Fatalf("star guest ChannelMixers count: want 1 (relay only), got %d", got)
+	}
+	if _, ok := session.ChannelMixers[relayDestID]; !ok {
+		t.Fatalf("star guest must expose the relay mixer under relayDestID")
 	}
 	if !session.IsGuest {
 		t.Error("guest session must have IsGuest=true")
+	}
+	if session.AutoRouter == nil {
+		t.Error("star guest must attach AutoRouter to the session")
 	}
 
 	start()

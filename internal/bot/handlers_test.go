@@ -33,7 +33,6 @@ type fakeManager struct {
 	trySeedCalls        []snowflakePair
 	removeSpeakerCalls  []snowflakePair
 	notifyMemberCalls   []snowflakePair
-	updateMixerCalls    []snowflake.ID
 	autoRouteCalls      []autoRouteCall
 	reconnectCalls      []snowflakePair
 	onBotVoiceMoveCalls []botMoveCall
@@ -85,11 +84,6 @@ func (f *fakeManager) NotifyMemberUpdate(g snowflake.ID, m discord.Member) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.notifyMemberCalls = append(f.notifyMemberCalls, snowflakePair{g, m.User.ID})
-}
-func (f *fakeManager) UpdateMixerPause(g snowflake.ID) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.updateMixerCalls = append(f.updateMixerCalls, g)
 }
 func (f *fakeManager) AutoRoute(g, ch snowflake.ID) {
 	f.mu.Lock()
@@ -148,7 +142,7 @@ func (f *fakeManager) snapshotCalls() fakeManagerSnapshot {
 		trySeedCalls:        append([]snowflakePair(nil), f.trySeedCalls...),
 		removeSpeakerCalls:  append([]snowflakePair(nil), f.removeSpeakerCalls...),
 		notifyMemberCalls:   append([]snowflakePair(nil), f.notifyMemberCalls...),
-		updateMixerCalls:    append([]snowflake.ID(nil), f.updateMixerCalls...),
+		autoRouteCalls:      append([]autoRouteCall(nil), f.autoRouteCalls...),
 		reconnectCalls:      append([]snowflakePair(nil), f.reconnectCalls...),
 		onBotVoiceMoveCalls: append([]botMoveCall(nil), f.onBotVoiceMoveCalls...),
 	}
@@ -159,7 +153,7 @@ type fakeManagerSnapshot struct {
 	trySeedCalls        []snowflakePair
 	removeSpeakerCalls  []snowflakePair
 	notifyMemberCalls   []snowflakePair
-	updateMixerCalls    []snowflake.ID
+	autoRouteCalls      []autoRouteCall
 	reconnectCalls      []snowflakePair
 	onBotVoiceMoveCalls []botMoveCall
 }
@@ -323,9 +317,9 @@ func TestOnVoiceLeave_BotReconnectsWhenSessionActive(t *testing.T) {
 	if got.guild != guildID || got.user != botID {
 		t.Errorf("ReconnectBotChannel args: want (%s,%s) got (%s,%s)", guildID, botID, got.guild, got.user)
 	}
-	// Bots must not trigger UpdateMixerPause / VoiceCallerAdd on leave.
-	if len(snap.updateMixerCalls) != 0 {
-		t.Errorf("UpdateMixerPause must not be called for bot leave; got %d calls", len(snap.updateMixerCalls))
+	// Bots must not trigger AutoRoute / VoiceCallerAdd on leave.
+	if len(snap.autoRouteCalls) != 0 {
+		t.Errorf("AutoRoute must not be called for bot leave; got %d calls", len(snap.autoRouteCalls))
 	}
 }
 
@@ -381,8 +375,8 @@ func TestOnVoiceLeave_HumanUpdatesMixerAndCallerCount(t *testing.T) {
 			})
 
 			snap := f.snapshotCalls()
-			if len(snap.updateMixerCalls) != 1 || snap.updateMixerCalls[0] != guildID {
-				t.Errorf("UpdateMixerPause: want [%s] got %v", guildID, snap.updateMixerCalls)
+			if len(snap.autoRouteCalls) != 1 || snap.autoRouteCalls[0].guild != guildID || snap.autoRouteCalls[0].channel != oldCh {
+				t.Errorf("AutoRoute: want [{%s,%s}] got %v", guildID, oldCh, snap.autoRouteCalls)
 			}
 			// We rely on the BotMetrics noop meter to not panic when VoiceCallerAdd
 			// is invoked; the call itself is unobservable without an OTel collector.
@@ -421,12 +415,12 @@ func TestOnVoiceMove_BotDelegatesToManager(t *testing.T) {
 	if got.chID == nil || *got.chID != newCh {
 		t.Errorf("OnBotVoiceMove channel: want %s got %v", newCh, got.chID)
 	}
-	if len(snap.updateMixerCalls) != 0 {
-		t.Errorf("UpdateMixerPause must not be called for bot move; got %d calls", len(snap.updateMixerCalls))
+	if len(snap.autoRouteCalls) != 0 {
+		t.Errorf("AutoRoute must not be called for bot move; got %d calls", len(snap.autoRouteCalls))
 	}
 }
 
-func TestOnVoiceMove_HumanUpdatesMixerPause(t *testing.T) {
+func TestOnVoiceMove_HumanTriggersAutoRoute(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{}
 	h := onVoiceMove(f)
@@ -441,8 +435,11 @@ func TestOnVoiceMove_HumanUpdatesMixerPause(t *testing.T) {
 		},
 	})
 	snap := f.snapshotCalls()
-	if len(snap.updateMixerCalls) != 1 || snap.updateMixerCalls[0] != guildID {
-		t.Errorf("UpdateMixerPause: want [%s] got %v", guildID, snap.updateMixerCalls)
+	// OldVoiceState has no channel in this fixture, so only the new channel
+	// triggers a route. Both old and new channels would route if both were
+	// set on the event.
+	if len(snap.autoRouteCalls) != 1 || snap.autoRouteCalls[0].guild != guildID || snap.autoRouteCalls[0].channel != newCh {
+		t.Errorf("AutoRoute: want [{%s,%s}] got %v", guildID, newCh, snap.autoRouteCalls)
 	}
 	if len(snap.onBotVoiceMoveCalls) != 0 {
 		t.Errorf("OnBotVoiceMove must not be called for human move; got %d", len(snap.onBotVoiceMoveCalls))
@@ -474,8 +471,8 @@ func TestOnVoiceJoin_HumanUpdatesPauseAndNotifies(t *testing.T) {
 	if len(snap.notifyMemberCalls) != 1 || snap.notifyMemberCalls[0].user != userID {
 		t.Errorf("NotifyMemberUpdate: want one call for %s got %v", userID, snap.notifyMemberCalls)
 	}
-	if len(snap.updateMixerCalls) != 1 || snap.updateMixerCalls[0] != guildID {
-		t.Errorf("UpdateMixerPause: want [%s] got %v", guildID, snap.updateMixerCalls)
+	if len(snap.autoRouteCalls) != 1 || snap.autoRouteCalls[0].guild != guildID || snap.autoRouteCalls[0].channel != chID {
+		t.Errorf("AutoRoute: want [{%s,%s}] got %v", guildID, chID, snap.autoRouteCalls)
 	}
 }
 
@@ -495,8 +492,8 @@ func TestOnVoiceJoin_BotIsSkipped(t *testing.T) {
 		},
 	})
 	snap := f.snapshotCalls()
-	if len(snap.notifyMemberCalls) != 0 || len(snap.updateMixerCalls) != 0 {
-		t.Errorf("bot join must short-circuit: notify=%d updateMixer=%d",
-			len(snap.notifyMemberCalls), len(snap.updateMixerCalls))
+	if len(snap.notifyMemberCalls) != 0 || len(snap.autoRouteCalls) != 0 {
+		t.Errorf("bot join must short-circuit: notify=%d autoRoute=%d",
+			len(snap.notifyMemberCalls), len(snap.autoRouteCalls))
 	}
 }

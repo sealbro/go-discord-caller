@@ -110,9 +110,10 @@ func TestE10_CallerJoinAfterRaidStart(t *testing.T) {
 }
 
 // TestE11_MixerPauseResumeViaVoiceEvents verifies the auto-pause/resume path
-// driven by Discord voice events rather than direct API calls (contrast with E3):
-//   - onVoiceLeave (non-bot) → UpdateMixerPause → mixer pauses when last caller leaves
-//   - onVoiceJoin  (non-bot) → UpdateMixerPause → mixer resumes when caller rejoins
+// driven by Discord voice events:
+//   - onVoiceLeave (non-bot) → AutoRoute → router pauses the destination mixer
+//     once HasListeners returns false (last human left the channel)
+//   - onVoiceJoin  (non-bot) → AutoRoute → router unpauses when the caller rejoins
 func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -138,8 +139,8 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
 	t.Log("E11: baseline established, dropping caller...")
 
-	// Caller leaves → onVoiceLeave → UpdateMixerPause → mixer pauses.
-	// Caller rejoins → onVoiceJoin → UpdateMixerPause → mixer resumes.
+	// Caller leaves → onVoiceLeave → AutoRoute → router pauses the mixer.
+	// Caller rejoins → onVoiceJoin → AutoRoute → router unpauses the mixer.
 	// AssertFrameGap captures the pause window then triggers the resume func.
 	stopSource() // leave; cleanup no-ops on subsequent calls
 	stopSource = func() {}

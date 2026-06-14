@@ -26,6 +26,7 @@ type guestPipelineParams struct {
 	ownerHandle    *opus.FanoutHandle // non-nil iff the guest owner bot has an inline-capture VoiceReceiver wired up
 	guestGm        telemetry.GuildMetrics
 	allowFilter    *AllowFilter
+	voiceProbe     VoiceProbe // production: *cacheVoiceProbe; consumed by the auto-router
 }
 
 // guestPipeline builds the audio wiring for one guest topology and returns the
@@ -79,47 +80,71 @@ func (guestListenerPipeline) build(_ context.Context, p guestPipelineParams) (*g
 
 // guestStarCallerPipeline handles RaidModeOneManyAllyCaller: sources → relay only,
 // host relay delivered directly to speaker chOuts (no local channel mixers).
+//
+// Auto-route shape: every captured source's only feed is the relay destSlot,
+// so copy mode emits zero local OpusTargets but keeps OpusCallback for
+// outbound broadcast; mix mode allocates per-user SourceBuffers into the
+// relay mixer only.
 type guestStarCallerPipeline struct{}
 
 func (guestStarCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*guild.Session, func(), func(), error) {
-	destinations := buildDestinations(p.setup.joined)
-	if p.ownerChOut != nil {
-		destinations = append(destinations, &destChannel{
-			channelID: p.ownerChannelID,
-			outs:      []chan<- []byte{p.ownerChOut},
-		})
-	}
-	relayMixer, err := opus.NewMixer(p.guestGm.Opus)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("guest star: create relay mixer: %w", err)
-	}
-
 	allOuts := make([]chan<- []byte, len(p.setup.outs))
 	copy(allOuts, p.setup.outs)
 	if p.ownerChOut != nil {
 		allOuts = append(allOuts, p.ownerChOut)
 	}
 
-	session := &guild.Session{
-		GuildID:     p.guestGuildID,
-		Cancel:      p.cancelFunc,
-		Cleanup:     p.setup.speakerCleanup,
-		AllyCode:    p.code,
-		IsGuest:     true,
-		Speakers:    p.setup.speakers,
-		AllowFilter: p.allowFilter,
+	relayMixer, err := opus.NewMixer(p.guestGm.Opus)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("guest star: create relay mixer: %w", err)
+	}
+	relaySlot := &destSlot{channelID: relayDestID, mixer: relayMixer}
+	dests := []*destSlot{relaySlot}
+
+	srcEntries := buildGuestSources(p.setup.joined)
+	if p.ownerHandle != nil {
+		srcEntries = append(srcEntries, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
+	}
+	sourceSlots := make([]*sourceSlot, 0, len(srcEntries))
+	for _, e := range srcEntries {
+		slot := &sourceSlot{
+			id:        e.id,
+			channelID: e.channelID,
+			handle:    e.handle,
+			feeds:     []*destSlot{relaySlot},
+		}
+		slot.buildInstall = mixMinusInstallBuilder(p.guestGm, p.guestGuildID, slot, p.allySession)
+		relaySlot.sources = append(relaySlot.sources, slot)
+		sourceSlots = append(sourceSlots, slot)
 	}
 
-	sources := buildGuestSources(p.setup.joined)
-	if p.ownerHandle != nil {
-		sources = append(sources, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
+	router := newSourceRouter(p.guestGuildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests)
+
+	mixerPausers := map[snowflake.ID]guild.MixerPauser{relayDestID: relayMixer}
+
+	speakerCleanup := p.setup.speakerCleanup
+	session := &guild.Session{
+		GuildID: p.guestGuildID,
+		Cancel:  p.cancelFunc,
+		Cleanup: func() {
+			router.Close()
+			speakerCleanup()
+		},
+		AllyCode:      p.code,
+		IsGuest:       true,
+		Speakers:      p.setup.speakers,
+		ChannelMixers: mixerPausers,
+		AllowFilter:   p.allowFilter,
+		AutoRouter:    router,
 	}
 
 	start := func() {
-		// ownerChannelID=0: all sources go to relay mixer only.
-		wireFanoutOneMany(ctx, p.guestGm, sources, destinations, nil, relayMixer, 0)
+		// Local destination chOuts receive audio from the host's broadcast
+		// via AddGuild → ally session → speaker chOut. The router only
+		// handles the outbound (capture → relay) side.
 		p.allySession.AddGuild(p.guestGuildID, allOuts)
 		startGuestRelayBroadcast(ctx, relayMixer, p.allySession, p.guestGuildID)
+		router.Recompute()
 	}
 	cleanup := func() {
 		for _, ch := range allOuts {
@@ -129,8 +154,11 @@ func (guestStarCallerPipeline) build(ctx context.Context, p guestPipelineParams)
 	return session, start, cleanup, nil
 }
 
-// guestCallerPipeline handles RaidModeAllyCaller: full mix-minus, one channel mixer per
-// destination, relay mixer for outbound. Mirrors the host mixMinusPipeline for guest guilds.
+// guestCallerPipeline handles RaidModeAllyCaller: full mix-minus, one channel
+// mixer per destination, relay mixer for outbound. Mirrors guildCallerPipeline
+// for the guest side — same router pattern, same closure shape; the only
+// difference is that BroadcastFromGuild fires with guestGuildID so the packet
+// reaches the host and every other guest.
 type guestCallerPipeline struct{}
 
 func (guestCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*guild.Session, func(), func(), error) {
@@ -155,35 +183,71 @@ func (guestCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*g
 		return nil, nil, nil, fmt.Errorf("guest caller: create relay mixer: %w", err)
 	}
 
-	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers))
+	dests := make([]*destSlot, 0, len(destinations)+1)
+	for _, dest := range destinations {
+		dests = append(dests, &destSlot{
+			channelID: dest.channelID,
+			mixer:     channelMixers[dest.channelID],
+			chOuts:    dest.outs,
+		})
+	}
+	relaySlot := &destSlot{channelID: relayDestID, mixer: relayMixer}
+	dests = append(dests, relaySlot)
+
+	srcEntries := buildGuestSources(p.setup.joined)
+	if p.ownerHandle != nil {
+		srcEntries = append(srcEntries, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
+	}
+	sourceSlots := make([]*sourceSlot, 0, len(srcEntries))
+	for _, e := range srcEntries {
+		slot := &sourceSlot{
+			id:        e.id,
+			channelID: e.channelID,
+			handle:    e.handle,
+		}
+		for _, d := range dests {
+			if d.channelID == e.channelID {
+				continue
+			}
+			slot.feeds = append(slot.feeds, d)
+			d.sources = append(d.sources, slot)
+		}
+		slot.buildInstall = mixMinusInstallBuilder(p.guestGm, p.guestGuildID, slot, p.allySession)
+		sourceSlots = append(sourceSlots, slot)
+	}
+
+	router := newSourceRouter(p.guestGuildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests)
+
+	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {
 		mixerPausers[chID] = mx
 	}
+	mixerPausers[relayDestID] = relayMixer
 
+	speakerCleanup := p.setup.speakerCleanup
 	session := &guild.Session{
-		GuildID:       p.guestGuildID,
-		Cancel:        p.cancelFunc,
-		Cleanup:       p.setup.speakerCleanup,
+		GuildID: p.guestGuildID,
+		Cancel:  p.cancelFunc,
+		Cleanup: func() {
+			router.Close()
+			speakerCleanup()
+		},
 		AllyCode:      p.code,
 		IsGuest:       true,
 		Speakers:      p.setup.speakers,
 		ChannelMixers: mixerPausers,
 		AllowFilter:   p.allowFilter,
+		AutoRouter:    router,
 	}
 
-	sources := buildGuestSources(p.setup.joined)
-	if p.ownerHandle != nil {
-		sources = append(sources, sourceEntry{p.ownerBotID, p.ownerChannelID, p.ownerHandle})
-	}
-
-	// relayInputs is populated inside start() and closed by cleanup(); it is safe
-	// because the teardown goroutine in JoinSession only runs after start() returns.
+	// relayInputs is populated inside start() and closed by cleanup(); safe
+	// because the teardown goroutine in JoinSession only runs after start().
 	var relayInputs []chan<- []byte
 	start := func() {
-		wireFanout(ctx, p.guestGm, sources, destinations, channelMixers, relayMixer)
 		relayInputs = registerRelayInputs(ctx, p.guestGm, p.allySession, destinations, channelMixers)
 		startChannelMixers(ctx, p.guestGm, destinations, channelMixers)
 		startGuestRelayBroadcast(ctx, relayMixer, p.allySession, p.guestGuildID)
+		router.Recompute()
 	}
 	cleanup := func() {
 		for _, ch := range relayInputs {

@@ -85,8 +85,33 @@ func buildHostParams(t *testing.T, ctx context.Context, fx hostFixture, mode gui
 		ov:           pool.NewGuildVoice(nil, fx.ownerChannelID),
 		gm:           gm,
 		allowFilter:  &AllowFilter{},
+		// Force every channel into routeMix so the router-driven pipelines'
+		// initial Recompute attaches mixer inputs immediately. Topology tests
+		// then assert against the post-install state instead of having to
+		// simulate caller joins. C=2 also exercises the §1 row-2 cascade
+		// for both source-baseline and multi-source cases.
+		voiceProbe: stubCallerCounter(2),
 	}
 }
+
+// stubCallerCounter is a CallerEnumerator that synthesises N caller IDs for
+// any channel — pipeline tests use this to drive the router into a predictable
+// mode. The synthesised IDs are derived from the channel ID so each call
+// returns a stable set the user-set comparison can recognise across re-routes.
+type stubCallerCounter int
+
+func (s stubCallerCounter) EnumerateCallers(channelID, _ snowflake.ID) []snowflake.ID {
+	out := make([]snowflake.ID, int(s))
+	for i := range out {
+		out[i] = snowflake.ID(uint64(channelID)*1000 + uint64(i+1))
+	}
+	return out
+}
+
+// HasListeners returns true unconditionally so pipeline tests can assert on
+// the routed (unpaused) mixer state without setting up a separate listener
+// fixture for every channel.
+func (s stubCallerCounter) HasListeners(_ snowflake.ID) bool { return true }
 
 // hostFx is the canonical 2-speaker, distinct-channel layout used across
 // pipeline tests. Two speakers in two distinct channels gives mix-minus
@@ -108,8 +133,8 @@ func TestPipelineFor_ReturnsExpectedImpl(t *testing.T) {
 		want string
 	}{
 		{guild.RaidModeOneCaller, "manager.oneCallerPipeline"},
-		{guild.RaidModeGuildCaller, "manager.mixMinusPipeline"},
-		{guild.RaidModeOneManyGuildCaller, "manager.starPipeline"},
+		{guild.RaidModeGuildCaller, "manager.guildCallerPipeline"},
+		{guild.RaidModeOneManyGuildCaller, "manager.starCallerPipeline"},
 	}
 	for _, c := range cases {
 		t.Run(string(c.mode), func(t *testing.T) {
@@ -159,9 +184,13 @@ func TestOneCallerPipeline_AlwaysOnGraph(t *testing.T) {
 	}
 }
 
-// TestMixMinusPipeline_BuildsExpectedTopology verifies that each destination
-// channel gets its own mixer and that mix-minus excludes the source channel.
-func TestMixMinusPipeline_BuildsExpectedTopology(t *testing.T) {
+// TestGuildCallerPipeline_BuildsExpectedTopology verifies that each
+// destination channel gets its own mixer, the relay mixer is exposed too, and
+// mix-minus excludes the source channel from each channel mixer.
+// (Replaces TestMixMinusPipeline_BuildsExpectedTopology — the pipeline now
+// runs through the router and exposes the relay mixer via ChannelMixers under
+// the synthetic relayDestID.)
+func TestGuildCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -173,8 +202,8 @@ func TestMixMinusPipeline_BuildsExpectedTopology(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// (a) ChannelMixers exists for owner channel + each speaker channel.
-	wantChIDs := []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1]}
+	// (a) ChannelMixers exists for owner channel + each speaker channel + relay.
+	wantChIDs := []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1], relayDestID}
 	if got := len(session.ChannelMixers); got != len(wantChIDs) {
 		t.Fatalf("ChannelMixers count: want %d got %d", len(wantChIDs), got)
 	}
@@ -182,6 +211,9 @@ func TestMixMinusPipeline_BuildsExpectedTopology(t *testing.T) {
 		if _, ok := session.ChannelMixers[chID]; !ok {
 			t.Errorf("missing channel mixer for %s", chID)
 		}
+	}
+	if session.AutoRouter == nil {
+		t.Error("GuildCaller pipeline must attach AutoRouter to the session")
 	}
 
 	// start() wires fanout inputs to the mixers; cancel ctx on cleanup so
@@ -198,41 +230,36 @@ func TestMixMinusPipeline_BuildsExpectedTopology(t *testing.T) {
 		}
 	})
 
-	// (b)(c) Inspect inputs on each channel mixer.
-	// Mix-minus: a channel mixer must NOT contain the source ID from that channel.
-	tests := []struct {
-		chID            snowflake.ID
-		wantInputs      []snowflake.ID
-		forbiddenInputs []snowflake.ID
-	}{
-		// Owner channel mixer: receives speakers (mix-minus excludes owner).
-		{fx.ownerChannelID, []snowflake.ID{fx.speakerIDs[0], fx.speakerIDs[1]}, []snowflake.ID{fx.ownerBotID}},
-		// Speaker 1's channel mixer: owner + speaker 2 (excludes speaker 1).
-		{fx.speakerChIDs[0], []snowflake.ID{fx.ownerBotID, fx.speakerIDs[1]}, []snowflake.ID{fx.speakerIDs[0]}},
-		// Speaker 2's channel mixer: owner + speaker 1 (excludes speaker 2).
-		{fx.speakerChIDs[1], []snowflake.ID{fx.ownerBotID, fx.speakerIDs[0]}, []snowflake.ID{fx.speakerIDs[1]}},
-	}
-	for _, tc := range tests {
-		mx := mixerOf(t, session.ChannelMixers[tc.chID])
+	// (b) Mixer inputs are now synth IDs (one per user, per source feeding
+	// the destination) rather than source bot IDs. With stubCallerCounter(2)
+	// each of the 3 source channels has 2 enumerated users. Mix-minus says
+	// each channel mixer is fed by 2 source channels (N-1) × 2 users = 4
+	// synth inputs. AllowGuestCapture also registers the relay input (id 1).
+	const wantSynthInputs = 4
+	for _, chID := range []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1]} {
+		mx := mixerOf(t, session.ChannelMixers[chID])
 		got := mx.InputIDs()
-		for _, want := range tc.wantInputs {
-			if !slices.Contains(got, want) {
-				t.Errorf("channel %s: missing expected input %s; got %v", tc.chID, want, got)
+		synthCount := 0
+		for _, id := range got {
+			if uint64(id)>>63 == 1 {
+				synthCount++
 			}
 		}
-		for _, forbidden := range tc.forbiddenInputs {
-			if slices.Contains(got, forbidden) {
-				t.Errorf("channel %s: contains forbidden mix-minus input %s; got %v", tc.chID, forbidden, got)
-			}
+		if synthCount != wantSynthInputs {
+			t.Errorf("channel %s: want %d synth inputs (mix-minus excludes own source), got %d in %v", chID, wantSynthInputs, synthCount, got)
+		}
+		if !slices.Contains(got, relayInputID) {
+			t.Errorf("channel %s: missing relay input (id=%d) from registerRelayInputs; got %v", chID, relayInputID, got)
 		}
 	}
 }
 
-// TestStarPipeline_BuildsExpectedTopology verifies RaidModeOneManyGuildCaller:
-// exactly one channel mixer at the owner channel, receiving every speaker as
-// input. Speaker channels get raw Opus passthrough via the FanoutHandle, not
-// per-channel mixers.
-func TestStarPipeline_BuildsExpectedTopology(t *testing.T) {
+// TestStarCallerPipeline_BuildsExpectedTopology verifies RaidModeOneManyGuildCaller:
+// the hub mixer at owner channel receives every speaker as input, and the
+// relay mixer is exposed alongside it via ChannelMixers (under the synthetic
+// relayDestID). Speaker channels still get raw Opus passthrough from the
+// owner via OpusTargets — they have no dedicated per-channel mixer.
+func TestStarCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -244,12 +271,18 @@ func TestStarPipeline_BuildsExpectedTopology(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// Exactly one ChannelMixer entry — the hub at the owner channel.
-	if got := len(session.ChannelMixers); got != 1 {
-		t.Fatalf("ChannelMixers count: want 1 got %d", got)
+	// Hub mixer + relay mixer = 2 entries (speakers have no per-channel mixer).
+	if got := len(session.ChannelMixers); got != 2 {
+		t.Fatalf("ChannelMixers count: want 2 (hub + relay) got %d", got)
 	}
 	if _, ok := session.ChannelMixers[fx.ownerChannelID]; !ok {
 		t.Fatalf("missing hub mixer at owner channel %s", fx.ownerChannelID)
+	}
+	if _, ok := session.ChannelMixers[relayDestID]; !ok {
+		t.Fatalf("missing relay mixer under relayDestID")
+	}
+	if session.AutoRouter == nil {
+		t.Error("star pipeline must attach AutoRouter to the session")
 	}
 
 	start()
@@ -263,21 +296,28 @@ func TestStarPipeline_BuildsExpectedTopology(t *testing.T) {
 
 	hubMixer := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
 	got := hubMixer.InputIDs()
-	// Hub receives both speakers (star spokes → hub) but NOT the owner.
-	for _, want := range fx.speakerIDs {
-		if !slices.Contains(got, want) {
-			t.Errorf("hub mixer: missing speaker input %s; got %v", want, got)
+	// Hub is fed only by speaker sources (star spokes → hub). Per-user
+	// keying produces (2 speakers) × (2 users per stub) = 4 synth inputs;
+	// AllowGuestCapture adds the relay input (id 1) too.
+	synthCount := 0
+	for _, id := range got {
+		if uint64(id)>>63 == 1 {
+			synthCount++
 		}
 	}
-	if slices.Contains(got, fx.ownerBotID) {
-		t.Errorf("hub mixer: must not contain owner self-input; got %v", got)
+	if synthCount != 4 {
+		t.Errorf("hub mixer: want 4 synth inputs (2 speakers × 2 users), got %d in %v", synthCount, got)
+	}
+	if !slices.Contains(got, relayInputID) {
+		t.Errorf("hub mixer: missing relay input (id=%d); got %v", relayInputID, got)
 	}
 }
 
-// TestMixMinusPipeline_SharedChannel verifies the buildDestinations dedupe path
-// when two speakers occupy the same voice channel — only one mixer is created
-// for that channel and it carries both speakers' chOut.
-func TestMixMinusPipeline_SharedChannel(t *testing.T) {
+// TestGuildCallerPipeline_SharedChannel verifies the buildDestinations dedupe
+// path when two speakers occupy the same voice channel — only one mixer is
+// created for that channel and it carries both speakers' chOut. The relay
+// mixer brings the count to 3.
+func TestGuildCallerPipeline_SharedChannel(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -292,9 +332,9 @@ func TestMixMinusPipeline_SharedChannel(t *testing.T) {
 		t.Fatalf("build: %v", err)
 	}
 
-	// 1 owner mixer + 1 shared speaker-channel mixer = 2.
-	if got := len(session.ChannelMixers); got != 2 {
-		t.Fatalf("ChannelMixers count (shared channel): want 2 got %d", got)
+	// 1 owner mixer + 1 shared speaker-channel mixer + relay = 3.
+	if got := len(session.ChannelMixers); got != 3 {
+		t.Fatalf("ChannelMixers count (shared channel): want 3 got %d", got)
 	}
 
 	start()
@@ -308,16 +348,22 @@ func TestMixMinusPipeline_SharedChannel(t *testing.T) {
 
 	// Shared channel mixer should only receive owner (mix-minus excludes the
 	// shared channel itself, and iterDeduplicatedCaptures wires only the first
-	// speaker as a source).
+	// speaker as a source). Owner channel has 2 stub users, so the shared
+	// channel mixer should have exactly 2 synth inputs (one per user) + the
+	// relay input from AllowGuestCapture.
 	sharedMixer := mixerOf(t, session.ChannelMixers[snowflake.ID(1002)])
 	got := sharedMixer.InputIDs()
-	if !slices.Contains(got, fx.ownerBotID) {
-		t.Errorf("shared channel mixer: missing owner input; got %v", got)
-	}
-	for _, sid := range fx.speakerIDs {
-		if slices.Contains(got, sid) {
-			t.Errorf("shared channel mixer: must not contain speaker %s (mix-minus); got %v", sid, got)
+	synthCount := 0
+	for _, id := range got {
+		if uint64(id)>>63 == 1 {
+			synthCount++
 		}
+	}
+	if synthCount != 2 {
+		t.Errorf("shared channel mixer: want 2 synth inputs (owner × 2 users), got %d in %v", synthCount, got)
+	}
+	if !slices.Contains(got, relayInputID) {
+		t.Errorf("shared channel mixer: missing relay input (id=%d); got %v", relayInputID, got)
 	}
 }
 

@@ -6,19 +6,40 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/opus"
 )
 
-// callerCount is a CallerCounter that returns canned values per channel and
-// counts how many times CountCallers has been invoked.
+// callerCount is a CallerEnumerator that returns canned values per channel
+// and counts how many times EnumerateCallers has been invoked. When users is
+// nil it synthesises non-zero placeholder userIDs derived from channelID, so
+// existing tests that only set counts continue to work without specifying
+// per-user identities.
 type callerCount struct {
 	counts map[snowflake.ID]int
+	users  map[snowflake.ID][]snowflake.ID
 	calls  atomic.Int32
 }
 
-func (c *callerCount) CountCallers(channelID, _ snowflake.ID) int {
+func (c *callerCount) EnumerateCallers(channelID, _ snowflake.ID) []snowflake.ID {
 	c.calls.Add(1)
-	return c.counts[channelID]
+	if u, ok := c.users[channelID]; ok {
+		out := make([]snowflake.ID, len(u))
+		copy(out, u)
+		return out
+	}
+	n := c.counts[channelID]
+	out := make([]snowflake.ID, n)
+	for i := range out {
+		// Synth user IDs that are stable per (channel, index) but non-zero
+		// and unlikely to collide with explicit fixtures.
+		out[i] = snowflake.ID(uint64(channelID)*1000 + uint64(i+1))
+	}
+	return out
 }
+
+// HasListeners defaults to true so cascade-focused tests don't need to wire
+// listener fixtures. Per-test overrides can be added once the field exists.
+func (c *callerCount) HasListeners(_ snowflake.ID) bool { return true }
 
 func chID(i uint64) snowflake.ID { return snowflake.ID(i) }
 
@@ -253,6 +274,100 @@ func TestSourceRouter_RecomputeIdempotent(t *testing.T) {
 	}
 	if mode1 != routeCopy {
 		t.Errorf("C=1 source must be routeCopy; got %v", mode1)
+	}
+}
+
+func TestSourceRouter_PerUserSynthIDsAreUniqueAndStable(t *testing.T) {
+	// §4.3 fix: each role-bearing user in a source channel must get their
+	// own synth ID so the destination mixer registers them as independent
+	// inputs (one SourceBuffer per user) instead of evicting each other in
+	// a shared cap-3 ring.
+	r := &sourceRouter{}
+	s := &sourceSlot{id: chID(100), channelID: chID(200)}
+
+	a1 := r.synthIDForLocked(s, chID(10))
+	b1 := r.synthIDForLocked(s, chID(20))
+	a2 := r.synthIDForLocked(s, chID(10)) // same user again
+
+	if a1 == b1 {
+		t.Errorf("different users must get different synth IDs; both = %v", a1)
+	}
+	if a1 != a2 {
+		t.Errorf("same user must get stable synth ID; first=%v second=%v", a1, a2)
+	}
+	for _, id := range []snowflake.ID{a1, b1} {
+		if uint64(id)>>63 != 1 {
+			t.Errorf("synth ID must have bit 63 set (no collision with snowflakes); got %v (%b)", id, id)
+		}
+	}
+}
+
+func TestSourceRouter_UserSetChangeReinstallsEvenInSameMode(t *testing.T) {
+	// Same mix mode across two recomputes, but the user set changes
+	// (user 999 joins channel). The router must re-call buildInstall so the
+	// new user's SourceBuffer gets registered.
+	counter := &callerCount{
+		users: map[snowflake.ID][]snowflake.ID{chID(1): {chID(11), chID(12)}},
+	}
+	// Provide a real (no-op) FanoutHandle so applyModes' nil-guard passes
+	// and buildInstall gets called.
+	src := &sourceSlot{id: chID(1), channelID: chID(1), handle: opus.NewFanoutHandle()}
+	dst := &destSlot{channelID: chID(2), sources: []*sourceSlot{src}}
+	src.feeds = []*destSlot{dst}
+
+	var calls int
+	var lastUsers []userBinding
+	src.buildInstall = func(_ routeMode, users []userBinding) (opus.FanoutInstall, func()) {
+		calls++
+		lastUsers = users
+		return opus.FanoutInstall{}, func() {}
+	}
+
+	r := newSourceRouter(chID(1), chID(7), counter, []*sourceSlot{src}, []*destSlot{dst})
+
+	r.Recompute()
+	// Routing is intentionally mocked via buildInstall; the slot's mode
+	// transitioned from off → mix. We expect 1 call so far.
+	if calls != 1 {
+		t.Fatalf("first Recompute should fire buildInstall once; got %d", calls)
+	}
+	if len(lastUsers) != 2 {
+		t.Fatalf("first install: want 2 user bindings, got %d", len(lastUsers))
+	}
+
+	// New user joins; mode stays routeMix (still ≥2 callers).
+	counter.users[chID(1)] = []snowflake.ID{chID(11), chID(12), chID(999)}
+
+	r.Recompute()
+	if calls != 2 {
+		t.Errorf("user-set change must trigger reinstall even in same mode; got %d total calls", calls)
+	}
+	if len(lastUsers) != 3 {
+		t.Errorf("second install: want 3 user bindings, got %d", len(lastUsers))
+	}
+
+	// Same user set on a third Recompute: no reinstall.
+	r.Recompute()
+	if calls != 2 {
+		t.Errorf("unchanged user set must NOT trigger reinstall; got %d total calls", calls)
+	}
+}
+
+func TestSourceRouter_RecomputeAfterCloseBailsOut(t *testing.T) {
+	// Defends against an AfterFunc that started before Close but was waiting
+	// on mu when Close ran — the timer.Stop() returned false and the callback
+	// continues. The closed flag prevents the late Recompute from touching
+	// already-torn-down handles.
+	counter := &callerCount{counts: map[snowflake.ID]int{chID(1): 1}}
+	src := &sourceSlot{id: chID(1), channelID: chID(1)}
+	dst := &destSlot{channelID: chID(2), sources: []*sourceSlot{src}}
+	src.feeds = []*destSlot{dst}
+
+	r := newSourceRouter(chID(1), chID(7), counter, []*sourceSlot{src}, []*destSlot{dst})
+	r.Close()
+	r.Recompute()
+	if got := counter.calls.Load(); got != 0 {
+		t.Errorf("Recompute after Close must short-circuit; got %d EnumerateCallers calls", got)
 	}
 }
 

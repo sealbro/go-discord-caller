@@ -96,6 +96,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		ownerHandle:    ownerHandle,
 		guestGm:        guestGm,
 		allowFilter:    allowUser,
+		voiceProbe:     &cacheVoiceProbe{svc: m, guildID: guestGuildID},
 	}
 	session, start, pipelineCleanup, err := guestPipelineFor(guestMode).build(ctx, params)
 	if err != nil {
@@ -112,9 +113,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		endSpanErr(span, err)
 		return guestMode, fmt.Errorf("join session: commit: %w", err)
 	}
-	if session.ChannelMixers != nil {
-		m.syncMixerPauseState(guestGuildID, session)
-	}
+	// Initial pause state (per-cascade + listener check) is seeded by the
+	// router's Recompute inside start(); no separate sync pass needed.
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	start()
 
@@ -268,9 +268,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		endSpanErr(span, err)
 		return "", err
 	}
-	if !mode.IsDirectPassthrough() {
-		m.syncMixerPauseState(guildID, session)
-	}
+	// Initial pause state (per-cascade + listener check) is seeded by the
+	// router's Recompute inside start(); no separate sync pass needed.
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	gm.SessionStarted(len(setup.joined))
 	logMsg := "voice raid started"

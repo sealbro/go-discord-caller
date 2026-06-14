@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -11,11 +12,12 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
-// relayDestID is the synthetic destination channelID used by oneCallerPipeline
-// to model the ally relay mixer as a destSlot in the router topology. Must
-// not collide with any real Discord channelID; 2 sits inside the range
-// Discord reserves for its own system snowflakes (epoch + 0). relayInputID
-// uses 1 for the host-side guest-input source, so 2 is the next safe choice.
+// relayDestID is the synthetic destination channelID used to model the ally
+// relay mixer as a destSlot in the router topology. Discord snowflakes are
+// epoch-based with a minimum value around 4×10¹⁰ (Discord's epoch is
+// 2015-01-01), so any small integer is safely below the real-channelID
+// range. relayInputID = 1 is already used for the host-side guest-input
+// source, so 2 is the next safe choice.
 const relayDestID snowflake.ID = 2
 
 // oneCallerPipeline handles RaidModeOneCaller: single owner source feeds N
@@ -122,10 +124,10 @@ func (oneCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.Se
 // oneCallerInstallBuilder returns the buildInstall closure for the OneCaller
 // owner source. Closes over the ally session + guild metrics so each
 // transition has the topology details to install.
-func oneCallerInstallBuilder(gm telemetry.GuildMetrics, guildID snowflake.ID, owner *sourceSlot, allySession *ally.Session) func(routeMode) (opus.FanoutInstall, func()) {
+func oneCallerInstallBuilder(gm telemetry.GuildMetrics, guildID snowflake.ID, owner *sourceSlot, allySession *ally.Session) func(routeMode, []userBinding) (opus.FanoutInstall, func()) {
 	dropDirect := gm.Drop(telemetry.DropPathDirect)
 	dropMixer := gm.Drop(telemetry.DropPathMixer)
-	return func(mode routeMode) (opus.FanoutInstall, func()) {
+	return func(mode routeMode, users []userBinding) (opus.FanoutInstall, func()) {
 		switch mode {
 		case routeOff:
 			return opus.FanoutInstall{}, func() {}
@@ -146,32 +148,55 @@ func oneCallerInstallBuilder(gm telemetry.GuildMetrics, guildID snowflake.ID, ow
 			}
 			return spec, func() {}
 		case routeMix:
-			var sbs []*opus.SourceBuffer
-			var removals []mixerRef
-			for _, d := range owner.feeds {
-				if d.mixer == nil {
-					continue
-				}
-				sb := opus.NewSourceBuffer(dropMixer)
-				if err := d.mixer.AddInput(owner.id, sb); err != nil {
-					continue
-				}
-				sbs = append(sbs, sb)
-				removals = append(removals, mixerRef{mx: d.mixer, id: owner.id})
-			}
-			spec := opus.FanoutInstall{
-				SourceTargets: map[snowflake.ID][]*opus.SourceBuffer{opus.BroadcastUserID: sbs},
-			}
-			teardown := func() {
-				for _, r := range removals {
-					r.mx.RemoveInput(r.id)
-				}
-				for _, sb := range sbs {
-					sb.Drain()
-				}
-			}
+			spec, teardown := buildPerUserMixSpec(owner, users, dropMixer)
 			return spec, teardown
 		}
 		return opus.FanoutInstall{}, func() {}
 	}
+}
+
+// buildPerUserMixSpec allocates one SourceBuffer per (user, destination
+// mixer) pair, registers each under its synth ID with the destination mixer,
+// and returns a FanoutInstall keyed by userID plus a teardown closure that
+// detaches and drains them. Shared by every mix-mode closure that has no
+// extra topology rules (OneCaller / GuildCaller / star speaker source).
+func buildPerUserMixSpec(src *sourceSlot, users []userBinding, dropMixer func()) (opus.FanoutInstall, func()) {
+	sourceTargets := make(map[snowflake.ID][]*opus.SourceBuffer, len(users))
+	var removals []mixerRef
+	var sbs []*opus.SourceBuffer
+	for _, u := range users {
+		var userSBs []*opus.SourceBuffer
+		for _, d := range src.feeds {
+			if d.mixer == nil {
+				continue
+			}
+			sb := opus.NewSourceBuffer(dropMixer)
+			if err := d.mixer.AddInput(u.synthID, sb); err != nil {
+				// Silent skip would mean this user's audio never reaches
+				// this destination — surface it so the operator can
+				// correlate with the mixer-internal error.
+				slog.Warn("auto-route: mixer.AddInput failed; skipping user→dest binding",
+					slog.String("sourceID", src.id.String()),
+					slog.String("destID", d.channelID.String()),
+					slog.String("userID", u.userID.String()),
+					slog.Any("err", err))
+				continue
+			}
+			userSBs = append(userSBs, sb)
+			sbs = append(sbs, sb)
+			removals = append(removals, mixerRef{mx: d.mixer, id: u.synthID})
+		}
+		if len(userSBs) > 0 {
+			sourceTargets[u.userID] = userSBs
+		}
+	}
+	teardown := func() {
+		for _, r := range removals {
+			r.mx.RemoveInput(r.id)
+		}
+		for _, sb := range sbs {
+			sb.Drain()
+		}
+	}
+	return opus.FanoutInstall{SourceTargets: sourceTargets}, teardown
 }

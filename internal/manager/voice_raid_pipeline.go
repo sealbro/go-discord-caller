@@ -2,7 +2,6 @@ package manager
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -28,11 +27,13 @@ type pipelineParams struct {
 	ov           pool.GuildVoice
 	gm           telemetry.GuildMetrics
 	allowFilter  *AllowFilter
-	voiceProbe   CallerCounter // production: *cacheVoiceProbe; consumed by the auto-router
+	voiceProbe   VoiceProbe // production: *cacheVoiceProbe; consumed by the auto-router
 }
 
 // hostPipeline builds the audio wiring for one topology and returns the
-// session to commit plus a start func to call after commitSession + syncMixerPauseState.
+// session to commit plus a start func to call after commitSession. start()
+// is responsible for spawning mixer goroutines and seeding initial pause
+// state via the router's Recompute.
 // On failure it returns a non-nil error; the caller is responsible for cleaning up
 // speakers, the owner voice connection, and the ally session.
 type hostPipeline interface {
@@ -40,122 +41,16 @@ type hostPipeline interface {
 }
 
 // pipelineFor returns the correct pipeline implementation for mode.
+//
+// All three host modes now run through the always-on mixer graph + auto router
+// (oneCallerPipeline / guildCallerPipeline / starCallerPipeline).
 func pipelineFor(mode guild.RaidMode) hostPipeline {
 	switch {
 	case mode.IsDirectPassthrough():
-		// RaidModeOneCaller now runs through the always-on mixer graph + auto
-		// router (oneCallerPipeline). The legacy directPipeline is retained
-		// below only as a reference for the star/mixMinus pipelines until
-		// they are migrated in a follow-up commit.
 		return oneCallerPipeline{}
 	case mode.IsStarTopology():
-		return starPipeline{}
+		return starCallerPipeline{}
 	default:
-		return mixMinusPipeline{}
+		return guildCallerPipeline{}
 	}
-}
-
-// starPipeline handles RaidModeOneManyGuildCaller: hub mixer at the owner channel only.
-// Speaker channels receive raw Opus frames directly — no per-channel mixer needed.
-type starPipeline struct{}
-
-func (starPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
-	destinations := buildDestinations(p.setup.joined)
-	if p.chOwnerOut != nil {
-		destinations = append(destinations, &destChannel{
-			channelID: p.ov.ChannelID(),
-			outs:      []chan<- []byte{p.chOwnerOut},
-		})
-	}
-	relayMixer, err := opus.NewMixer(p.gm.Opus)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
-	}
-	hubMixer, err := opus.NewMixer(p.gm.Opus)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create hub mixer: %w", err)
-	}
-	channelMixers := map[snowflake.ID]*opus.Mixer{p.ov.ChannelID(): hubMixer}
-	mixerPausers := map[snowflake.ID]guild.MixerPauser{p.ov.ChannelID(): hubMixer}
-	session := &guild.Session{
-		GuildID:       p.guildID,
-		Cancel:        p.cancelFunc,
-		Cleanup:       p.setup.speakerCleanup,
-		AllyCode:      p.allyCode,
-		Speakers:      p.setup.speakers,
-		ChannelMixers: mixerPausers,
-		AllowFilter:   p.allowFilter,
-	}
-	// Partition destinations: owner hub gets mixed output; all other channels
-	// get raw Opus directly from the fanout goroutine (no mixing needed).
-	var ownerDests []*destChannel
-	var directSpeakerOuts []chan<- []byte
-	for _, dest := range destinations {
-		if dest.channelID == p.ov.ChannelID() {
-			ownerDests = append(ownerDests, dest)
-		} else {
-			directSpeakerOuts = append(directSpeakerOuts, dest.outs...)
-		}
-	}
-	start := func() {
-		wireFanoutOneManyDirect(ctx, p.gm, sources, p.ov.ChannelID(), directSpeakerOuts, channelMixers, relayMixer)
-		// Guest relay enters only at the hub mixer.
-		if p.mode.AllowGuestCapture() {
-			registerRelayInputs(ctx, p.gm, p.allySession, ownerDests, channelMixers)
-		}
-		startChannelMixers(ctx, p.gm, ownerDests, channelMixers)
-		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
-	}
-	return session, start, nil
-}
-
-// mixMinusPipeline handles RaidModeGuildCaller: full mix-minus with one mixer per destination channel.
-type mixMinusPipeline struct{}
-
-func (mixMinusPipeline) build(ctx context.Context, p pipelineParams) (*guild.Session, func(), error) {
-	sources := buildSources(p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
-	destinations := buildDestinations(p.setup.joined)
-	if p.chOwnerOut != nil {
-		destinations = append(destinations, &destChannel{
-			channelID: p.ov.ChannelID(),
-			outs:      []chan<- []byte{p.chOwnerOut},
-		})
-	}
-	relayMixer, err := opus.NewMixer(p.gm.Opus)
-	if err != nil {
-		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
-	}
-	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
-	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.gm.Opus)
-		if err != nil {
-			return nil, nil, fmt.Errorf("create channel mixer: %w", err)
-		}
-		channelMixers[dest.channelID] = mx
-	}
-	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers))
-	for chID, mx := range channelMixers {
-		mixerPausers[chID] = mx
-	}
-	session := &guild.Session{
-		GuildID:       p.guildID,
-		Cancel:        p.cancelFunc,
-		Cleanup:       p.setup.speakerCleanup,
-		AllyCode:      p.allyCode,
-		Speakers:      p.setup.speakers,
-		ChannelMixers: mixerPausers,
-		AllowFilter:   p.allowFilter,
-	}
-	start := func() {
-		wireFanout(ctx, p.gm, sources, destinations, channelMixers, relayMixer)
-		// When the host allows guest capture, register host channel mixers as relay
-		// receivers so BroadcastFromGuild packets from AllyCaller guests reach host speakers.
-		if p.mode.AllowGuestCapture() {
-			registerRelayInputs(ctx, p.gm, p.allySession, destinations, channelMixers)
-		}
-		startChannelMixers(ctx, p.gm, destinations, channelMixers)
-		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
-	}
-	return session, start, nil
 }

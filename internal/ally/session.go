@@ -25,8 +25,9 @@ type Session struct {
 
 	done chan struct{}
 
-	mu   sync.RWMutex
-	outs map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
+	mu     sync.RWMutex
+	outs   map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
+	guests map[snowflake.ID]struct{}        // guest guild IDs (host not included)
 }
 
 func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Session {
@@ -36,6 +37,7 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 		HostMode:    mode,
 		done:        make(chan struct{}),
 		outs:        make(map[snowflake.ID][]chan<- []byte),
+		guests:      make(map[snowflake.ID]struct{}),
 	}
 }
 
@@ -44,6 +46,19 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 // Takes ownership of pkt: each channel receives its own copy so that
 // VoiceProviders can independently return their buffer to the pool via
 // PutEncodedFrame. The original pkt is returned to the pool at the end.
+//
+// LOCK-ORDERING CONTRACT: Send-to-closed-channel would panic here. The
+// `select case ch <- buf: default:` only protects against full channels,
+// NOT closed channels. Safety relies on the following invariant in
+// session teardown:
+//
+//  1. `RemoveGuild(guildID)` takes s.mu.Lock(), which blocks until every
+//     in-flight broadcast (holding RLock) completes.
+//  2. ONLY AFTER RemoveGuild returns may the caller close the channels.
+//
+// Both callers in `manager/voice_raid.go` (host StopVoiceRaid / guest
+// JoinSession defer) follow this order. If you add a new caller that
+// owns channels registered via AddGuild, preserve this ordering.
 func (s *Session) broadcast(pkt []byte, excludeGuildID snowflake.ID) {
 	for guildID, chs := range s.outs {
 		if guildID == excludeGuildID {
@@ -84,25 +99,33 @@ func (s *Session) AddGuild(guildID snowflake.ID, chs []chan<- []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.outs[guildID] = chs
+	if guildID != s.HostGuildID {
+		s.guests[guildID] = struct{}{}
+	}
 }
 
 // RemoveGuild detaches a guild's channels. The caller is responsible for
 // closing the channels afterward.
+//
+// Must be called BEFORE closing the channels — see the LOCK-ORDERING
+// CONTRACT on `broadcast`. Acquiring s.mu.Lock() here blocks until every
+// in-flight broadcast that captured this guild's channel slice has
+// finished sending, after which it is safe to close the channels.
 func (s *Session) RemoveGuild(guildID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.outs, guildID)
+	delete(s.guests, guildID)
 }
 
-// GuestGuildIDs returns the IDs of all guilds attached to this session except the host.
+// GuestGuildIDs returns the IDs of all guest guilds attached to this session
+// (host excluded). O(guests) — the set is maintained by AddGuild/RemoveGuild.
 func (s *Session) GuestGuildIDs() []snowflake.ID {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	ids := make([]snowflake.ID, 0, len(s.outs))
-	for id := range s.outs {
-		if id != s.HostGuildID {
-			ids = append(ids, id)
-		}
+	ids := make([]snowflake.ID, 0, len(s.guests))
+	for id := range s.guests {
+		ids = append(ids, id)
 	}
 	return ids
 }
@@ -180,6 +203,8 @@ func (m *Manager) RemoveGuest(guildID snowflake.ID) {
 }
 
 // RemoveHost closes the session and removes all participants from the registry.
+// O(guests-of-this-session) thanks to Session.GuestGuildIDs (vs the prior
+// O(all-attached-guilds) scan of m.byGuild).
 func (m *Manager) RemoveHost(hostGuildID snowflake.ID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -190,13 +215,7 @@ func (m *Manager) RemoveHost(hostGuildID snowflake.ID) {
 	s.close()
 	delete(m.sessions, s.Code)
 	delete(m.byGuild, hostGuildID)
-	var guestIDs []snowflake.ID
-	for guildID, sess := range m.byGuild {
-		if sess == s {
-			guestIDs = append(guestIDs, guildID)
-		}
-	}
-	for _, guildID := range guestIDs {
+	for _, guildID := range s.GuestGuildIDs() {
 		delete(m.byGuild, guildID)
 	}
 }

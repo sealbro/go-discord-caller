@@ -9,9 +9,6 @@ layout for each raid mode; in copy or off mode the same source's FanoutHandle
 is re-installed with a different `FanoutInstall` shape but the participating
 destinations are the same.
 
-See `docs/AUTO_PIPELINE_PLAN.md` for the cascade rule and per-mode decision
-table.
-
 ---
 
 ## RaidModeOneCaller — single source, multiple speaker channels

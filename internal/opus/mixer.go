@@ -121,6 +121,7 @@ type inputEntry struct {
 type Mixer struct {
 	mu             sync.Mutex
 	inputs         map[snowflake.ID]*inputEntry
+	inputsSnap     atomic.Pointer[[]*inputEntry] // lock-free read for tick; rebuilt on AddInput/RemoveInput
 	paused         atomic.Bool
 	lastActivityAt atomic.Int64  // UnixNano of last tick that consumed at least one frame
 	pausedDrops    atomic.Uint64 // diagnostic: frames discarded by tick because the mixer was paused
@@ -136,11 +137,10 @@ type Mixer struct {
 
 	// Pre-allocated scratch buffers reused on every tick.
 	// Only accessed from the single Run goroutine — no synchronisation needed.
-	entriesBuf []*inputEntry
-	framesBuf  []Frame // active frames collected each tick
-	mixed      []int32
-	pcm        []int16
-	encodeBuf  []byte
+	framesBuf []Frame // active frames collected each tick
+	mixed     []int32
+	pcm       []int16
+	encodeBuf []byte
 }
 
 // NewMixer creates a Mixer ready to accept inputs and run.
@@ -195,6 +195,7 @@ func (m *Mixer) SetSink(sink func(pkt []byte)) {
 func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
 	m.mu.Lock()
 	m.inputs[id] = &inputEntry{src: src}
+	m.rebuildSnapLocked()
 	m.mu.Unlock()
 	return nil
 }
@@ -203,12 +204,23 @@ func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
 func (m *Mixer) RemoveInput(id snowflake.ID) {
 	m.mu.Lock()
 	delete(m.inputs, id)
+	m.rebuildSnapLocked()
 	m.mu.Unlock()
 }
 
+// rebuildSnapLocked rebuilds the immutable inputs snapshot read by tick. Must
+// be called with m.mu held. Allocates a fresh slice (cheap relative to the
+// rarity of input changes vs. the 50 Hz tick rate).
+func (m *Mixer) rebuildSnapLocked() {
+	snap := make([]*inputEntry, 0, len(m.inputs))
+	for _, e := range m.inputs {
+		snap = append(snap, e)
+	}
+	m.inputsSnap.Store(&snap)
+}
+
 // InputIDs returns the IDs of all currently registered inputs in unspecified order.
-// Intended for tests and observability — the result is a snapshot taken under
-// the mixer's lock and not safe to mutate.
+// Intended for tests and observability.
 func (m *Mixer) InputIDs() []snowflake.ID {
 	m.mu.Lock()
 	ids := make([]snowflake.ID, 0, len(m.inputs))
@@ -296,23 +308,23 @@ func (m *Mixer) Run(ctx context.Context) {
 func (m *Mixer) tick() error {
 	paused := m.paused.Load()
 
-	m.mu.Lock()
-	m.entriesBuf = m.entriesBuf[:0]
-	for _, e := range m.inputs {
-		m.entriesBuf = append(m.entriesBuf, e)
+	// Read the inputs snapshot atomically — no lock taken on the hot path.
+	// The slice itself is immutable (AddInput/RemoveInput replace it via
+	// inputsSnap.Store under m.mu); inputEntry.src is assigned once at
+	// construction. Tick processes a stale snapshot at worst — fine, because
+	// removed inputs that still appear in the snapshot just return underrun
+	// from Pull, and freshly-added inputs are picked up on the next tick.
+	var entries []*inputEntry
+	if snap := m.inputsSnap.Load(); snap != nil {
+		entries = *snap
 	}
-	m.mu.Unlock()
-	// entriesBuf is safe to read without the lock from here: inputEntry.ch is
-	// assigned once in AddInput and never mutated. RemoveInput only deletes the
-	// map entry; it does not touch the inputEntry struct itself. Reading a
-	// closed or already-drained channel is always safe in Go.
 
 	// Pull one frame per input. When paused, drain all buffered frames instead
 	// to prevent PCM/Opus buffer accumulation (SourceBuffer holds pooled memory).
 	// Overflow/jitter handling is now inside SourceBuffer.Feed (drops oldest on
 	// overflow), so no drain-threshold bleed-off logic is needed here.
 	m.framesBuf = m.framesBuf[:0]
-	for _, e := range m.entriesBuf {
+	for _, e := range entries {
 		if paused {
 			// Count what we're about to discard so diagnostic readers (tests,
 			// PausedDrops accessor) can detect "upstream is feeding, downstream

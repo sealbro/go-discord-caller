@@ -398,7 +398,9 @@ func (r *sourceRouter) applyModes(sourceModes map[snowflake.ID]routeMode, destMi
 			slog.Int("feeds", len(s.feeds)),
 			slog.Int("users", len(users)),
 			slog.String("from", s.mode.String()),
+			slog.Int("from_raw", int(s.mode)),
 			slog.String("to", newMode.String()),
+			slog.Int("to_raw", int(newMode)),
 		)
 		if s.activeTeardown != nil {
 			s.activeTeardown()

@@ -11,7 +11,7 @@ If this project is useful to you, please consider giving it a ⭐ on GitHub — 
 
 ## Try it out
 
-Want to see it in action without hosting anything? Click the **Try the bot** badge above to invite a hosted owner bot to your server, then follow [Discord app setup → step 2](#2-start-the-bot-and-finish-setup) to bind roles and add **one speaker bot** via `/setup`. A single speaker is enough to verify the relay end-to-end.
+Want to see it in action without hosting anything? Click the **Try the bot** badge above to invite a hosted owner bot to your server, then follow [Discord app setup → step 2](#2-finish-the-bot-setup) to bind roles and add **one speaker bot** via `/setup`. A single speaker is enough to verify the relay end-to-end.
 
 > The hosted instance is intended for evaluation. For production use, self-host with your own owner + speaker bot tokens.
 
@@ -121,7 +121,7 @@ Configuration is loaded from environment variables (a `.env` file in the working
 
 ## Discord app setup
 
-### 1. Create the bots
+### 1. Create the bots and start the service
 
 For each bot (owner first, then one per speaker) go to [https://discord.com/developers/applications](https://discord.com/developers/applications), click **New Application**, give it a name, set a profile image and banner.
 
@@ -137,6 +137,8 @@ DISCORD_SPEAKER_BOT_TOKEN_1=your-speaker-1-token
 DISCORD_SPEAKER_BOT_TOKEN_2=your-speaker-2-token
 ```
 
+Start the service (see [Running locally](#running-locally) or [Docker](#docker)).
+
 To invite the **owner bot** to your server, open the **Installation** section, copy the Install Link and append the required scope and permissions:
 
 ```
@@ -147,16 +149,15 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
 
 > Speaker bots do **not** need to be added to the server manually — use the `/setup` command after the bot is running to invite them one by one.
 
-### 2. Start the bot and finish setup
+### 2. Finish the bot setup
 
-1. Start the bot (see [Running locally](#running-locally) or [Docker](#docker)).
-2. In your Discord server, run `/setup` to open the interactive panel:
+1. In your Discord server, run `/setup` to open the interactive panel:
    - Bind the **capture role** — members with this role will have their voice relayed
    - Bind the **manager role** — members with this role can use `/start` and `/stop`
    - Bind the **owner bot** to a voice channel
    - Add speaker bots via the **Add Speaker** button and bind each to a voice channel
-3. Run `/start` to begin a voice raid.
-4. Share your relay code (from `/status`) with another server so they can join with `/start code:XXXXXX`.
+2. Run `/start` to begin a voice raid.
+3. Share your relay code (from `/status`) with another server so they can join with `/start code:XXXXXX`.
 
 ---
 

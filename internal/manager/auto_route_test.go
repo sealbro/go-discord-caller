@@ -353,6 +353,54 @@ func TestSourceRouter_UserSetChangeReinstallsEvenInSameMode(t *testing.T) {
 	}
 }
 
+func TestSourceRouter_TransitionRecorderFiresOnlyOnModeChange(t *testing.T) {
+	// The OTel counter wired in by withTransitionRecorder should record one
+	// event per actual off↔copy↔mix transition. Mix-mode user-set churn
+	// (which also triggers a reinstall) is NOT a routing transition and
+	// must not bump the counter.
+	counter := &callerCount{
+		users: map[snowflake.ID][]snowflake.ID{chID(1): {chID(11), chID(12)}},
+	}
+	src := &sourceSlot{id: chID(1), channelID: chID(1), handle: opus.NewFanoutHandle()}
+	dst := &destSlot{channelID: chID(2), sources: []*sourceSlot{src}}
+	src.feeds = []*destSlot{dst}
+	src.buildInstall = func(_ routeMode, _ []userBinding) (opus.FanoutInstall, func()) {
+		return opus.FanoutInstall{}, func() {}
+	}
+
+	type transition struct{ from, to routeMode }
+	var got []transition
+	r := newSourceRouter(chID(1), chID(7), counter, []*sourceSlot{src}, []*destSlot{dst}).
+		withTransitionRecorder(func(from, to routeMode) {
+			got = append(got, transition{from, to})
+		})
+
+	r.Recompute() // off → mix (initial)
+	// User-set churn (new user joins) still in mix mode → no transition.
+	counter.users[chID(1)] = []snowflake.ID{chID(11), chID(12), chID(13)}
+	r.Recompute()
+	// Drop to 1 caller → mix → copy.
+	counter.users[chID(1)] = []snowflake.ID{chID(11)}
+	r.Recompute()
+	// Empty channel → copy → off.
+	counter.users[chID(1)] = nil
+	r.Recompute()
+
+	want := []transition{
+		{routeOff, routeMix},
+		{routeMix, routeCopy},
+		{routeCopy, routeOff},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("transition count: want %d (off→mix, mix→copy, copy→off), got %d (%v)", len(want), len(got), got)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("transition[%d]: want %v→%v, got %v→%v", i, w.from, w.to, got[i].from, got[i].to)
+		}
+	}
+}
+
 func TestSourceRouter_RecomputeAfterCloseBailsOut(t *testing.T) {
 	// Defends against an AfterFunc that started before Close but was waiting
 	// on mu when Close ran — the timer.Stop() returned false and the callback

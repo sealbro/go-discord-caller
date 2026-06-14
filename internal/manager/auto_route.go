@@ -213,6 +213,10 @@ type sourceRouter struct {
 	// pairs in synthIDFor. Bit 63 is set on every emitted value so synth IDs
 	// can never collide with real Discord snowflakes (which are < 2^63).
 	synthSeed uint64
+	// recordTransition is invoked from applyModes on every source mode change
+	// so external observability (OTel counter) can track transition rates.
+	// Optional — nil is treated as a no-op so unit tests can omit it.
+	recordTransition func(from, to routeMode)
 }
 
 // newSourceRouter constructs a router from the topology graph. Takes ownership
@@ -234,6 +238,13 @@ func newSourceRouter(guildID, roleID snowflake.ID, enumerator VoiceProbe, source
 	for _, d := range destinations {
 		r.destinations[d.channelID] = d
 	}
+	return r
+}
+
+// withTransitionRecorder wires an external observer (typically a telemetry
+// counter) into the router. Called after newSourceRouter; nil-safe.
+func (r *sourceRouter) withTransitionRecorder(fn func(from, to routeMode)) *sourceRouter {
+	r.recordTransition = fn
 	return r
 }
 
@@ -404,6 +415,12 @@ func (r *sourceRouter) applyModes(sourceModes map[snowflake.ID]routeMode, destMi
 				copy(snap, users)
 				s.activeUsers = snap
 			}
+		}
+		// Only record a transition when the mode actually changed; mix-mode
+		// user-set churn (which also triggers a reinstall) is not a routing
+		// transition and would otherwise drown out the signal.
+		if r.recordTransition != nil && s.mode != newMode {
+			r.recordTransition(s.mode, newMode)
 		}
 		s.mode = newMode
 	}

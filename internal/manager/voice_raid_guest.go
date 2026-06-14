@@ -118,7 +118,11 @@ func (guestStarCallerPipeline) build(ctx context.Context, p guestPipelineParams)
 		sourceSlots = append(sourceSlots, slot)
 	}
 
-	router := newSourceRouter(p.guestGuildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests)
+	gm := p.guestGm
+	router := newSourceRouter(p.guestGuildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
+		withTransitionRecorder(func(from, to routeMode) {
+			gm.RouteTransition(from.String(), to.String())
+		})
 
 	mixerPausers := map[snowflake.ID]guild.MixerPauser{relayDestID: relayMixer}
 
@@ -216,7 +220,11 @@ func (guestCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*g
 		sourceSlots = append(sourceSlots, slot)
 	}
 
-	router := newSourceRouter(p.guestGuildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests)
+	gm := p.guestGm
+	router := newSourceRouter(p.guestGuildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
+		withTransitionRecorder(func(from, to routeMode) {
+			gm.RouteTransition(from.String(), to.String())
+		})
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {

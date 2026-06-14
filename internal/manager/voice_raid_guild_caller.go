@@ -83,7 +83,11 @@ func (guildCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.
 		sourceSlots = append(sourceSlots, slot)
 	}
 
-	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests)
+	gm := p.gm
+	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
+		withTransitionRecorder(func(from, to routeMode) {
+			gm.RouteTransition(from.String(), to.String())
+		})
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {

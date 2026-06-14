@@ -68,3 +68,10 @@ func (g GuildMetrics) SessionStarted(speakerCount int) {
 func (g GuildMetrics) SessionStopped() {
 	g.session.SessionStopped(g.ctx, g.guildID)
 }
+
+// RouteTransition records one auto-router source-mode transition using the
+// bundled guild ID. Used by the auto-router every time a source flips
+// off/copy/mix.
+func (g GuildMetrics) RouteTransition(from, to string) {
+	g.session.RouteTransition(g.ctx, g.guildID, from, to)
+}

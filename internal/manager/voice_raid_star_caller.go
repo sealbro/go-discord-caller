@@ -99,7 +99,11 @@ func (starCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.S
 		sourceSlots = append(sourceSlots, slot)
 	}
 
-	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests)
+	gm := p.gm
+	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
+		withTransitionRecorder(func(from, to routeMode) {
+			gm.RouteTransition(from.String(), to.String())
+		})
 
 	mixerPausers := map[snowflake.ID]guild.MixerPauser{
 		p.ov.ChannelID(): hubMixer,

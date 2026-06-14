@@ -81,7 +81,11 @@ func (oneCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.Se
 	// Construct router but do NOT seed it from any caller count yet — the
 	// initial Recompute fires after commitSession so the disgo cache has
 	// the post-join voice states.
-	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, []*sourceSlot{ownerSlot}, dests)
+	gm := p.gm
+	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, []*sourceSlot{ownerSlot}, dests).
+		withTransitionRecorder(func(from, to routeMode) {
+			gm.RouteTransition(from.String(), to.String())
+		})
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {

@@ -182,7 +182,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Guild Caller mode (`/start mode:many`)**: Speaker bots in every bound channel both capture and play back audio, turning the whole speaker pool into a multi-channel conference relay
 - **Guest listener mode by default**: A guest guild that joins with `/start code:XXXXXX` (no `mode` option) is in **listener-only** mode — it receives all host audio but its own users are not captured; add `mode:many` to enable capture on the guest side (only effective when the host also uses `mode:many`)
 - **Relay mixer for inter-guild audio**: All audio sources are continuously mixed into a single relay stream broadcast to guest guilds, so guests hear the full conversation regardless of how many callers are active on the host
-- **Voice Flow documentation**: New [VOICE_FLOW.md](VOICE_FLOW.md) with detailed signal flow diagrams for each raid mode
+- **Voice Flow documentation**: New [VOICE_FLOW.md](docs/VOICE_FLOW.md) with detailed signal flow diagrams for each raid mode
 
 
 ## [0.4.1] - 2026-04-10

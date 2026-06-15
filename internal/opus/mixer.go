@@ -305,34 +305,68 @@ func (m *Mixer) Run(ctx context.Context) {
 	}
 }
 
+// tick is the 20 ms mix loop. Composes four phases (gather frames, record
+// activity / latency, decide passthrough vs. mix, emit), each in its own
+// helper so the orchestration reads top-to-bottom.
 func (m *Mixer) tick() error {
 	paused := m.paused.Load()
+	entries := m.readInputsSnapshot()
 
-	// Read the inputs snapshot atomically — no lock taken on the hot path.
-	// The slice itself is immutable (AddInput/RemoveInput replace it via
-	// inputsSnap.Store under m.mu); inputEntry.src is assigned once at
-	// construction. Tick processes a stale snapshot at worst — fine, because
-	// removed inputs that still appear in the snapshot just return underrun
-	// from Pull, and freshly-added inputs are picked up on the next tick.
-	var entries []*inputEntry
-	if snap := m.inputsSnap.Load(); snap != nil {
-		entries = *snap
+	m.collectFrames(entries, paused)
+
+	if len(m.framesBuf) > 0 {
+		m.lastActivityAt.Store(time.Now().UnixNano())
 	}
 
-	// Pull one frame per input. When paused, drain all buffered frames instead
-	// to prevent PCM/Opus buffer accumulation (SourceBuffer holds pooled memory).
-	// Overflow/jitter handling is now inside SourceBuffer.Feed (drops oldest on
-	// overflow), so no drain-threshold bleed-off logic is needed here.
+	// When paused (no non-bot listeners in the destination channel), skip
+	// mixing/encoding/output entirely. Inputs were already drained above.
+	if paused || len(m.framesBuf) == 0 {
+		m.recyclePCMBuffers()
+		return nil
+	}
+
+	m.recordPipelineLatency()
+
+	// Single active source: forward the original Opus packet directly.
+	// No re-encode needed — eliminates 1 encode per tick for the common case.
+	// Frame.Opus is already an isolated copy made by the fanout goroutine so no
+	// defensive copy is needed here.
+	if len(m.framesBuf) == 1 {
+		PutPCM(m.framesBuf[0].PCM)
+		m.emit(m.framesBuf[0].Opus)
+		return nil
+	}
+
+	out, err := m.mixAndEncode()
+	if err != nil {
+		return err
+	}
+	m.emit(out)
+	return nil
+}
+
+// readInputsSnapshot returns the current inputs slice without taking any lock.
+// The slice itself is immutable (AddInput/RemoveInput replace it via
+// inputsSnap.Store under m.mu); inputEntry.src is assigned once at construction.
+// Tick processes a stale snapshot at worst — fine, because removed inputs that
+// still appear in the snapshot just return underrun from Pull, and freshly-
+// added inputs are picked up on the next tick.
+func (m *Mixer) readInputsSnapshot() []*inputEntry {
+	if snap := m.inputsSnap.Load(); snap != nil {
+		return *snap
+	}
+	return nil
+}
+
+// collectFrames pulls one frame per input into m.framesBuf. When paused, every
+// input is fully drained (incrementing pausedDrops by the drained count) so
+// SourceBuffer ring memory does not accumulate while the mixer is silent.
+func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) {
 	m.framesBuf = m.framesBuf[:0]
 	for _, e := range entries {
 		if paused {
-			// Count what we're about to discard so diagnostic readers (tests,
-			// PausedDrops accessor) can detect "upstream is feeding, downstream
-			// is silently throwing it away" without enabling debug logging.
-			if sb, ok := e.src.(*SourceBuffer); ok {
-				if n := sb.Len(); n > 0 {
-					m.pausedDrops.Add(uint64(n))
-				}
+			if n := e.src.Len(); n > 0 {
+				m.pausedDrops.Add(uint64(n))
 			}
 			e.src.Drain()
 			continue
@@ -342,21 +376,20 @@ func (m *Mixer) tick() error {
 			m.framesBuf = append(m.framesBuf, f)
 		}
 	}
+}
 
-	if len(m.framesBuf) > 0 {
-		m.lastActivityAt.Store(time.Now().UnixNano())
+// recyclePCMBuffers returns each frame's PCM buffer to the pool. Used by the
+// no-output paths (paused or zero frames) where we still have to release the
+// pool buffers that producers handed off to us.
+func (m *Mixer) recyclePCMBuffers() {
+	for _, f := range m.framesBuf {
+		PutPCM(f.PCM)
 	}
+}
 
-	// When paused (no non-bot listeners in the destination channel), skip
-	// mixing/encoding/output entirely. Inputs were already drained above.
-	if paused || len(m.framesBuf) == 0 {
-		for _, f := range m.framesBuf {
-			PutPCM(f.PCM)
-		}
-		return nil
-	}
-
-	// Record pipeline latency from the oldest input frame (worst-case path).
+// recordPipelineLatency emits the gdc.mixer.pipeline.latency observation for
+// the oldest input frame in this tick (worst-case path through the pipeline).
+func (m *Mixer) recordPipelineLatency() {
 	now := time.Now()
 	oldest := m.framesBuf[0].CreatedAt
 	for _, f := range m.framesBuf[1:] {
@@ -367,21 +400,14 @@ func (m *Mixer) tick() error {
 	if !oldest.IsZero() {
 		m.metrics.RecordPipelineLatency(float64(now.Sub(oldest).Microseconds()) / 1000)
 	}
+}
 
+// mixAndEncode accumulates the PCM from every frame in m.framesBuf, clamps to
+// int16, encodes via libopus, and returns the pooled encoded buffer. Recycles
+// each frame's PCM buffer along the way.
+func (m *Mixer) mixAndEncode() ([]byte, error) {
 	// Zero the accumulator in-place instead of allocating a new slice.
 	clear(m.mixed)
-
-	// Single active source: forward the original Opus packet directly.
-	// No re-encode needed — eliminates 1 encode per tick for the common case.
-	// Frame.Opus is already an isolated copy made by the fanout goroutine so no
-	// defensive copy is needed here.
-	if len(m.framesBuf) == 1 {
-		PutPCM(m.framesBuf[0].PCM)
-		if m.sink != nil {
-			m.sink(m.framesBuf[0].Opus)
-		}
-		return nil
-	}
 
 	// Multiple active sources: accumulate PCM and re-encode (mix-minus).
 	// The inner loop is unrolled 4× to help the compiler emit SIMD instructions
@@ -412,18 +438,22 @@ func (m *Mixer) tick() error {
 
 	n, err := m.enc.Encode(m.pcm, m.encodeBuf)
 	if err != nil {
-		return fmt.Errorf("encode: %w", err)
+		return nil, fmt.Errorf("encode: %w", err)
 	}
 
 	// Copy the encoded frame into a pooled buffer; encodeBuf is reused next tick.
 	// VoiceProvider returns this buffer via PutEncodedFrame before blocking for the next frame.
 	out := getEncodedFrame(n)
 	copy(out, m.encodeBuf[:n])
+	return out, nil
+}
 
+// emit hands pkt to the registered sink. Recycles the buffer when no sink is
+// configured so it doesn't leak.
+func (m *Mixer) emit(pkt []byte) {
 	if m.sink != nil {
-		m.sink(out)
+		m.sink(pkt)
 	} else {
-		PutEncodedFrame(out) // no sink registered — recycle directly
+		PutEncodedFrame(pkt) // no sink registered — recycle directly
 	}
-	return nil
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
@@ -27,7 +28,7 @@ type pipelineParams struct {
 	ov           pool.GuildVoice
 	gm           telemetry.GuildMetrics
 	allowFilter  *AllowFilter
-	voiceProbe   VoiceProbe // production: *cacheVoiceProbe; consumed by the auto-router
+	voiceProbe   router.VoiceProbe // production: *cacheVoiceProbe; consumed by the auto-router
 }
 
 // hostPipeline builds the audio wiring for one topology and returns the

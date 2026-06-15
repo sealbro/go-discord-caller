@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
@@ -63,45 +63,62 @@ func (starCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.S
 	}
 
 	// Collect hub chOuts. After partitioning above, every ownerDests entry is
-	// at the owner channel — concatenate their outs as the hub destSlot's
+	// at the owner channel — concatenate their outs as the hub router.DestSlot's
 	// chOuts (the mixer's sink writes the mix into them).
 	var hubChOuts []chan<- []byte
 	for _, d := range ownerDests {
 		hubChOuts = append(hubChOuts, d.outs...)
 	}
-	hubSlot := &destSlot{
-		channelID: p.ov.ChannelID(),
-		mixer:     hubMixer,
-		chOuts:    hubChOuts,
+	hubSlot := &router.DestSlot{
+		ChannelID: p.ov.ChannelID(),
+		Mixer:     hubMixer,
+		ChOuts:    hubChOuts,
 	}
-	relaySlot := &destSlot{channelID: relayDestID, mixer: relayMixer}
-	dests := []*destSlot{hubSlot, relaySlot}
+	relaySlot := &router.DestSlot{ChannelID: relayDestID, Mixer: relayMixer}
+	dests := []*router.DestSlot{hubSlot, relaySlot}
 
 	// Per-source slots. Owner feeds relay only (speakers receive raw via
 	// OpusTargets, handled inside the install closure). Speakers feed hub
 	// only (no ally relay).
-	sourceSlots := make([]*sourceSlot, 0, len(srcEntries))
+	sourceSlots := make([]*router.SourceSlot, 0, len(srcEntries))
 	for _, e := range srcEntries {
-		slot := &sourceSlot{
-			id:        e.id,
-			channelID: e.channelID,
-			handle:    e.handle,
+		slot := &router.SourceSlot{
+			ID:        e.id,
+			ChannelID: e.channelID,
+			Handle:    e.handle,
 		}
 		if e.channelID == p.ov.ChannelID() {
-			slot.feeds = []*destSlot{relaySlot}
-			relaySlot.sources = append(relaySlot.sources, slot)
-			slot.buildInstall = ownerStarInstallBuilder(p.gm, p.guildID, slot, p.allySession, speakerOuts)
+			slot.Feeds = []*router.DestSlot{relaySlot}
+			relaySlot.Sources = append(relaySlot.Sources, slot)
+			guildID := p.guildID
+			allySession := p.allySession
+			slot.BuildInstall = routerInstallBuilder(installBuildOpts{
+				src:        slot,
+				dropDirect: p.gm.Drop(telemetry.DropPathDirect),
+				dropMixer:  p.gm.Drop(telemetry.DropPathMixer),
+				// Raw Opus stays on the speaker chOuts in both copy and mix
+				// modes — star has no per-speaker mixer to feed.
+				rawTargets: speakerOuts,
+				allyBroadcast: func(pkt []byte) {
+					allySession.BroadcastFromGuild(guildID, pkt)
+				},
+			})
 		} else {
-			slot.feeds = []*destSlot{hubSlot}
-			hubSlot.sources = append(hubSlot.sources, slot)
-			slot.buildInstall = speakerStarInstallBuilder(p.gm, slot)
+			slot.Feeds = []*router.DestSlot{hubSlot}
+			hubSlot.Sources = append(hubSlot.Sources, slot)
+			slot.BuildInstall = routerInstallBuilder(installBuildOpts{
+				src:       slot,
+				dropMixer: p.gm.Drop(telemetry.DropPathMixer),
+				// allyBroadcast nil: star speakers do NOT participate in the
+				// ally broadcast — only the owner's voice crosses the relay.
+			})
 		}
 		sourceSlots = append(sourceSlots, slot)
 	}
 
 	gm := p.gm
-	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
-		withTransitionRecorder(func(from, to routeMode) {
+	r := router.New(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
+		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
 
@@ -115,14 +132,14 @@ func (starCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.S
 		GuildID: p.guildID,
 		Cancel:  p.cancelFunc,
 		Cleanup: func() {
-			router.Close()
+			r.Close()
 			speakerCleanup()
 		},
 		AllyCode:      p.allyCode,
 		Speakers:      p.setup.speakers,
 		ChannelMixers: mixerPausers,
 		AllowFilter:   p.allowFilter,
-		AutoRouter:    router,
+		AutoRouter:    r,
 	}
 
 	start := func() {
@@ -135,61 +152,7 @@ func (starCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.S
 		channelMixers := map[snowflake.ID]*opus.Mixer{p.ov.ChannelID(): hubMixer}
 		startChannelMixers(ctx, p.gm, ownerDests, channelMixers)
 		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
-		router.Recompute()
+		r.Recompute()
 	}
 	return session, start, nil
-}
-
-// ownerStarInstallBuilder returns the owner source's buildInstall closure.
-// Owner emits raw Opus to speaker chOuts in BOTH copy and mix modes (no
-// per-speaker mixers exist to feed). Ally broadcast goes via OpusCallback in
-// copy mode and via the relay mixer SourceBuffer(s) in mix mode (one per
-// role-bearing user in the owner channel — §4.3 per-user keying).
-func ownerStarInstallBuilder(gm telemetry.GuildMetrics, guildID snowflake.ID, src *sourceSlot, allySession *ally.Session, speakerOuts []chan<- []byte) func(routeMode, []userBinding) (opus.FanoutInstall, func()) {
-	dropDirect := gm.Drop(telemetry.DropPathDirect)
-	dropMixer := gm.Drop(telemetry.DropPathMixer)
-	return func(mode routeMode, users []userBinding) (opus.FanoutInstall, func()) {
-		switch mode {
-		case routeOff:
-			return opus.FanoutInstall{}, func() {}
-		case routeCopy:
-			return opus.FanoutInstall{
-				OpusTargets: speakerOuts,
-				OpusCallback: func(pkt []byte) {
-					allySession.BroadcastFromGuild(guildID, pkt)
-				},
-				DropOpus: dropDirect,
-			}, func() {}
-		case routeMix:
-			spec, teardown := buildPerUserMixSpec(src, users, dropMixer)
-			// Raw OpusTargets remain in mix mode too — there is no
-			// per-speaker-channel mixer for these chOuts.
-			spec.OpusTargets = speakerOuts
-			spec.DropOpus = dropDirect
-			return spec, teardown
-		}
-		return opus.FanoutInstall{}, func() {}
-	}
-}
-
-// speakerStarInstallBuilder returns a speaker source's buildInstall closure
-// for the star topology. Speakers feed the hub mixer only and do not
-// participate in the ally broadcast — OpusCallback is intentionally absent.
-func speakerStarInstallBuilder(gm telemetry.GuildMetrics, src *sourceSlot) func(routeMode, []userBinding) (opus.FanoutInstall, func()) {
-	dropMixer := gm.Drop(telemetry.DropPathMixer)
-	return func(mode routeMode, users []userBinding) (opus.FanoutInstall, func()) {
-		switch mode {
-		case routeOff:
-			return opus.FanoutInstall{}, func() {}
-		case routeCopy:
-			var outs []chan<- []byte
-			for _, d := range src.feeds {
-				outs = append(outs, d.chOuts...)
-			}
-			return opus.FanoutInstall{OpusTargets: outs}, func() {}
-		case routeMix:
-			return buildPerUserMixSpec(src, users, dropMixer)
-		}
-		return opus.FanoutInstall{}, func() {}
-	}
 }

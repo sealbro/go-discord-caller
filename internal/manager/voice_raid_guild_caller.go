@@ -5,8 +5,8 @@ import (
 	"fmt"
 
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
@@ -17,12 +17,12 @@ import (
 // ally guests; every source feeds relay too.
 //
 // Replaces mixMinusPipeline. Always-on graph + router decide per-source mode:
-//   - routeOff (no callers): empty install
-//   - routeCopy (1 source feeding ≤1 non-relay dest): raw Opus to those chOuts
+//   - router.RouteOff (no callers): empty install
+//   - router.RouteCopy (1 source feeding ≤1 non-relay dest): raw Opus to those chOuts
 //     plus OpusCallback for ally. Mixer paused. Rare in practice — the §1.1
 //     multi-source rule forces mix as soon as ≥2 channels have role-bearing
 //     users.
-//   - routeMix: per-feed SourceBuffer attached to each destination mixer
+//   - router.RouteMix: per-feed SourceBuffer attached to each destination mixer
 //     (including relay). Channel mixers and relay mixer unpause.
 type guildCallerPipeline struct{}
 
@@ -50,42 +50,51 @@ func (guildCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.
 	}
 
 	// destSlots in router order: per-channel destinations, then relay.
-	dests := make([]*destSlot, 0, len(destinations)+1)
+	dests := make([]*router.DestSlot, 0, len(destinations)+1)
 	for _, dest := range destinations {
-		dests = append(dests, &destSlot{
-			channelID: dest.channelID,
-			mixer:     channelMixers[dest.channelID],
-			chOuts:    dest.outs,
+		dests = append(dests, &router.DestSlot{
+			ChannelID: dest.channelID,
+			Mixer:     channelMixers[dest.channelID],
+			ChOuts:    dest.outs,
 		})
 	}
-	relaySlot := &destSlot{channelID: relayDestID, mixer: relayMixer}
+	relaySlot := &router.DestSlot{ChannelID: relayDestID, Mixer: relayMixer}
 	dests = append(dests, relaySlot)
 
-	// One sourceSlot per capturing source: owner + each deduplicated speaker
+	// One router.SourceSlot per capturing source: owner + each deduplicated speaker
 	// channel. buildSources already returns this list.
 	srcEntries := buildSources(p.ownerBotID, p.ov.ChannelID(), p.ownerHandle, p.setup.joined)
-	sourceSlots := make([]*sourceSlot, 0, len(srcEntries))
+	sourceSlots := make([]*router.SourceSlot, 0, len(srcEntries))
 	for _, e := range srcEntries {
-		slot := &sourceSlot{
-			id:        e.id,
-			channelID: e.channelID,
-			handle:    e.handle,
+		slot := &router.SourceSlot{
+			ID:        e.id,
+			ChannelID: e.channelID,
+			Handle:    e.handle,
 		}
 		// Mix-minus: source feeds every destination except its own channel.
 		for _, d := range dests {
-			if d.channelID == e.channelID {
+			if d.ChannelID == e.channelID {
 				continue
 			}
-			slot.feeds = append(slot.feeds, d)
-			d.sources = append(d.sources, slot)
+			slot.Feeds = append(slot.Feeds, d)
+			d.Sources = append(d.Sources, slot)
 		}
-		slot.buildInstall = mixMinusInstallBuilder(p.gm, p.guildID, slot, p.allySession)
+		guildID := p.guildID
+		allySession := p.allySession
+		slot.BuildInstall = routerInstallBuilder(installBuildOpts{
+			src:        slot,
+			dropDirect: p.gm.Drop(telemetry.DropPathDirect),
+			dropMixer:  p.gm.Drop(telemetry.DropPathMixer),
+			allyBroadcast: func(pkt []byte) {
+				allySession.BroadcastFromGuild(guildID, pkt)
+			},
+		})
 		sourceSlots = append(sourceSlots, slot)
 	}
 
 	gm := p.gm
-	router := newSourceRouter(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
-		withTransitionRecorder(func(from, to routeMode) {
+	r := router.New(p.guildID, p.allowFilter.RoleID(), p.voiceProbe, sourceSlots, dests).
+		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
 
@@ -100,14 +109,14 @@ func (guildCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.
 		GuildID: p.guildID,
 		Cancel:  p.cancelFunc,
 		Cleanup: func() {
-			router.Close()
+			r.Close()
 			speakerCleanup()
 		},
 		AllyCode:      p.allyCode,
 		Speakers:      p.setup.speakers,
 		ChannelMixers: mixerPausers,
 		AllowFilter:   p.allowFilter,
-		AutoRouter:    router,
+		AutoRouter:    r,
 	}
 
 	start := func() {
@@ -119,40 +128,7 @@ func (guildCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.
 		}
 		startChannelMixers(ctx, p.gm, destinations, channelMixers)
 		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
-		router.Recompute()
+		r.Recompute()
 	}
 	return session, start, nil
-}
-
-// mixMinusInstallBuilder returns the per-source buildInstall closure for the
-// mix-minus topology. Identical in shape to oneCallerInstallBuilder; the only
-// per-mode work is reading the source's current feeds at install time. Mix
-// mode delegates to buildPerUserMixSpec for per-user SourceBuffer allocation.
-func mixMinusInstallBuilder(gm telemetry.GuildMetrics, guildID snowflake.ID, src *sourceSlot, allySession *ally.Session) func(routeMode, []userBinding) (opus.FanoutInstall, func()) {
-	dropDirect := gm.Drop(telemetry.DropPathDirect)
-	dropMixer := gm.Drop(telemetry.DropPathMixer)
-	return func(mode routeMode, users []userBinding) (opus.FanoutInstall, func()) {
-		switch mode {
-		case routeOff:
-			return opus.FanoutInstall{}, func() {}
-		case routeCopy:
-			var outs []chan<- []byte
-			for _, d := range src.feeds {
-				outs = append(outs, d.chOuts...)
-			}
-			// Every source's feeds include the relay destSlot, so copy mode
-			// must mirror the ally broadcast that mix mode would otherwise
-			// route through the relay mixer.
-			return opus.FanoutInstall{
-				OpusTargets: outs,
-				OpusCallback: func(pkt []byte) {
-					allySession.BroadcastFromGuild(guildID, pkt)
-				},
-				DropOpus: dropDirect,
-			}, func() {}
-		case routeMix:
-			return buildPerUserMixSpec(src, users, dropMixer)
-		}
-		return opus.FanoutInstall{}, func() {}
-	}
 }

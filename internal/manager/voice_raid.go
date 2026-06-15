@@ -136,6 +136,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			if st := m.statuses[guestGuildID]; st != nil {
 				st.Session = nil
 			}
+			m.clearActiveRouter(guestGuildID)
 			m.mu.Unlock()
 			setup.speakerCleanup()
 			guestCleanupOwner()
@@ -168,6 +169,7 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	}
 	session := status.Session
 	status.Session = nil
+	m.clearActiveRouter(guildID)
 	m.mu.Unlock()
 	session.Cancel()
 	if session.Cleanup != nil {

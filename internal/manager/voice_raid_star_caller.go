@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
@@ -153,6 +154,7 @@ func (starCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.S
 		startChannelMixers(ctx, p.gm, ownerDests, channelMixers)
 		startRelayBroadcast(ctx, p.gm, relayMixer, p.allySession, p.ownerCleanup)
 		r.Recompute()
+		r.ScheduleRecompute(500 * time.Millisecond)
 	}
 	return session, start, nil
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -36,6 +37,14 @@ type Service struct {
 	mu       sync.RWMutex
 	statuses map[snowflake.ID]*guild.Status // protected by mu
 
+	// activeRouters mirrors the subset of statuses whose Session has a
+	// non-nil AutoRouter, kept as an immutable map snapshot behind an
+	// atomic.Pointer. Voice events go through AutoRoute on every Discord
+	// event — looking up the router here avoids taking m.mu on the hot
+	// path. Updated under m.mu by setActiveRouter / clearActiveRouter
+	// whenever a session is committed or torn down.
+	activeRouters atomic.Pointer[map[snowflake.ID]guild.AutoRouter]
+
 	store              store.Store
 	poolSvc            pool.PoolService
 	ownerClient        *bot.Client
@@ -49,7 +58,7 @@ type Service struct {
 
 // NewService creates a new manager Service.
 func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig, metrics *telemetry.Metrics) *Service {
-	return &Service{
+	s := &Service{
 		statuses:    make(map[snowflake.ID]*guild.Status),
 		store:       st,
 		poolSvc:     poolSvc,
@@ -60,6 +69,45 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		metrics:     metrics,
 		reconnect:   newReconnectState(),
 	}
+	empty := map[snowflake.ID]guild.AutoRouter{}
+	s.activeRouters.Store(&empty)
+	return s
+}
+
+// setActiveRouter publishes a session's AutoRouter into the lock-free
+// activeRouters snapshot. Called from commitSession + JoinSession under
+// m.mu so the published snapshot reflects the freshly-committed session.
+// Copy-on-write: replaces the entire map so AutoRoute readers always see
+// an immutable snapshot.
+func (m *Service) setActiveRouter(guildID snowflake.ID, r guild.AutoRouter) {
+	if r == nil {
+		m.clearActiveRouter(guildID)
+		return
+	}
+	cur := *m.activeRouters.Load()
+	next := make(map[snowflake.ID]guild.AutoRouter, len(cur)+1)
+	for k, v := range cur {
+		next[k] = v
+	}
+	next[guildID] = r
+	m.activeRouters.Store(&next)
+}
+
+// clearActiveRouter removes a guild from the activeRouters snapshot. Called
+// from StopVoiceRaid / JoinSession-teardown under m.mu.
+func (m *Service) clearActiveRouter(guildID snowflake.ID) {
+	cur := *m.activeRouters.Load()
+	if _, present := cur[guildID]; !present {
+		return
+	}
+	next := make(map[snowflake.ID]guild.AutoRouter, len(cur)-1)
+	for k, v := range cur {
+		if k == guildID {
+			continue
+		}
+		next[k] = v
+	}
+	m.activeRouters.Store(&next)
 }
 
 // SetSessionIdleTimeout configures the duration after which a session whose
@@ -293,15 +341,15 @@ func (p *cacheVoiceProbe) EnumerateCallers(channelID, roleID snowflake.ID) []sno
 // listener check folded together — Plan §3.6). Safe to call when there is no
 // active session or no router attached to the session — both paths are no-ops.
 func (m *Service) AutoRoute(guildID, channelID snowflake.ID) {
-	m.mu.RLock()
-	st := m.statuses[guildID]
-	if st == nil || st.Session == nil || st.Session.AutoRouter == nil {
-		m.mu.RUnlock()
-		return
+	// Lock-free hot path: voice events fire on every Discord state change
+	// (typically many per second per active guild). Reading the
+	// activeRouters atomic.Pointer avoids m.mu contention with the slower
+	// raid-lifecycle writers.
+	if routers := m.activeRouters.Load(); routers != nil {
+		if router, ok := (*routers)[guildID]; ok {
+			router.Debounce(channelID)
+		}
 	}
-	router := st.Session.AutoRouter
-	m.mu.RUnlock()
-	router.Debounce(channelID)
 }
 
 func (m *Service) isGuildMember(guildID, userID snowflake.ID) bool {

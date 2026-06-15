@@ -459,6 +459,12 @@ func (r *Router) applyModes(sourceModes map[snowflake.ID]RouteMode, destMix map[
 			r.recordTransition(s.activeMode, newMode)
 		}
 		s.activeMode = newMode
+		// Prune synth IDs for users no longer present in the source channel.
+		// They will be reallocated if/when the user rejoins. Pruning here (in
+		// the reinstall path only) is safe because user-set changes force a
+		// reinstall via the sameUserSet check above — so any voice-leave
+		// reaches this branch within one debounce window.
+		pruneSynthIDsLocked(s, users)
 	}
 	for chID, d := range r.destinations {
 		if d.Mixer == nil {
@@ -489,6 +495,54 @@ func (r *Router) bindUsersLocked(s *SourceSlot, users []snowflake.ID, mode Route
 		out = append(out, UserBinding{UserID: u, SynthID: r.synthIDForLocked(s, u)})
 	}
 	return out
+}
+
+// pruneSynthIDsLocked removes synth IDs for users no longer present in the
+// source channel. Bounds the per-source synthIDs map at "users currently in
+// the channel" instead of "every user who ever joined". Caller must hold
+// r.mu (it's only called from applyModes, which holds the lock throughout).
+func pruneSynthIDsLocked(s *SourceSlot, presentUsers []snowflake.ID) {
+	if len(s.synthIDs) == 0 {
+		return
+	}
+	present := make(map[snowflake.ID]struct{}, len(presentUsers))
+	for _, u := range presentUsers {
+		present[u] = struct{}{}
+	}
+	for u := range s.synthIDs {
+		if _, ok := present[u]; !ok {
+			delete(s.synthIDs, u)
+		}
+	}
+}
+
+// ScheduleRecompute fires a one-shot Recompute after delay. Used by
+// pipelines at session start to catch voice-state updates that arrive after
+// the initial synchronous Recompute — e.g. a user already in the owner
+// channel whose VOICE_STATE_UPDATE was still in flight through the gateway
+// when the pipeline committed.
+//
+// The timer is registered the same way as debounce timers, so Close() will
+// stop it cleanly if the session tears down before the followup fires.
+// channelID is a synthetic key (delay nanoseconds) so it never collides with
+// real voice-event debounce timers.
+func (r *Router) ScheduleRecompute(delay time.Duration) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	key := snowflake.ID(delay.Nanoseconds()) | (snowflake.ID(1) << 62)
+	if t, ok := r.debounceTimers[key]; ok {
+		t.Reset(delay)
+		return
+	}
+	r.debounceTimers[key] = time.AfterFunc(delay, func() {
+		r.mu.Lock()
+		delete(r.debounceTimers, key)
+		r.mu.Unlock()
+		r.Recompute()
+	})
 }
 
 // Close stops every pending debounce timer, marks the router closed so any

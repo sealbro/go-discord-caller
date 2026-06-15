@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
@@ -130,6 +131,11 @@ func (oneCallerPipeline) build(ctx context.Context, p pipelineParams) (*guild.Se
 		// compute caller counts directly. Router takes over install on the
 		// owner FanoutHandle from here.
 		r.Recompute()
+		// VOICE_STATE_UPDATE events for users already in the owner channel
+		// may still be in flight via the gateway. Schedule a single
+		// followup Recompute to catch them before the user-perceived delay
+		// becomes noticeable.
+		r.ScheduleRecompute(500 * time.Millisecond)
 	}
 	return session, start, nil
 }

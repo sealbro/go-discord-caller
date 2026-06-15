@@ -96,6 +96,9 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 }
 
 // commitSession stores session under write lock, re-checking for conflicts.
+// Also publishes the session's AutoRouter into the lock-free activeRouters
+// snapshot so voice-event handlers can dispatch via AutoRoute without
+// taking m.mu.
 func (m *Service) commitSession(session *guild.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -107,6 +110,9 @@ func (m *Service) commitSession(session *guild.Session) error {
 		return ErrSessionExists
 	}
 	st.Session = session
+	if session.AutoRouter != nil {
+		m.setActiveRouter(session.GuildID, session.AutoRouter)
+	}
 	return nil
 }
 

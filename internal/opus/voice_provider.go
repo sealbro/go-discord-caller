@@ -37,6 +37,14 @@ func NewVoiceProvider(ch <-chan []byte, metrics telemetry.OpusRecorder) *VoicePr
 // 3 frames × 20 ms = 60 ms of tolerated jitter before drain kicks in.
 const providerDrainThreshold = 3
 
+// providerHardDrainThreshold is twice the soft threshold. Beyond this point
+// the buffer is clearly recovering from a stall (not normal jitter), and the
+// gentle 1-frame-per-call drain would take many calls to catch up while
+// listeners hear accumulating latency. Above this threshold we drain
+// (depth - soft threshold) frames in one go, accepting one audible gap
+// instead of seconds of compounding lag.
+const providerHardDrainThreshold = 2 * providerDrainThreshold
+
 func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 	// Return the previous frame's buffer to the pool before blocking.
 	// disgo calls ProvideOpusFrame only after finishing the UDP send for the
@@ -54,11 +62,30 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 			return nil, fmt.Errorf("voice provider channel closed")
 		}
 		start := time.Now()
-		// Bleed-off: when the buffer depth exceeds the threshold, drop just
-		// one extra frame per call instead of flushing to the latest. This
-		// shaves 20 ms of accumulated latency per tick — gradual enough that
-		// speech is not cut mid-word, but persistent enough to drain a stall.
-		if len(v.ch) > providerDrainThreshold {
+		// Bleed-off: when the buffer depth exceeds the soft threshold, drop
+		// one extra frame per call (gradual catch-up; speech is not cut
+		// mid-word). When depth crosses the HARD threshold, the buffer is
+		// recovering from a real stall — drain everything beyond the soft
+		// threshold in a single call rather than spending many ticks
+		// chipping away while latency compounds.
+		depth := len(v.ch)
+		if depth > providerHardDrainThreshold {
+			drop := depth - providerDrainThreshold
+		hardDrain:
+			for range drop {
+				select {
+				case newer, ok := <-v.ch:
+					if !ok {
+						break hardDrain
+					}
+					PutEncodedFrame(data)
+					v.metrics.RecordDrop()
+					data = newer
+				default:
+					break hardDrain
+				}
+			}
+		} else if depth > providerDrainThreshold {
 			select {
 			case newer, ok := <-v.ch:
 				if ok {

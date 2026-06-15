@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -159,6 +160,7 @@ func (guestStarCallerPipeline) build(ctx context.Context, p guestPipelineParams)
 		p.allySession.AddGuild(p.guestGuildID, allOuts)
 		startGuestRelayBroadcast(ctx, relayMixer, p.allySession, p.guestGuildID)
 		r.Recompute()
+		r.ScheduleRecompute(500 * time.Millisecond)
 	}
 	cleanup := func() {
 		for _, ch := range allOuts {
@@ -275,6 +277,7 @@ func (guestCallerPipeline) build(ctx context.Context, p guestPipelineParams) (*g
 		startChannelMixers(ctx, p.guestGm, destinations, channelMixers)
 		startGuestRelayBroadcast(ctx, relayMixer, p.allySession, p.guestGuildID)
 		r.Recompute()
+		r.ScheduleRecompute(500 * time.Millisecond)
 	}
 	cleanup := func() {
 		for _, ch := range relayInputs {

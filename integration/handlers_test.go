@@ -32,12 +32,11 @@ func TestE8_BotReconnectAfterVoiceLeave(t *testing.T) {
 
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
 
-	// Drop the speaker's voice connection. Leave sends OP4 (channel_id=null) to
-	// Discord, which emits VOICE_STATE_UPDATE. The owner bot's onVoiceLeave handler
-	// fires → bot is detected as left → ReconnectBotChannel rejoins the bound channel.
 	if _, ok := h.Pool.GetClientByID(speakerIDs[0]); !ok {
 		t.Skip("speaker not connected")
 	}
+	// OP4 with channel_id=null → VOICE_STATE_UPDATE on the owner bot →
+	// onVoiceLeave → ReconnectBotChannel.
 	leaveCtx, leaveCancel := context.WithTimeout(ctx, 5*time.Second)
 	h.DisconnectSpeakerVoice(leaveCtx, h.Cfg.GuildID, speakerIDs[0])
 	leaveCancel()
@@ -69,9 +68,8 @@ func TestE9_BotReconnectAfterVoiceMove(t *testing.T) {
 
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
 
-	// Use the owner bot's REST API to move the speaker into the owner channel,
-	// displacing it from its bound Speaker1ChannelID. This fires GuildVoiceMove on
-	// the owner bot → onVoiceMove → OnBotVoiceMove → ReconnectBotChannel.
+	// Displace the speaker from its bound channel → GuildVoiceMove on the
+	// owner bot → OnBotVoiceMove → ReconnectBotChannel.
 	moveCtx, moveCancel := context.WithTimeout(ctx, 5*time.Second)
 	if err := h.MoveSpeakerVoice(moveCtx, h.Cfg.GuildID, speakerIDs[0], h.Cfg.OwnerChannelID); err != nil {
 		moveCancel()
@@ -93,14 +91,13 @@ func TestE10_CallerJoinAfterRaidStart(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Start the raid with an empty owner channel — no RequestMembers prefetch occurs.
+	// Empty owner channel at raid start so RequestMembers prefetch is a no-op
+	// and the live onVoiceJoin path is the only way the caller can register.
 	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
 	speakerIDs := h.RequireSpeakers(t)
 
-	// Caller joins AFTER the raid is running. onVoiceJoin fires on the owner bot
-	// → NotifyMemberUpdate updates the AllowFilter → audio is relayed.
 	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 
 	h.RegisterCleanup(t, mgr, stopSource, stopListener)
@@ -118,7 +115,6 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// Source joins before raid so it is captured from the start.
 	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
@@ -128,21 +124,17 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 
 	speakerIDs := h.RequireSpeakers(t)
 
-	// stopSource is reassigned below, so use inline cleanup to capture by reference.
+	// stopSource is reassigned below; cleanup closure must capture by reference.
 	t.Cleanup(func() {
 		stopSource()
 		stopListener()
 		_ = mgr.StopVoiceRaid(context.Background(), h.Cfg.GuildID)
 	})
 
-	// Establish steady-state audio.
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
 	t.Log("E11: baseline established, dropping caller...")
 
-	// Caller leaves → onVoiceLeave → AutoRoute → router pauses the mixer.
-	// Caller rejoins → onVoiceJoin → AutoRoute → router unpauses the mixer.
-	// AssertFrameGap captures the pause window then triggers the resume func.
-	stopSource() // leave; cleanup no-ops on subsequent calls
+	stopSource()
 	stopSource = func() {}
 
 	AssertFrameGap(t, h.Listener, speakerIDs[0], 2*time.Second, 10*time.Second, func() {
@@ -168,7 +160,6 @@ func TestE12_AllowFilterUpdatedOnRoleRevoke(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	// Both sources join before the raid.
 	stopSource1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
@@ -179,18 +170,16 @@ func TestE12_AllowFilterUpdatedOnRoleRevoke(t *testing.T) {
 	speakerIDs := h.RequireSpeakers(t)
 	h.RegisterCleanup(t, mgr, stopSource1, stopSource2, stopListener)
 
-	// Establish baseline — speaker1 relays cross-channel audio.
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
 
-	// Fetch speaker2 source bot's current member to get its full role list.
-	// Uses the listener bot (test-admin) so the owner bot needs no extra permissions.
+	// Use the listener (test-admin) for role mutation so the owner bot needs
+	// no Manage Roles permission.
 	sourceID := h.Speaker2.ID()
 	member, err := h.Listener.GetMember(h.Cfg.GuildID, sourceID)
 	if err != nil {
 		t.Skipf("E12: GetMember failed (listener bot may lack permission): %v", err)
 	}
 
-	// Remove the caller role from speaker2 source. Restore in cleanup regardless.
 	rolesWithout := filterIDs(member.RoleIDs, h.Cfg.CallerRoleID)
 	t.Cleanup(func() {
 		_, _ = h.Listener.UpdateMember(h.Cfg.GuildID, sourceID,
@@ -202,17 +191,14 @@ func TestE12_AllowFilterUpdatedOnRoleRevoke(t *testing.T) {
 	}
 	t.Log("E12: caller role removed from speaker2 source, waiting for AllowFilter to reject it...")
 
-	// onGuildMemberUpdate fires → NotifyMemberUpdate → AllowFilter.Set(sourceID, false).
-	// Give the event a moment to propagate, then verify speaker2 source is no longer
-	// producing relay frames (its audio is dropped by the VoiceReceiver).
+	// Give onGuildMemberUpdate a moment to propagate before sampling the post-revoke window.
 	time.Sleep(2 * time.Second)
 	baseAfterRevoke := h.Listener.Receiver.FramesReceived(speakerIDs[1])
 	time.Sleep(2 * time.Second)
 	deltaAfterRevoke := h.Listener.Receiver.FramesReceived(speakerIDs[1]) - baseAfterRevoke
 
-	// With the role removed the cross-channel audio from speaker2 source should have
-	// stopped — expect a very low frame delta (< 10 % of what 2 s of full audio gives).
-	maxExpected := int64(2 * 50 / 10) // 10 frames
+	// 2 s of full audio = 100 frames; allow ≤ 10 % for in-flight before the filter took effect.
+	maxExpected := int64(2 * 50 / 10)
 	if deltaAfterRevoke > maxExpected {
 		t.Fatalf("E12 failed: after role revoke still got %d frames from speakerIDs[1] (expected < %d)", deltaAfterRevoke, maxExpected)
 	}

@@ -16,8 +16,8 @@ func TestE1_OneCaller(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	// Source joins before StartVoiceRaid so prefetchChannelMembers captures it
-	// with full RoleIDs via the RequestMembers gateway op.
+	// Source must be in-channel before raid start so prefetchChannelMembers
+	// resolves it via RequestMembers with full RoleIDs.
 	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
@@ -41,30 +41,19 @@ func TestE2_GuildCallerMixMinus(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	// Sources join before StartVoiceRaid so prefetchChannelMembers gets full RoleIDs.
 	stopSource1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.Speaker1ChannelID)
 	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.Speaker2ChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	// Assign speaker 1 → channel 1, speaker 2 → channel 2.
 	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID, h.Cfg.Speaker2ChannelID)
-	// Listener sits in channel 1.
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
 	speakerIDs := h.RequireSpeakers(t)
 	h.RegisterCleanup(t, mgr, stopSource1, stopSource2, stopListener)
 
-	// Speaker1 (in ch1) plays cross-channel audio from ch2 — verifies relay works.
 	AssertSSRCSeen(t, h.Listener, speakerIDs[0], 10*time.Second)
 	t.Log("E2 passed: cross-channel relay confirmed via speaker bot frames in ch1")
 }
-
-// TestE3_PauseResume was removed when UpdateMixerPause was deprecated. The
-// router now owns pause state and exposes no direct "pause/resume" API — the
-// equivalent voice-event-driven scenario is covered by E11
-// (TestE11_MixerPauseResumeViaVoiceEvents): a listener leaving triggers
-// onVoiceLeave → AutoRoute → router pauses the destination mixer because
-// HasListeners returns false; the listener rejoining unpauses it.
 
 // TestE4_RaidRestart verifies that stopping and restarting a voice raid resumes
 // audio delivery. This exercises the voice-connection teardown and re-setup path
@@ -76,7 +65,7 @@ func TestE4_RaidRestart(t *testing.T) {
 	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	// Use a child cancel so StopVoiceRaid doesn't cancel the test's ctx itself.
+	// Child cancel so StopVoiceRaid does not cancel the test's own ctx.
 	_, session1Cancel := context.WithCancel(ctx)
 	mgr := h.MustStartRaid(t, ctx, session1Cancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
@@ -84,18 +73,14 @@ func TestE4_RaidRestart(t *testing.T) {
 	speakerIDs := h.RequireSpeakers(t)
 	h.RegisterCleanup(t, mgr, stopSource, stopListener)
 
-	// Establish baseline — raid is running and frames are flowing.
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
 	t.Log("E4: baseline established, stopping raid...")
 
-	// Stop the raid — all speaker voice connections are torn down.
 	if err := mgr.StopVoiceRaid(ctx, h.Cfg.GuildID); err != nil {
 		t.Fatalf("StopVoiceRaid: %v", err)
 	}
-	// Brief pause to let voice connections close.
 	time.Sleep(500 * time.Millisecond)
 
-	// Restart the raid with a fresh session cancel.
 	_, session2Cancel := context.WithCancel(ctx)
 	if _, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, session2Cancel, guild.RaidModeOneCaller); err != nil {
 		t.Fatalf("StartVoiceRaid (restart): %v", err)
@@ -115,20 +100,16 @@ func TestE6_OneManyStarTopology(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
 
-	// Sources join before StartVoiceRaid so prefetchChannelMembers gets full RoleIDs.
 	stopSource1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.Speaker1ChannelID)
 	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.Speaker2ChannelID)
 	time.Sleep(500 * time.Millisecond)
 
-	// Speaker1 → channel1, Speaker2 → channel2.
 	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeOneManyGuildCaller, h.Cfg.Speaker1ChannelID, h.Cfg.Speaker2ChannelID)
-	// Listener in the owner's channel — the owner bot plays the mixed audio there.
 	stopListenerOwner := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
 
 	h.RegisterCleanup(t, mgr, stopSource1, stopSource2, stopListenerOwner)
 
-	// In star topology, the owner bot mixes all speaker-channel sources and plays
-	// the result in OwnerChannelID. Frames arrive attributed to the owner bot's ID.
+	// Star topology attributes the mixed output to the owner bot's ID.
 	AssertFramesReceived(t, h.Listener, h.OwnerID, 100, 10*time.Second)
 	t.Log("E6 passed: star topology — owner channel receives mixed audio from both sources")
 }
@@ -140,9 +121,8 @@ func TestE7_RequestMembersPreFetch(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
-	// Source bot joins the owner's channel BEFORE StartVoiceRaid.
 	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	// Brief pause so the voice-state update reaches the gateway before we start.
+	// Let the VOICE_STATE_UPDATE land before we kick off the raid.
 	time.Sleep(1 * time.Second)
 
 	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)

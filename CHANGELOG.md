@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-16
+
+### Added
+- **Auto-routing for voice channels**: each captured channel now flips between raw-Opus copy and decoded-mix modes based on the live count of role-bearing callers. One-caller channels skip the mixer entirely (lower CPU and audio latency), while channels with two or more callers continue to mix cleanly. Transitions follow voice join/leave/move and role changes with a short debounce so bursts of events do not thrash the pipeline.
+- **Route-transition metric**: new counter `gdc.session.route_transitions.total` (labels: `guild_id`, `from`, `to`) lets dashboards spot stuck or thrashing routes per guild.
+
+### Changed
+- **Lower-latency mixer and provider**: the mixer tick now reads its inputs from a lock-free snapshot, and the voice provider hard-drains when the playback queue runs deep — cutting tail latency and avoiding the slow-consumer fallback under burst load.
+- **Auto-router replaces the manual pause/resume path**: all voice and member events fan into a single debounced re-evaluation, so per-channel mixer pause/resume and copy↔mix transitions stay coherent even under fast caller churn.
+- **Internal restructure into `router` and `pipeline` sub-packages**: voice-raid wiring split out of `manager/` into focused packages. Behaviour unchanged; integrators that imported the unexported pipeline types must move to the new exported `pipeline.Params` / `pipeline.HostFor` / `pipeline.GuestFor` surface.
+
 ## [0.8.2] - 2026-06-09
 
 ### Added

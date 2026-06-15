@@ -87,14 +87,12 @@ func (s *SessionMetrics) RouteTransition(_ context.Context, guildID snowflake.ID
 type DropPath string
 
 const (
-	DropPathMixer           DropPath = "mixer"
-	DropPathDirect          DropPath = "direct"
-	DropPathChannelMixer    DropPath = "channel_mixer"
-	DropPathOwnerStarDirect DropPath = "owner_star_direct"
-	DropPathOwnerStarRelay  DropPath = "owner_star_relay"
-	DropPathRelayBridge     DropPath = "relay_bridge"
-	DropPathProvider        DropPath = "provider"
-	DropPathReceiver        DropPath = "receiver"
+	DropPathMixer        DropPath = "mixer"
+	DropPathDirect       DropPath = "direct"
+	DropPathChannelMixer DropPath = "channel_mixer"
+	DropPathRelayBridge  DropPath = "relay_bridge"
+	DropPathProvider     DropPath = "provider"
+	DropPathReceiver     DropPath = "receiver"
 )
 
 // FrameDropper pre-computes the metric attributes for guildID+path and returns

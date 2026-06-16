@@ -64,9 +64,21 @@ func NewSessionIdleWatcher(mixers []PauseProbe, cancelFunc context.CancelFunc, i
 	return &SessionIdleWatcher{mixers: mixers, cancelFunc: cancelFunc, idleTimeout: idleTimeout}
 }
 
+// idleUnpauseHysteresis is the number of consecutive "any mixer unpaused"
+// observations required to reset the paused-since timer. The router can flap
+// a mixer paused→unpaused→paused inside a single tick window (e.g. a burst
+// of voice join/leave events); requiring two consecutive unpaused ticks
+// before reset prevents that flap from indefinitely deferring the auto-stop.
+const idleUnpauseHysteresis = 2
+
 // Run polls until ctx is cancelled or until every mixer has been paused
 // continuously for w.idleTimeout — in which case it calls cancelFunc and
 // returns. Disabled when idleTimeout <= 0 or no mixers are provided.
+//
+// Hysteresis: a single tick where one mixer is unpaused does NOT reset the
+// paused-since timer. Two consecutive unpaused observations are required.
+// This stops short-lived router transitions (cascade flips on a burst of
+// voice events) from preventing the auto-stop indefinitely.
 func (w *SessionIdleWatcher) Run(ctx context.Context) {
 	if w.idleTimeout <= 0 || len(w.mixers) == 0 {
 		return
@@ -84,6 +96,7 @@ func (w *SessionIdleWatcher) Run(ctx context.Context) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	var pausedSince time.Time
+	var unpausedCount int
 	for {
 		select {
 		case <-ctx.Done():
@@ -97,9 +110,14 @@ func (w *SessionIdleWatcher) Run(ctx context.Context) {
 				}
 			}
 			if !allPaused {
-				pausedSince = time.Time{}
+				unpausedCount++
+				if unpausedCount >= idleUnpauseHysteresis {
+					pausedSince = time.Time{}
+					unpausedCount = 0
+				}
 				continue
 			}
+			unpausedCount = 0
 			if pausedSince.IsZero() {
 				pausedSince = time.Now()
 				continue

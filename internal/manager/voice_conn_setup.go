@@ -27,10 +27,9 @@ func NewVoiceConnSetup(userID snowflake.ID) *VoiceConnSetup {
 // WithVoiceProvider reads opus frames from chOut and plays them.
 // metrics carries both the histogram recorder and (optionally) the drop callback —
 // build it via GuildMetrics.Provider() to wire both in one shot.
-// Optional mw wrappers are applied in order after construction (e.g. for recording).
-func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder, mw ...opus.ProviderMiddleware) *VoiceConnSetup {
+func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder) *VoiceConnSetup {
 	v.providerFn = func(chOut <-chan []byte) (voice.OpusFrameProvider, error) {
-		return opus.ApplyProviderMiddleware(opus.NewVoiceProvider(chOut, metrics), mw), nil
+		return opus.NewVoiceProvider(chOut, metrics), nil
 	}
 	return v
 }
@@ -38,15 +37,14 @@ func (v *VoiceConnSetup) WithVoiceProvider(metrics telemetry.OpusRecorder, mw ..
 // WithVoiceReceiver captures incoming voice frames filtered by allowUser.
 // metrics carries both the histogram recorder and (optionally) the drop callback —
 // build it via GuildMetrics.Receiver() to wire both in one shot.
-// Optional mw wrappers are applied in order after construction (e.g. for recording).
 //
 // A FanoutHandle is created and attached to the receiver so the wiring code
 // can later call handle.Install with the topology-specific targets. Frames
 // received before Install are silently dropped (brief pre-install window).
-func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder, mw ...opus.ReceiverMiddleware) *VoiceConnSetup {
+func (v *VoiceConnSetup) WithVoiceReceiver(allowUser func(snowflake.ID) bool, metrics telemetry.OpusRecorder) *VoiceConnSetup {
 	v.receiverFn = func() (voice.OpusFrameReceiver, *opus.FanoutHandle, error) {
 		handle := opus.NewFanoutHandle()
-		r := opus.ApplyReceiverMiddleware(opus.NewVoiceReceiver(v.userID, allowUser, metrics, handle), mw)
+		r := opus.NewVoiceReceiver(v.userID, allowUser, metrics, handle)
 		return r, handle, nil
 	}
 	return v

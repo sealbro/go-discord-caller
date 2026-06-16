@@ -72,3 +72,25 @@ func TestMixerPausedTransitionIdempotent(t *testing.T) {
 		t.Fatal("Paused must report false after SetPaused(false)")
 	}
 }
+
+// TestMixerUnpauseResetsActivityTimestamp guards the §3.5 fix: when a mixer
+// has been paused long enough that IdleFor would exceed DrainIdleTimeout,
+// SetPaused(false) must reset lastActivityAt so DrainWatcher doesn't insta-
+// pause it before it has had a chance to consume a single frame.
+func TestMixerUnpauseResetsActivityTimestamp(t *testing.T) {
+	t.Parallel()
+	m, _ := newTestMixer(t)
+
+	m.SetPaused(true)
+	// Backdate lastActivityAt so IdleFor looks like an eternity has passed.
+	m.lastActivityAt.Store(time.Now().Add(-1 * time.Hour).UnixNano())
+	if got := m.IdleFor(); got < 30*time.Minute {
+		t.Fatalf("backdated IdleFor should be ~1h, got %v", got)
+	}
+
+	m.SetPaused(false)
+
+	if got := m.IdleFor(); got > 100*time.Millisecond {
+		t.Errorf("SetPaused(false) should reset lastActivityAt; IdleFor=%v, want < 100ms", got)
+	}
+}

@@ -11,7 +11,7 @@ const audioSourceCap = 3
 
 // AudioSource is the pull interface consumed by the Mixer tick.
 // Producers (fanout dispatch, relay bridge) call Feed on the concrete
-// *SourceBuffer; the mixer calls Pull/Drain via this interface.
+// *SourceBuffer; the mixer calls Pull/Drain/Len via this interface.
 type AudioSource interface {
 	// Pull removes and returns the oldest buffered frame.
 	// Returns (Frame{}, false) on underrun (no frame available this tick).
@@ -19,6 +19,9 @@ type AudioSource interface {
 	// Drain discards all buffered frames and returns their pool buffers.
 	// Called by the mixer when paused to prevent PCM/Opus buffer leaks.
 	Drain()
+	// Len returns the number of frames currently buffered. Used by the paused
+	// branch of Mixer.tick to count silently-dropped frames; racey by nature.
+	Len() int
 	// Close is a lifecycle no-op; sources are detached via Mixer.RemoveInput.
 	Close()
 }
@@ -46,10 +49,12 @@ func NewSourceBuffer(drop func()) *SourceBuffer {
 }
 
 // Feed inserts f into the ring. If the ring is full the oldest frame is evicted
-// (its pool buffers returned) and drop is invoked before inserting the new frame.
+// (its pool buffers returned) and drop is invoked AFTER releasing the mutex
+// so a slow drop callback doesn't widen the buffer's critical section.
 // Safe to call concurrently with Pull/Drain.
 func (s *SourceBuffer) Feed(f Frame) {
 	s.mu.Lock()
+	dropped := false
 	if s.n == audioSourceCap {
 		old := s.buf[s.head]
 		if old.PCM != nil {
@@ -60,13 +65,15 @@ func (s *SourceBuffer) Feed(f Frame) {
 		}
 		s.head = (s.head + 1) % audioSourceCap
 		s.n--
-		if s.drop != nil {
-			s.drop()
-		}
+		dropped = true
 	}
 	s.buf[(s.head+s.n)%audioSourceCap] = f
 	s.n++
+	drop := s.drop
 	s.mu.Unlock()
+	if dropped && drop != nil {
+		drop()
+	}
 }
 
 // Len returns the number of frames currently buffered. Intended for

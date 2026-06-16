@@ -55,12 +55,17 @@ type FanoutInstall struct {
 	// forward packets without re-encoding (e.g. owner→speaker direct path
 	// in star topology). Each target gets its own pooled copy.
 	OpusTargets []chan<- []byte
-	// SourceTargets receive decoded Frames via SourceBuffer.Feed. Each target
-	// gets its own PCM and Opus copy so the mixer's single-source passthrough
-	// optimisation can safely forward Opus bytes without re-encoding.
-	// Overflow is handled inside SourceBuffer (oldest frame dropped); no
-	// select/default or separate DropFrame counter is needed here.
-	SourceTargets []*SourceBuffer
+	// SourceTargets receive decoded Frames via SourceBuffer.Feed, keyed by
+	// the userID of the speaker so the auto-router can route each user's
+	// frames into a dedicated per-user SourceBuffer per destination mixer
+	// (preventing the cap-3 ring from evicting one user's frames when a
+	// second user in the same channel also speaks — §4.3 fix).
+	//
+	// Each target gets its own PCM and Opus copy so the mixer's single-source
+	// passthrough optimisation can safely forward Opus bytes without
+	// re-encoding. Overflow is handled inside SourceBuffer (oldest frame
+	// dropped).
+	SourceTargets map[snowflake.ID][]*SourceBuffer
 	// OpusCallback is invoked once per packet with a pool-backed copy of the
 	// raw Opus bytes. Used by the OneCaller direct passthrough to broadcast
 	// frames to ally.Session without a goroutine + channel hop. The callee
@@ -90,25 +95,43 @@ type FanoutHandle struct {
 	closeOnce sync.Once
 }
 
-// NewFanoutHandle creates an empty handle. Frames received before Install fall
-// through to the receiver's legacy chan path (or are silently dropped if the
-// receiver was constructed with a nil ch), so the brief wiring window between
-// SetOpusFrameReceiver and Install does not lose audio for topologies that
-// drain the chan, and never blocks the receiver for those that don't.
+// NewFanoutHandle creates an empty handle. Frames received before Install is
+// called are silently dropped (dispatchFanout checks `state.Load() != nil`
+// and returns without touching any targets). Wiring code is responsible for
+// calling Install promptly after constructing the receiver so this window is
+// vanishingly brief in practice.
 func NewFanoutHandle() *FanoutHandle { return &FanoutHandle{} }
 
 // fanoutDispatch is the immutable bundle stored in the handle's atomic
 // pointer once Install runs.
 type fanoutDispatch struct {
 	opusTargets   []chan<- []byte
-	sourceTargets []*SourceBuffer
+	sourceTargets map[snowflake.ID][]*SourceBuffer
 	opusCallback  func([]byte)
 	onClose       func()
 	dropOpus      func()
 }
 
-// Install activates fanout mode for this handle. Idempotent in the sense that
-// the latest Install wins; typically called once per session.
+// installTargetsForUser returns the SourceBuffers that should be fed when a
+// frame from userID arrives. Returns nil when the user has no registered
+// targets (off mode, or a user without the caller role).
+func (s *fanoutDispatch) installTargetsForUser(userID snowflake.ID) []*SourceBuffer {
+	if s.sourceTargets == nil {
+		return nil
+	}
+	return s.sourceTargets[userID]
+}
+
+// Install activates fanout mode for this handle. The atomic-pointer swap is
+// the supported mid-session reconfiguration path — callers (e.g. the auto
+// router) may re-Install to switch a source between copy and mix modes on the
+// fly without tearing the receiver down.
+//
+// OnClose is NOT invoked on re-Install. It fires exactly once when Close is
+// called at session-end teardown. The previous install's OnClose is silently
+// dropped on the floor — re-installers must take ownership of teardown for
+// any resources they replace (e.g. detach SourceBuffer inputs themselves
+// before installing a new SourceTargets set).
 func (h *FanoutHandle) Install(opts FanoutInstall) {
 	h.state.Store(&fanoutDispatch{
 		opusTargets:   opts.OpusTargets,
@@ -140,11 +163,26 @@ type VoiceReceiver struct {
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
 
-	// Per-receiver decoder + scratch buffer for fanout-mode dispatch.
-	// Lazy-init on first SourceTargets dispatch. Single-producer (disgo
+	// Per-user decoder cache + shared scratch buffer for fanout-mode dispatch.
+	// Each speaker gets their OWN hraban.Decoder so its internal state (SILK
+	// predictor, FEC concealment buffer, range coder context) is consistent
+	// across that user's frames. A single shared decoder would have its state
+	// ping-pong between every speaker on each packet, corrupting the decoded
+	// PCM for both — the audible "robo voice" symptom when ≥2 users speak in
+	// the same channel. The scratch buffer is shared because dispatchFanout
+	// copies out of it before the next decode call. Single-producer (disgo
 	// serialises ReceiveOpusFrame per receiver) so no synchronisation needed.
-	decoder *hraban.Decoder
-	scratch []int16
+	decoders map[snowflake.ID]*hraban.Decoder
+	scratch  []int16
+
+	// Same-user lookup cache. Discord typically delivers back-to-back frames
+	// from the same speaker; caching the (state, userID) → SourceBuffer list
+	// skips a map lookup on every Opus packet. Invalidated automatically
+	// whenever Install swaps in a new state pointer or the userID changes.
+	// Single-producer: ReceiveOpusFrame is serialised per receiver.
+	cachedState   *fanoutDispatch
+	cachedUserID  snowflake.ID
+	cachedTargets []*SourceBuffer
 }
 
 // NewVoiceReceiver constructs a VoiceReceiver. The wiring code must call
@@ -188,7 +226,7 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	// the FanoutHandle is Installed (brief pre-install window) are silently dropped.
 	if v.fanout != nil {
 		if state := v.fanout.state.Load(); state != nil {
-			v.dispatchFanout(state, packet.Opus, receivedAt)
+			v.dispatchFanout(state, userID, packet.Opus, receivedAt)
 		}
 	}
 
@@ -202,17 +240,38 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 // receivedAt is the timestamp captured at the top of ReceiveOpusFrame before any
 // filtering or decode work — used as Frame.CreatedAt so gdc.mixer.pipeline.latency
 // measures the full Discord-receive → mixer-output span.
-func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte, receivedAt time.Time) {
-	// Lazy-init the decoder on the first frame-target dispatch. A receiver
-	// with only OpusTargets never allocates one.
-	if v.decoder == nil && len(state.sourceTargets) > 0 {
-		dec, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
-		if err != nil {
-			slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
-			return
+// userID identifies the speaker so per-user SourceBuffer entries can be
+// looked up via fanoutDispatch.installTargetsForUser.
+func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.ID, opusBytes []byte, receivedAt time.Time) {
+	var sourceTargets []*SourceBuffer
+	if v.cachedState == state && v.cachedUserID == userID {
+		sourceTargets = v.cachedTargets
+	} else {
+		sourceTargets = state.installTargetsForUser(userID)
+		v.cachedState = state
+		v.cachedUserID = userID
+		v.cachedTargets = sourceTargets
+	}
+	// Lazy-init the per-user decoder on the first frame-target dispatch for
+	// this speaker. A receiver with only OpusTargets never allocates one.
+	var dec *hraban.Decoder
+	if len(sourceTargets) > 0 {
+		if v.decoders == nil {
+			v.decoders = make(map[snowflake.ID]*hraban.Decoder)
 		}
-		v.decoder = dec
-		v.scratch = make([]int16, MixerPCMBuf)
+		dec = v.decoders[userID]
+		if dec == nil {
+			d, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
+			if err != nil {
+				slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
+				return
+			}
+			dec = d
+			v.decoders[userID] = dec
+			if v.scratch == nil {
+				v.scratch = make([]int16, MixerPCMBuf)
+			}
+		}
 	}
 
 	// Each OpusTarget (VoiceProvider) independently returns its buffer via
@@ -242,11 +301,11 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte, 
 		state.opusCallback(buf)
 	}
 
-	if len(state.sourceTargets) == 0 || v.decoder == nil {
+	if len(sourceTargets) == 0 || dec == nil {
 		return
 	}
 
-	n, err := v.decoder.Decode(opusBytes, v.scratch)
+	n, err := dec.Decode(opusBytes, v.scratch)
 	if err != nil {
 		slog.Debug("voice receiver: decode failed", slog.Any("err", err))
 		return
@@ -254,7 +313,7 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, opusBytes []byte, 
 	// Each sourceTarget gets its own PCM and Opus copy. SourceBuffer.Feed
 	// handles overflow internally (drops oldest + calls its drop func).
 	// No select/done check needed: Feed is synchronous and non-blocking.
-	for _, t := range state.sourceTargets {
+	for _, t := range sourceTargets {
 		pcm := GetPCM()[:n*MixerChannels]
 		copy(pcm, v.scratch[:n*MixerChannels])
 		opusCopy := getRecvFrame(len(opusBytes))
@@ -269,6 +328,12 @@ func (v *VoiceReceiver) recordReceiveLatency(start time.Time) {
 
 func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 	slog.Debug("cleanup user", slog.Any("userID", userID))
+	if v.cachedUserID == userID {
+		v.cachedState = nil
+		v.cachedUserID = 0
+		v.cachedTargets = nil
+	}
+	delete(v.decoders, userID)
 }
 
 // Close stops this receiver. Does NOT close the FanoutHandle — that lives

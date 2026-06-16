@@ -42,7 +42,14 @@ func (h *CommandHandlers) handleMainMenu(guildID snowflake.ID, loc *i18n.Localiz
 }
 
 // handleBindRoleMenu handles capture role selection from the roles page and refreshes it.
+//
+// Rejected while a voice raid is active: the auto-router captures the caller
+// role at session start and a mid-session change would leave the cached roleID
+// stale (plan §3.8). The user must /stop the raid before rebinding.
 func (h *CommandHandlers) handleBindRoleMenu(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	if h.manager.HasActiveSession(guildID) {
+		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
+	}
 	return h.applyRoleMenuBinding(guildID, loc, store.RoleTypeCaller, data, e)
 }
 

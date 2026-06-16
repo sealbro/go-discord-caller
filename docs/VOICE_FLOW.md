@@ -1,13 +1,33 @@
 # Voice Session Flow
 
-State as of v0.8.1: inline fanout decode in `VoiceReceiver.dispatchFanout`, pull-based `SourceBuffer` mixer inputs, sink-callback mixer output, `DrainWatcher` auto-pause.
+State as of the auto-route refactor: inline fanout decode in
+`VoiceReceiver.dispatchFanout`, pull-based per-user `SourceBuffer` mixer inputs,
+sink-callback mixer output. Every host and guest pipeline is router-driven —
+the `sourceRouter` (`internal/manager/auto_route.go`) owns mode (off/copy/mix)
+selection AND mixer pause state. The diagrams below show the **mix-mode** wire
+layout for each raid mode; in copy or off mode the same source's FanoutHandle
+is re-installed with a different `FanoutInstall` shape but the participating
+destinations are the same.
 
 ---
 
-## RaidModeOneCaller — direct passthrough (no mixer pipeline)
+## RaidModeOneCaller — single source, multiple speaker channels
 
 Only the owner bot has a `VoiceReceiver`; speakers are `VoiceProvider`-only.
-Single source → **entire mixer pipeline is bypassed**. The owner's `FanoutHandle` is installed by `installFanoutDirect` with `OpusTargets` pointing at each speaker `chOut` (raw Opus, per-target pooled copy) and an `OpusCallback` that calls `ally.Session.BroadcastFromGuild`. Everything runs **inline on disgo's UDP goroutine**: no fanout goroutine, no `chIn` hop, no decode, no mix, no re-encode. `chOwnerOut` is not created (owner does not play back audio into its own channel).
+The router decides between two modes for the owner source:
+
+- **Copy mode** (`C(owner) == 1`): owner's `FanoutHandle` is installed with
+  `OpusTargets` pointing at each speaker `chOut` (raw Opus, per-target pooled
+  copy) and an `OpusCallback` that calls `ally.Session.BroadcastFromGuild`.
+  Both the per-channel mixers and the relay mixer are paused — owner writes
+  directly to speaker chOuts and broadcasts raw Opus to the relay. No decode,
+  no mix, no re-encode on the hot path.
+- **Mix mode** (`C(owner) >= 2`): owner's `FanoutHandle` is installed with
+  `SourceTargets` (one `SourceBuffer` per `(user, destination mixer)` pair —
+  the §4.3 per-user keying fix). Per-channel mixers and the relay mixer run;
+  the relay's sink calls `ally.Session.BroadcastFromGuild`.
+
+The diagram below shows **copy mode** (the common case for OneCaller).
 
 ```mermaid
 flowchart TD
@@ -63,8 +83,10 @@ flowchart TD
 ## RaidModeGuildCaller — all channels capture and relay
 
 Every channel has both a `VoiceReceiver` (capture, fanout mode) and a `VoiceProvider` (playback).
-On each Opus packet `VoiceReceiver.dispatchFanout` runs **inline on disgo's UDP goroutine**: it decodes once, then calls `SourceBuffer.Feed` on every registered target (one buffer per source × destination mixer). Each `Mixer.tick` pulls one frame from each input via `SourceBuffer.Pull`. There is no longer a per-source decode goroutine and no intermediate capture channel for fanout-mode receivers.
+On each Opus packet `VoiceReceiver.dispatchFanout` runs **inline on disgo's UDP goroutine**: it looks up the per-user `SourceBuffer` list keyed by the speaker's userID, decodes once, then calls `SourceBuffer.Feed` on every entry (one buffer per (user × destination mixer)). Each `Mixer.tick` pulls one frame from each input via `SourceBuffer.Pull`. There is no per-source decode goroutine.
 Each `Mixer` receives audio from all sources **except its own channel** (mix-minus). The owner bot also gets `chOwnerOut` so it plays back the mixed audio of other channels.
+
+The §1.1 multi-source rule means that with N≥3 captured channels the relay mixer is always fed by 2+ sources, which cascades back to force every source into mix mode regardless of per-channel C. With N=2 mix-minus, copy mode applies while both channels are at C=1 and the cascade lifts the whole graph to mix when either reaches C≥2.
 
 ```mermaid
 flowchart TD
@@ -158,7 +180,7 @@ flowchart TD
     linkStyle 17 stroke:#e57373,stroke-width:2px
 ```
 
-Implementation note: each edge labelled `Feed (Frame)` represents one `SourceBuffer` instance registered with the target mixer via `Mixer.AddInput`. The buffer has capacity 3 (`audioSourceCap` in `internal/opus/source.go`); overflow drops the oldest frame at the producer side so the mixer is always within 60 ms of the live edge.
+Implementation note: each edge labelled `Feed (Frame)` represents **one `SourceBuffer` per role-bearing user** in the originating channel (the §4.3 fix), registered with the target mixer via `Mixer.AddInput` keyed by a router-allocated synthetic ID (bit 63 set so it cannot collide with real Discord snowflakes). Each buffer has capacity 3 (`audioSourceCap` in `internal/opus/source.go`); overflow drops the oldest frame at the producer side so the mixer is always within 60 ms of the live edge.
 
 ---
 
@@ -302,8 +324,8 @@ flowchart TD
 
 ## RaidModeOneManyGuildCaller — star topology (host)
 
-Star topology: the owner is the central hub. Only **one** channel `Mixer` is created — for the owner's channel (the hub). The owner's `FanoutHandle` is installed by `installFanoutOwnerStar` with two kinds of targets: **OpusTargets** that receive raw Opus bytes (one per-target pooled copy) and go directly to each speaker `chOut`, and one **SourceTarget** (`SourceBuffer`) registered with the relay mixer so guests still hear the owner.
-Speaker sources decode + `Feed` into the hub mixer (and into the relay mixer) just like in mix-minus mode. Speakers cannot hear each other — they only hear the owner.
+Star topology: the owner is the central hub. Only **one** channel `Mixer` is created — for the owner's channel (the hub). The owner's `FanoutHandle` keeps a fixed shape across modes: **OpusTargets** that receive raw Opus bytes (one per-target pooled copy) and go directly to each speaker `chOut`, plus — in mix mode — per-user `SourceBuffer`s registered with the relay mixer so guests hear the owner's voice. In copy mode the relay mixer is paused and the ally broadcast goes through `OpusCallback` instead.
+Speaker sources decode + `Feed` into the hub mixer when in mix mode (and write raw to the hub `chOwnerOut` in copy mode). Speakers cannot hear each other — they only hear the owner.
 
 ```mermaid
 flowchart TD
@@ -515,12 +537,12 @@ flowchart TD
 ## Mix-minus rule
 
 Each channel `Mixer[X]` receives `Feed` calls from **every source except sources originating in channel X**.
-This prevents echo: users in channel X would otherwise hear their own audio played back to them. The exclusion is enforced in `wireFanout` (`voice_fanout.go:88`) by simply *not registering* a `SourceBuffer` for `src.channelID == dest.channelID`.
+This prevents echo: users in channel X would otherwise hear their own audio played back to them. The exclusion is enforced in the pipeline `build` step (e.g. `guildCallerPipeline` in `voice_raid_guild_caller.go`) by skipping the source's own channel when populating `sourceSlot.feeds`.
 
 ### Star topology exception (OneManyGuildCaller / OneManyAllyCaller)
 
 In star mode the rule tightens further:
-- Host: speakers do not get their own per-channel mixer; the owner's `FanoutHandle` writes raw Opus directly to each speaker `chOut` via `OpusTargets`. Speakers `Feed` only the hub mixer (and the relay mixer).
+- Host: speakers do not get their own per-channel mixer; the owner's `FanoutHandle` writes raw Opus directly to each speaker `chOut` via `OpusTargets`. Speakers `Feed` only the hub mixer (and the relay mixer in mix mode).
 - Guest star: sources `Feed` the relay mixer only, and channel mixers are not created at all — host relay arrives as raw Opus bytes delivered directly to speaker `chOut`s via `ally.Session.AddGuild` (same as `AllyListener`).
 
 ---
@@ -529,12 +551,12 @@ In star mode the rule tightens further:
 
 | Stage              | Component                                                | Description                                                                                                                                       |
 |--------------------|----------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| Capture            | `VoiceReceiver.dispatchFanout`                           | Inline on disgo's UDP goroutine: role filter → Opus decode (once, if any `SourceTargets`) → `Feed` each registered `SourceBuffer`, copy raw Opus to each `OpusTarget`, and invoke `OpusCallback`. |
-| Direct fanout      | `installFanoutDirect`                                    | **OneCaller**: installs `OpusTargets` (raw → speaker chOuts) + `OpusCallback` (→ `ally.Session.BroadcastFromGuild`) on the owner's `FanoutHandle`. No decode, no goroutine. |
-| Owner star fanout  | `installFanoutOwnerStar`                                 | **OneMany host**: installs `OpusTargets` (raw → speaker chOuts) + one `SourceBuffer` (decoded → relay mixer) on the owner's `FanoutHandle`.       |
-| Mixer input        | `SourceBuffer` (cap 3)                                   | Lock-protected ring; `Feed` evicts the oldest frame on overflow so the mixer is always within 60ms of the live edge.                              |
-| Per-channel mix    | `Mixer.tick` (20ms timer, `startChannelMixers`)          | Pulls one `Frame` per input; single-source passthrough forwards `Frame.Opus` directly; multi-source mixes PCM and re-encodes.                     |
-| Relay mix          | `Mixer.tick` (relay), `startRelayBroadcast`              | Mixes all sources; `SetSink` calls `ally.Session.BroadcastFromGuild` synchronously.                                                               |
+| Routing decision   | `sourceRouter.Recompute` (`auto_route.go`)               | Snapshots per-channel callers (`VoiceProbe.EnumerateCallers`) + listener presence (`HasListeners`); runs the cascade rule (off/copy/mix); calls `applyModes`. Debounced 250 ms per channel via `Debounce`. |
+| Install spec       | per-pipeline `buildInstall` closure                      | Topology-specific. Returns `(opus.FanoutInstall, teardown)` per mode. OneCaller/GuildCaller/AllyCaller use the shared `mixMinusInstallBuilder`; star modes use `ownerStarInstallBuilder` / `speakerStarInstallBuilder`. |
+| Capture            | `VoiceReceiver.dispatchFanout`                           | Inline on disgo's UDP goroutine: role filter → look up per-user `SourceBuffer` list (falling back to `BroadcastUserID`) → Opus decode (once, if any `SourceTargets`) → `Feed` each registered `SourceBuffer`, copy raw Opus to each `OpusTarget`, and invoke `OpusCallback`. |
+| Mixer input        | `SourceBuffer` (cap 3)                                   | Lock-protected ring; `Feed` evicts the oldest frame on overflow so the mixer is always within 60 ms of the live edge. One buffer per (user × destination mixer).                                          |
+| Per-channel mix    | `Mixer.tick` (20 ms timer, `startChannelMixers`)         | Pulls one `Frame` per input; single-source passthrough forwards `Frame.Opus` directly; multi-source mixes PCM and re-encodes.                     |
+| Relay mix          | `Mixer.tick` (relay), `startRelayBroadcast`              | Mixes all sources; `SetSink` calls `ally.Session.BroadcastFromGuild` synchronously. Modelled as a `destSlot` in the router under synthetic `relayDestID = 2` (below the Discord epoch-based snowflake range). |
 | Relay bridge       | one goroutine per attached guild (`registerRelayInputs`) | Reads incoming Opus packets, decodes **once**, `Feed`s a `Frame` into one `SourceBuffer` per destination mixer.                                   |
 | Guest delivery     | `ally.Session.BroadcastFromGuild`                        | One Opus channel per guest guild; direct to `chOut`s (Listener / OneManyAllyCaller) or to `relayOpusIn` for bridge → mixers (AllyCaller).         |
 | Playback           | `VoiceProvider.ProvideOpusFrame`                         | Reads from `chOut`; recycles previous frame to pool; bleed-off drains one extra frame per call when queue depth > 3.                              |
@@ -556,16 +578,23 @@ Each drop produces a 20ms gap — far less noticeable than cumulative delay from
 
 ---
 
-## Empty-channel pause
+## Auto-router-driven pause state
 
-Channel mixers are **paused** when their destination voice channel has no non-bot users or when no input frames have arrived for `DrainIdleTimeout` (5s). A paused mixer calls `src.Drain()` on every input (releasing pooled buffers) and skips mixing, encoding, and sink invocation — eliminating the Opus encode cost for silent or unwatched channels.
+Channel mixers are **paused** when **either** the cascade rule has nothing to mix (no live source feeding the destination) **or** the destination voice channel has no non-bot listeners. A paused mixer calls `src.Drain()` on every input (releasing pooled buffers) and skips mixing, encoding, and sink invocation — eliminating the Opus encode cost for silent or unwatched channels.
+
+Pause ownership is single: the router computes `shouldRun = destMix && hasListeners` in `applyModes` and calls `SetPaused(!shouldRun)`. Synthetic destinations (relay mixer; `chOuts == nil`) skip the listener check — their consumers are ally guests, not local voice-channel humans.
 
 | Trigger                | Source                                  | Effect                                                                              |
 |------------------------|-----------------------------------------|-------------------------------------------------------------------------------------|
-| `GuildVoiceJoin`       | `bot/handlers.go:onVoiceJoin`           | `UpdateMixerPause` → unpause if channel now has a listener                          |
-| `GuildVoiceLeave`      | `bot/handlers.go:onVoiceLeave`          | `UpdateMixerPause` → pause if channel is now empty                                  |
-| `GuildVoiceMove`       | `bot/handlers.go:onVoiceMove`           | `UpdateMixerPause` → re-evaluate both old and new channel                           |
-| Session start          | `manager/service.go:syncMixerPauseState` | Set initial pause state for all channel mixers based on current voice states        |
+| `GuildVoiceJoin`       | `bot/handlers.go:onVoiceJoin`           | `AutoRoute(guildID, channelID)` → router debounces 250 ms, then re-evaluates cascade + listener check for affected destinations |
+| `GuildVoiceLeave`      | `bot/handlers.go:onVoiceLeave`          | Same; uses `OldVoiceState.ChannelID` (the channel the user left)                    |
+| `GuildVoiceMove`       | `bot/handlers.go:onVoiceMove`           | Calls `AutoRoute` for both old and new channels                                     |
+| `GuildMemberUpdate`    | `manager/allow_user.go:NotifyMemberUpdate` | If the member is currently in a voice channel, `AutoRoute` fires for that channel so a mid-session role grant/revoke is picked up without waiting for a voice event |
+| Session start          | per-pipeline `start()` closure          | Calls `router.Recompute()` synchronously to seed initial mode + pause state from the cache |
 | No input frames for 5s | `opus/drain.go:DrainWatcher.Run`        | Auto-pause via `Mixer.IdleFor() > DrainIdleTimeout` poll loop; resumes on next Feed |
 
 Pause state is stored per-session in `Session.ChannelMixers` (`channelID → MixerPauser`). The `VoiceProvider` for a paused channel receives no frames, so Discord gets silence naturally.
+
+### Observability
+
+Each source mode transition (off→copy, copy→mix, mix→off, etc.) increments the OTel counter `gdc.session.route_transitions.total{guild_id, from, to}`. Mix-mode user-set churn does **not** count — only actual mode flips.

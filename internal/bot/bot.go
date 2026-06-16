@@ -33,7 +33,7 @@ type SessionManager interface {
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
 	HasActiveSession(guildID snowflake.ID) bool
-	UpdateMixerPause(guildID snowflake.ID)
+	AutoRoute(guildID, channelID snowflake.ID)
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
 	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 	OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,19 +30,20 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
-	mixerBitrate    = 48000 // bits per second sent to Opus encoder
+	mixerBitrate    = 64000 // bits per second sent to Opus encoder; matches Discord source bitrate
 )
 
-// mixerComplexity is the Opus encoder complexity (0–10).
-// 5 is a good middle ground: significantly better quality than 3 for mixed
-// multi-source paths with modest additional CPU (~15% over complexity 3).
-const mixerComplexity = 5
+// mixerComplexity is the Opus encoder complexity (0–10). 8 keeps audible
+// quality close to Discord's source for mix-mode re-encodes (same-channel
+// multi-speaker paths) at sub-millisecond CPU per tick — there is plenty of
+// headroom because encode is only invoked when len(framesBuf) >= 2.
+const mixerComplexity = 8
 
 // encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
 // calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
 // Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
 //
-//	= 48000 × 20 / 1000 / 8 = 120 bytes  →  pool cap = 480 bytes.
+//	= 64000 × 20 / 1000 / 8 = 160 bytes  →  pool cap = 640 bytes.
 //
 // frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
 const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
@@ -121,6 +123,7 @@ type inputEntry struct {
 type Mixer struct {
 	mu             sync.Mutex
 	inputs         map[snowflake.ID]*inputEntry
+	inputsSnap     atomic.Pointer[[]*inputEntry] // lock-free read for tick; rebuilt on AddInput/RemoveInput
 	paused         atomic.Bool
 	lastActivityAt atomic.Int64  // UnixNano of last tick that consumed at least one frame
 	pausedDrops    atomic.Uint64 // diagnostic: frames discarded by tick because the mixer was paused
@@ -136,29 +139,31 @@ type Mixer struct {
 
 	// Pre-allocated scratch buffers reused on every tick.
 	// Only accessed from the single Run goroutine — no synchronisation needed.
-	entriesBuf []*inputEntry
-	framesBuf  []Frame // active frames collected each tick
-	mixed      []int32
-	pcm        []int16
-	encodeBuf  []byte
+	framesBuf []Frame // active frames collected each tick
+	mixed     []int32
+	pcm       []int16
+	encodeBuf []byte
 }
 
 // NewMixer creates a Mixer ready to accept inputs and run.
 // metrics is a pre-baked recorder (guild_id already embedded); obtain one via
 // OpusMetrics.For(guildID).
 func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
-	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppVoIP)
+	// AppAudio rather than AppVoIP: the mixer's input is summed PCM from
+	// multiple simultaneous speakers, not a single-voice stream. AppVoIP's
+	// voice-processing (noise suppression, DTX hangover) distorts mixed
+	// audio with audible artifacts ("robo voice") on same-channel multi-
+	// speaker paths. AppAudio preserves the speech content of the sum.
+	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppAudio)
 	if err != nil {
 		return nil, fmt.Errorf("mixer: new encoder: %w", err)
 	}
 	if err := enc.SetComplexity(mixerComplexity); err != nil {
 		return nil, fmt.Errorf("mixer: set complexity: %w", err)
 	}
-	if err := enc.SetDTX(true); err != nil {
-		return nil, fmt.Errorf("mixer: set dtx: %w", err)
-	}
-	// 16 kbps is sufficient for voice relay; default (~32 kbps) produces larger
-	// frames than needed and wastes channel buffer space.
+	// DTX is intentionally left off (default). For a relay mixer it injects
+	// comfort-noise packets at low-amplitude moments which the listener
+	// decodes as glitchy artifacts at every speech onset.
 	if err := enc.SetBitrate(mixerBitrate); err != nil {
 		return nil, fmt.Errorf("mixer: set bitrate: %w", err)
 	}
@@ -195,6 +200,7 @@ func (m *Mixer) SetSink(sink func(pkt []byte)) {
 func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
 	m.mu.Lock()
 	m.inputs[id] = &inputEntry{src: src}
+	m.rebuildSnapLocked()
 	m.mu.Unlock()
 	return nil
 }
@@ -203,12 +209,23 @@ func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
 func (m *Mixer) RemoveInput(id snowflake.ID) {
 	m.mu.Lock()
 	delete(m.inputs, id)
+	m.rebuildSnapLocked()
 	m.mu.Unlock()
 }
 
+// rebuildSnapLocked rebuilds the immutable inputs snapshot read by tick. Must
+// be called with m.mu held. Allocates a fresh slice (cheap relative to the
+// rarity of input changes vs. the 50 Hz tick rate).
+func (m *Mixer) rebuildSnapLocked() {
+	snap := make([]*inputEntry, 0, len(m.inputs))
+	for _, e := range m.inputs {
+		snap = append(snap, e)
+	}
+	m.inputsSnap.Store(&snap)
+}
+
 // InputIDs returns the IDs of all currently registered inputs in unspecified order.
-// Intended for tests and observability — the result is a snapshot taken under
-// the mixer's lock and not safe to mutate.
+// Intended for tests and observability.
 func (m *Mixer) InputIDs() []snowflake.ID {
 	m.mu.Lock()
 	ids := make([]snowflake.ID, 0, len(m.inputs))
@@ -223,8 +240,15 @@ func (m *Mixer) InputIDs() []snowflake.ID {
 // input channels (preventing upstream backpressure) but skips mixing, encoding,
 // and output. Use this to suspend mixers whose destination channel has no
 // non-bot listeners.
+//
+// On paused → running transition the activity timestamp is reset to "now" so
+// that DrainWatcher does not immediately re-pause a freshly-unpaused mixer
+// based on idle time accumulated while it was paused.
 func (m *Mixer) SetPaused(p bool) {
-	m.paused.Store(p)
+	prev := m.paused.Swap(p)
+	if prev && !p {
+		m.lastActivityAt.Store(time.Now().UnixNano())
+	}
 }
 
 // PausedDrops returns the cumulative number of input frames discarded by
@@ -252,17 +276,28 @@ func (m *Mixer) IdleFor() time.Duration {
 }
 
 // Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
-// one. Using time.Timer (reset after each tick) instead of time.Ticker prevents
-// stale-frame buildup: if a tick takes longer than 20 ms under load, the next
-// tick is deferred rather than queued immediately from a backlog.
-// The timer accounts for tick processing time to prevent systematic drift:
-// without correction each period is 20 ms + processing, causing the mixer to
-// under-produce frames relative to the real-time Opus frame rate.
+// one. The next-tick interval is computed against an absolute wall-clock
+// deadline (advanced by mixerFrameDur each cycle) so scheduler wake-up
+// lateness does not accumulate cycle-over-cycle. The previous "subtract
+// elapsed from a relative timer" scheme silently absorbed wake-up lateness
+// into every period; over a few seconds the mixer drifted behind Discord's
+// 50 Hz UDP cadence, the per-user SourceBuffer (cap 3 = 60 ms) filled to
+// its ceiling, and incoming frames were evicted at the producer — observed
+// as 100 % of fanout drops landing on path=mixer with pipeline-latency P99
+// at the 60 ms cap.
+//
+// If the goroutine wakes so late that the next deadline has already passed,
+// we advance the deadline to the next future boundary rather than firing
+// back-to-back catch-up ticks (the dropped frames are gone anyway, so
+// catch-up ticks would just process already-evicted input).
+//
 // The first tick fires immediately so any frames already queued at session
 // start are processed without a one-off 20 ms wait.
 func (m *Mixer) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Microsecond)
 	defer timer.Stop()
+
+	deadline := time.Now()
 
 	for {
 		select {
@@ -273,11 +308,17 @@ func (m *Mixer) Run(ctx context.Context) {
 			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
-			elapsed := time.Since(start)
-			m.metrics.RecordTick(float64(elapsed.Microseconds()) / 1000)
-			// Subtract processing time so the next tick fires closer to 20 ms
-			// after the previous one started, not 20 ms after it finished.
-			next := mixerFrameDur - elapsed
+			m.metrics.RecordTick(float64(time.Since(start).Microseconds()) / 1000)
+
+			deadline = deadline.Add(mixerFrameDur)
+			next := time.Until(deadline)
+			if next < 0 {
+				// Skip past every deadline already in the past so we resume
+				// on a future boundary instead of replaying missed slots.
+				missed := (-next)/mixerFrameDur + 1
+				deadline = deadline.Add(missed * mixerFrameDur)
+				next = time.Until(deadline)
+			}
 			if next < time.Millisecond {
 				next = time.Millisecond
 			}
@@ -286,34 +327,68 @@ func (m *Mixer) Run(ctx context.Context) {
 	}
 }
 
+// tick is the 20 ms mix loop. Composes four phases (gather frames, record
+// activity / latency, decide passthrough vs. mix, emit), each in its own
+// helper so the orchestration reads top-to-bottom.
 func (m *Mixer) tick() error {
 	paused := m.paused.Load()
+	entries := m.readInputsSnapshot()
 
-	m.mu.Lock()
-	m.entriesBuf = m.entriesBuf[:0]
-	for _, e := range m.inputs {
-		m.entriesBuf = append(m.entriesBuf, e)
+	m.collectFrames(entries, paused)
+
+	if len(m.framesBuf) > 0 {
+		m.lastActivityAt.Store(time.Now().UnixNano())
 	}
-	m.mu.Unlock()
-	// entriesBuf is safe to read without the lock from here: inputEntry.ch is
-	// assigned once in AddInput and never mutated. RemoveInput only deletes the
-	// map entry; it does not touch the inputEntry struct itself. Reading a
-	// closed or already-drained channel is always safe in Go.
 
-	// Pull one frame per input. When paused, drain all buffered frames instead
-	// to prevent PCM/Opus buffer accumulation (SourceBuffer holds pooled memory).
-	// Overflow/jitter handling is now inside SourceBuffer.Feed (drops oldest on
-	// overflow), so no drain-threshold bleed-off logic is needed here.
+	// When paused (no non-bot listeners in the destination channel), skip
+	// mixing/encoding/output entirely. Inputs were already drained above.
+	if paused || len(m.framesBuf) == 0 {
+		m.recyclePCMBuffers()
+		return nil
+	}
+
+	m.recordPipelineLatency()
+
+	// Single active source: forward the original Opus packet directly.
+	// No re-encode needed — eliminates 1 encode per tick for the common case.
+	// Frame.Opus is already an isolated copy made by the fanout goroutine so no
+	// defensive copy is needed here.
+	if len(m.framesBuf) == 1 {
+		PutPCM(m.framesBuf[0].PCM)
+		m.emit(m.framesBuf[0].Opus)
+		return nil
+	}
+
+	out, err := m.mixAndEncode()
+	if err != nil {
+		return err
+	}
+	m.emit(out)
+	return nil
+}
+
+// readInputsSnapshot returns the current inputs slice without taking any lock.
+// The slice itself is immutable (AddInput/RemoveInput replace it via
+// inputsSnap.Store under m.mu); inputEntry.src is assigned once at construction.
+// Tick processes a stale snapshot at worst — fine, because removed inputs that
+// still appear in the snapshot just return underrun from Pull, and freshly-
+// added inputs are picked up on the next tick.
+func (m *Mixer) readInputsSnapshot() []*inputEntry {
+	if snap := m.inputsSnap.Load(); snap != nil {
+		return *snap
+	}
+	return nil
+}
+
+// collectFrames pulls one frame per input into m.framesBuf. When paused, every
+// input is fully drained (incrementing pausedDrops by the drained count) so
+// SourceBuffer ring memory does not accumulate while the mixer is silent.
+func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) {
 	m.framesBuf = m.framesBuf[:0]
-	for _, e := range m.entriesBuf {
+	for _, e := range entries {
 		if paused {
-			// Count what we're about to discard so diagnostic readers (tests,
-			// PausedDrops accessor) can detect "upstream is feeding, downstream
-			// is silently throwing it away" without enabling debug logging.
-			if sb, ok := e.src.(*SourceBuffer); ok {
-				if n := sb.Len(); n > 0 {
-					m.pausedDrops.Add(uint64(n))
-				}
+			if n := e.src.Len(); n > 0 {
+				m.pausedDrops.Add(uint64(n))
 			}
 			e.src.Drain()
 			continue
@@ -323,21 +398,20 @@ func (m *Mixer) tick() error {
 			m.framesBuf = append(m.framesBuf, f)
 		}
 	}
+}
 
-	if len(m.framesBuf) > 0 {
-		m.lastActivityAt.Store(time.Now().UnixNano())
+// recyclePCMBuffers returns each frame's PCM buffer to the pool. Used by the
+// no-output paths (paused or zero frames) where we still have to release the
+// pool buffers that producers handed off to us.
+func (m *Mixer) recyclePCMBuffers() {
+	for _, f := range m.framesBuf {
+		PutPCM(f.PCM)
 	}
+}
 
-	// When paused (no non-bot listeners in the destination channel), skip
-	// mixing/encoding/output entirely. Inputs were already drained above.
-	if paused || len(m.framesBuf) == 0 {
-		for _, f := range m.framesBuf {
-			PutPCM(f.PCM)
-		}
-		return nil
-	}
-
-	// Record pipeline latency from the oldest input frame (worst-case path).
+// recordPipelineLatency emits the gdc.mixer.pipeline.latency observation for
+// the oldest input frame in this tick (worst-case path through the pipeline).
+func (m *Mixer) recordPipelineLatency() {
 	now := time.Now()
 	oldest := m.framesBuf[0].CreatedAt
 	for _, f := range m.framesBuf[1:] {
@@ -348,21 +422,14 @@ func (m *Mixer) tick() error {
 	if !oldest.IsZero() {
 		m.metrics.RecordPipelineLatency(float64(now.Sub(oldest).Microseconds()) / 1000)
 	}
+}
 
+// mixAndEncode accumulates the PCM from every frame in m.framesBuf, clamps to
+// int16, encodes via libopus, and returns the pooled encoded buffer. Recycles
+// each frame's PCM buffer along the way.
+func (m *Mixer) mixAndEncode() ([]byte, error) {
 	// Zero the accumulator in-place instead of allocating a new slice.
 	clear(m.mixed)
-
-	// Single active source: forward the original Opus packet directly.
-	// No re-encode needed — eliminates 1 encode per tick for the common case.
-	// Frame.Opus is already an isolated copy made by the fanout goroutine so no
-	// defensive copy is needed here.
-	if len(m.framesBuf) == 1 {
-		PutPCM(m.framesBuf[0].PCM)
-		if m.sink != nil {
-			m.sink(m.framesBuf[0].Opus)
-		}
-		return nil
-	}
 
 	// Multiple active sources: accumulate PCM and re-encode (mix-minus).
 	// The inner loop is unrolled 4× to help the compiler emit SIMD instructions
@@ -381,8 +448,16 @@ func (m *Mixer) tick() error {
 		PutPCM(f.PCM)
 	}
 
-	// Clamp to int16 range and write into pcm for re-encoding.
+	// Equal-power attenuation: scale the sum by 1/sqrt(N) so two normal-volume
+	// speakers do not clip on peaks (raw sum of two 10 k peaks ≈ 20 k; three
+	// would clip at ~30 k against the int16 ceiling of 32767). sqrt rather
+	// than 1/N preserves perceived loudness for the dominant speaker.
+	// len(framesBuf) is always ≥ 2 here — the single-source case took the
+	// passthrough branch above. Computed in Q15 fixed-point to keep the
+	// clamp loop integer-only and SIMD-friendly.
+	scale := int32(float64(1<<15) / math.Sqrt(float64(len(m.framesBuf))))
 	for i, v := range m.mixed {
+		v = (v * scale) >> 15
 		if v > 32767 {
 			v = 32767
 		} else if v < -32768 {
@@ -393,18 +468,22 @@ func (m *Mixer) tick() error {
 
 	n, err := m.enc.Encode(m.pcm, m.encodeBuf)
 	if err != nil {
-		return fmt.Errorf("encode: %w", err)
+		return nil, fmt.Errorf("encode: %w", err)
 	}
 
 	// Copy the encoded frame into a pooled buffer; encodeBuf is reused next tick.
 	// VoiceProvider returns this buffer via PutEncodedFrame before blocking for the next frame.
 	out := getEncodedFrame(n)
 	copy(out, m.encodeBuf[:n])
+	return out, nil
+}
 
+// emit hands pkt to the registered sink. Recycles the buffer when no sink is
+// configured so it doesn't leak.
+func (m *Mixer) emit(pkt []byte) {
 	if m.sink != nil {
-		m.sink(out)
+		m.sink(pkt)
 	} else {
-		PutEncodedFrame(out) // no sink registered — recycle directly
+		PutEncodedFrame(pkt) // no sink registered — recycle directly
 	}
-	return nil
 }

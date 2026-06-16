@@ -140,8 +140,12 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 			metrics.VoiceCallerAdd(context.Background(), 1, guildID.String(), e.VoiceState.ChannelID.String())
 		}
 
-		// A non-bot user appeared — resume the mixer for this channel if paused.
-		m.UpdateMixerPause(guildID)
+		// Trigger an auto-route recompute on the channel the user joined.
+		// The router owns both source-mode routing AND mixer pause state
+		// (cascade ∧ listener check folded together — Plan §3.6 final).
+		if e.VoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.VoiceState.ChannelID)
+		}
 	}
 }
 
@@ -167,8 +171,13 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 			metrics.VoiceCallerAdd(context.Background(), -1, guildID.String(), e.OldVoiceState.ChannelID.String())
 		}
 
-		// A non-bot user left — pause the mixer if this was the last listener.
-		m.UpdateMixerPause(guildID)
+		// Trigger an auto-route recompute on the channel the user vacated.
+		// e.VoiceState.ChannelID is nil after a leave (no channel); the
+		// pre-event channel lives on e.OldVoiceState. The router pauses the
+		// destination's mixer if this was the last listener.
+		if e.OldVoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.OldVoiceState.ChannelID)
+		}
 	}
 }
 
@@ -184,7 +193,16 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 			return
 		}
 
-		// Both the old and new channel may need mixer pause state updated.
-		m.UpdateMixerPause(guildID)
+		// Auto-route both channels: the source channel loses a caller, the
+		// destination gains one. The router debounces, so two same-instant
+		// triggers on different channels still collapse to one Recompute per
+		// channel after the window. Pause state for both channels is also
+		// updated as part of the same Recompute.
+		if e.OldVoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.OldVoiceState.ChannelID)
+		}
+		if e.VoiceState.ChannelID != nil {
+			m.AutoRoute(guildID, *e.VoiceState.ChannelID)
+		}
 	}
 }

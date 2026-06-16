@@ -212,14 +212,21 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 		return false
 	}
 
+	// Swap the map entry under mu, then close the old client OUTSIDE the lock.
+	// Gateway shutdown can take seconds; holding s.mu across it would block
+	// every other reconnect / GetClientByID / observer callback in the
+	// meantime. The old client's internal goroutines and WebSocket connection
+	// are released by Close — and any voice connections the manager had on
+	// it become unreachable (they were already dead from the manager's
+	// perspective once isConnected returned false, which is the precondition
+	// that brought us here).
 	s.mu.Lock()
-	// Close the old (disconnected) client before replacing it so its internal
-	// goroutines and WebSocket connection are released rather than leaked.
-	if old := s.poolClients[botUserID]; old != nil {
-		old.Close(ctx)
-	}
+	old := s.poolClients[botUserID]
 	s.poolClients[botUserID] = newClient
 	s.mu.Unlock()
+	if old != nil {
+		old.Close(ctx)
+	}
 	slog.InfoContext(ctx, "pool: reconnected speaker gateway", slog.String("botUserID", botUserID.String()))
 	return true
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"maps"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -22,19 +23,19 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// audioChanBuf is the buffer size for the remaining single-producer/single-consumer
-// Opus channels: the provider playback channel (chOut, drained by VoiceProvider on
-// disgo's sender goroutine) and the relay bridge input channel (relayOpusIn, drained
-// by the bridge goroutine). 3 frames × 20 ms = 60 ms, matching providerDrainThreshold
-// so the bleed-off path engages just as the buffer fills — the natural value after
-// the legacy receiver bytes-channel path was retired.
-const audioChanBuf = 3
-
 // Service orchestrates speaker bots and voice raid sessions.
 // It is the sole owner of all GuildStatus state; callers receive safe value copies.
 type Service struct {
 	mu       sync.RWMutex
 	statuses map[snowflake.ID]*guild.Status // protected by mu
+
+	// activeRouters mirrors the subset of statuses whose Session has a
+	// non-nil AutoRouter, kept as an immutable map snapshot behind an
+	// atomic.Pointer. Voice events go through AutoRoute on every Discord
+	// event — looking up the router here avoids taking m.mu on the hot
+	// path. Updated under m.mu by setActiveRouter / clearActiveRouter
+	// whenever a session is committed or torn down.
+	activeRouters atomic.Pointer[map[snowflake.ID]guild.AutoRouter]
 
 	store              store.Store
 	poolSvc            pool.PoolService
@@ -49,7 +50,7 @@ type Service struct {
 
 // NewService creates a new manager Service.
 func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig, metrics *telemetry.Metrics) *Service {
-	return &Service{
+	s := &Service{
 		statuses:    make(map[snowflake.ID]*guild.Status),
 		store:       st,
 		poolSvc:     poolSvc,
@@ -60,6 +61,45 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		metrics:     metrics,
 		reconnect:   newReconnectState(),
 	}
+	empty := map[snowflake.ID]guild.AutoRouter{}
+	s.activeRouters.Store(&empty)
+	return s
+}
+
+// setActiveRouter publishes a session's AutoRouter into the lock-free
+// activeRouters snapshot. Called from commitSession + JoinSession under
+// m.mu so the published snapshot reflects the freshly-committed session.
+// Copy-on-write: replaces the entire map so AutoRoute readers always see
+// an immutable snapshot.
+func (m *Service) setActiveRouter(guildID snowflake.ID, r guild.AutoRouter) {
+	if r == nil {
+		m.clearActiveRouter(guildID)
+		return
+	}
+	cur := *m.activeRouters.Load()
+	next := make(map[snowflake.ID]guild.AutoRouter, len(cur)+1)
+	for k, v := range cur {
+		next[k] = v
+	}
+	next[guildID] = r
+	m.activeRouters.Store(&next)
+}
+
+// clearActiveRouter removes a guild from the activeRouters snapshot. Called
+// from StopVoiceRaid / JoinSession-teardown under m.mu.
+func (m *Service) clearActiveRouter(guildID snowflake.ID) {
+	cur := *m.activeRouters.Load()
+	if _, present := cur[guildID]; !present {
+		return
+	}
+	next := make(map[snowflake.ID]guild.AutoRouter, len(cur)-1)
+	for k, v := range cur {
+		if k == guildID {
+			continue
+		}
+		next[k] = v
+	}
+	m.activeRouters.Store(&next)
 }
 
 // SetSessionIdleTimeout configures the duration after which a session whose
@@ -229,48 +269,78 @@ func (m *Service) IsBot(user discord.User) bool {
 	return user.Bot && !m.test.AllowBots
 }
 
-// channelHasListeners returns true if channelID contains at least one listener
-// user according to the owner bot's voice-state cache.
-func (m *Service) channelHasListeners(guildID, channelID snowflake.ID) bool {
-	for vs := range m.ownerClient.Caches.VoiceStates(guildID) {
+// cacheVoiceProbe is the production CallerEnumerator used by the auto-router.
+// It reads the owner bot's voice-state and member caches to enumerate
+// role-bearing users currently in a channel.
+//
+// Held by the router for the session lifetime. The guildID is captured at
+// construction so the router only needs to pass channelID + roleID on each
+// query.
+type cacheVoiceProbe struct {
+	svc     *Service
+	guildID snowflake.ID
+}
+
+// HasListeners reports whether channelID currently contains at least one
+// non-bot member according to the owner bot's voice-state cache. Used by the
+// router to pause destination mixers whose voice channel has no humans to
+// hear the audio.
+func (p *cacheVoiceProbe) HasListeners(channelID snowflake.ID) bool {
+	caches := p.svc.ownerClient.Caches
+	for vs := range caches.VoiceStates(p.guildID) {
 		if vs.ChannelID == nil || *vs.ChannelID != channelID {
 			continue
 		}
-		member, ok := m.ownerClient.Caches.Member(guildID, vs.UserID)
-		if ok && !m.IsBot(member.User) {
+		member, ok := caches.Member(p.guildID, vs.UserID)
+		if ok && !p.svc.IsBot(member.User) {
 			return true
 		}
 	}
 	return false
 }
 
-// syncMixerPauseState checks every channel mixer in session and pauses those
-// whose destination channel has no non-bot listeners.
-func (m *Service) syncMixerPauseState(guildID snowflake.ID, session *guild.Session) {
-	for chID, mx := range session.ChannelMixers {
-		mx.SetPaused(!m.channelHasListeners(guildID, chID))
+// EnumerateCallers returns the user IDs of cached non-bot members in
+// channelID whose role set contains roleID. When roleID == 0 (no caller role
+// bound) every non-bot in the channel counts — matching AllowFilter semantics.
+func (p *cacheVoiceProbe) EnumerateCallers(channelID, roleID snowflake.ID) []snowflake.ID {
+	caches := p.svc.ownerClient.Caches
+	var users []snowflake.ID
+	for vs := range caches.VoiceStates(p.guildID) {
+		if vs.ChannelID == nil || *vs.ChannelID != channelID {
+			continue
+		}
+		member, ok := caches.Member(p.guildID, vs.UserID)
+		if !ok || p.svc.IsBot(member.User) {
+			continue
+		}
+		if roleID == 0 {
+			users = append(users, vs.UserID)
+			continue
+		}
+		for _, rID := range member.RoleIDs {
+			if rID == roleID {
+				users = append(users, vs.UserID)
+				break
+			}
+		}
 	}
+	return users
 }
 
-// UpdateMixerPause is called on voice state changes (join/leave/move) to
-// pause or resume channel mixers for the affected guild. Safe to call when
-// there is no active session — it is a no-op.
-func (m *Service) UpdateMixerPause(guildID snowflake.ID) {
-	m.mu.RLock()
-	st := m.statuses[guildID]
-	if st == nil || st.Session == nil || st.Session.ChannelMixers == nil {
-		m.mu.RUnlock()
-		return
-	}
-	// Snapshot the mixer map under the read lock so we can iterate without
-	// holding the lock (channelHasListeners acquires sub-locks on the disgo
-	// cache, and holding mu there risks a lock-order inversion).
-	mixers := make(map[snowflake.ID]guild.MixerPauser, len(st.Session.ChannelMixers))
-	maps.Copy(mixers, st.Session.ChannelMixers)
-	m.mu.RUnlock()
-
-	for chID, mx := range mixers {
-		mx.SetPaused(!m.channelHasListeners(guildID, chID))
+// AutoRoute notifies the auto-router that a voice state event has touched
+// channelID. The router debounces bursts (250 ms by default) before
+// recomputing per-source modes AND per-destination pause state (cascade and
+// listener check folded together — Plan §3.6). Safe to call when there is no
+// active session or no router attached to the session — both paths are no-ops.
+func (m *Service) AutoRoute(guildID, channelID snowflake.ID) {
+	// Lock-free hot path: voice events fire on every Discord state change
+	// (typically many per second per active guild). Reading the
+	// activeRouters atomic.Pointer avoids m.mu contention with the slower
+	// raid-lifecycle writers.
+	if routers := m.activeRouters.Load(); routers != nil {
+		if router, ok := (*routers)[guildID]; ok {
+			router.Debounce(channelID)
+		}
 	}
 }
 
@@ -314,6 +384,7 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 		sessionCopy.Cancel = nil
 		sessionCopy.Cleanup = nil
 		sessionCopy.ChannelMixers = nil
+		sessionCopy.AutoRouter = nil
 		sessionCopy.Speakers = make([]guild.Speaker, len(st.Session.Speakers))
 		copy(sessionCopy.Speakers, st.Session.Speakers)
 		snap.Session = &sessionCopy

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-06-16
+
+### Added
+- **Auto-routing for voice channels**: each captured channel now flips between raw-Opus copy and decoded-mix modes based on the live count of role-bearing callers. One-caller channels skip the mixer entirely (lower CPU and audio latency), while channels with two or more callers continue to mix cleanly. Transitions follow voice join/leave/move and role changes with a short debounce so bursts of events do not thrash the pipeline.
+- **Route-transition metric**: new counter `gdc.session.route_transitions.total` (labels: `guild_id`, `from`, `to`) lets dashboards spot stuck or thrashing routes per guild.
+
+### Changed
+- **Lower-latency mixer and provider**: the mixer tick now reads its inputs from a lock-free snapshot, and the voice provider hard-drains when the playback queue runs deep — cutting tail latency and avoiding the slow-consumer fallback under burst load.
+- **Auto-router replaces the manual pause/resume path**: all voice and member events fan into a single debounced re-evaluation, so per-channel mixer pause/resume and copy↔mix transitions stay coherent even under fast caller churn.
+- **Internal restructure into `router` and `pipeline` sub-packages**: voice-raid wiring split out of `manager/` into focused packages. Behaviour unchanged; integrators that imported the unexported pipeline types must move to the new exported `pipeline.Params` / `pipeline.HostFor` / `pipeline.GuestFor` surface.
+
+### Fixed
+- **"Robo voice" with two or more users in the same channel**: the receiver shared one Opus decoder across all speakers, so its state ping-ponged between users and corrupted the decoded PCM. Each speaker now has its own decoder.
+- **Mixer clock drift**: the per-tick timer fell behind Discord's 50 Hz cadence, filled the per-source ring, and dropped frames. The tick now advances against an absolute wallclock deadline.
+- **Mixer re-encode quality**: switched to `hraban.AppAudio`, raised bitrate 48→64 kbps and complexity 5→8, disabled DTX, and pre-attenuated the PCM sum by 1/√N — removes clip-and-distort when multiple speakers peak together.
+
 ## [0.8.2] - 2026-06-09
 
 ### Added
@@ -171,7 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Guild Caller mode (`/start mode:many`)**: Speaker bots in every bound channel both capture and play back audio, turning the whole speaker pool into a multi-channel conference relay
 - **Guest listener mode by default**: A guest guild that joins with `/start code:XXXXXX` (no `mode` option) is in **listener-only** mode — it receives all host audio but its own users are not captured; add `mode:many` to enable capture on the guest side (only effective when the host also uses `mode:many`)
 - **Relay mixer for inter-guild audio**: All audio sources are continuously mixed into a single relay stream broadcast to guest guilds, so guests hear the full conversation regardless of how many callers are active on the host
-- **Voice Flow documentation**: New [VOICE_FLOW.md](VOICE_FLOW.md) with detailed signal flow diagrams for each raid mode
+- **Voice Flow documentation**: New [VOICE_FLOW.md](docs/VOICE_FLOW.md) with detailed signal flow diagrams for each raid mode
 
 
 ## [0.4.1] - 2026-04-10

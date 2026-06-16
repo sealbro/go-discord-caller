@@ -19,7 +19,7 @@
           "enable": true,
           "hide": true,
           "iconColor": "rgba(0, 211, 255, 1)",
-          "name": "Annotations \u0026 Alerts",
+          "name": "Annotations & Alerts",
           "query": {
             "datasource": {
               "name": "-- Grafana --"
@@ -352,7 +352,7 @@
                   "color": "rgba(255,0,255,0.7)"
                 },
                 "filterValues": {
-                  "le": 1e-9
+                  "le": 1E-9
                 },
                 "legend": {
                   "show": true
@@ -771,7 +771,7 @@
                   "color": "rgba(255,0,255,0.7)"
                 },
                 "filterValues": {
-                  "le": 1e-9
+                  "le": 1E-9
                 },
                 "legend": {
                   "show": true
@@ -870,7 +870,7 @@
                   "color": "rgba(255,0,255,0.7)"
                 },
                 "filterValues": {
-                  "le": 1e-9
+                  "le": 1E-9
                 },
                 "legend": {
                   "show": true
@@ -1232,7 +1232,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
+                        "expr": "gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
                         "instant": false,
                         "legendFormat": "{{guild_name}}",
                         "range": true
@@ -1431,7 +1431,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "increase(gdc_fanout_frames_dropped_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__interval]) * on(guild_id) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
+                        "expr": "increase(gdc_fanout_frames_dropped_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__interval]) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
                         "instant": false,
                         "legendFormat": "{{path}} – {{guild_name}}",
                         "range": true
@@ -1775,7 +1775,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
+                        "expr": "gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
                         "instant": false,
                         "legendFormat": "{{guild_name}}",
                         "range": true
@@ -2496,7 +2496,7 @@
                   "color": "rgba(255,0,255,0.7)"
                 },
                 "filterValues": {
-                  "le": 1e-9
+                  "le": 1E-9
                 },
                 "legend": {
                   "show": true
@@ -2595,7 +2595,7 @@
                   "color": "rgba(255,0,255,0.7)"
                 },
                 "filterValues": {
-                  "le": 1e-9
+                  "le": 1E-9
                 },
                 "legend": {
                   "show": true
@@ -2773,7 +2773,7 @@
                   "color": "rgba(255,0,255,0.7)"
                 },
                 "filterValues": {
-                  "le": 1e-9
+                  "le": 1E-9
                 },
                 "legend": {
                   "show": true
@@ -3462,6 +3462,126 @@
             "version": "13.1.0-24779284961"
           }
         }
+      },
+      "panel-31": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (from, to) (rate(gdc_session_route_transitions_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "{{from}} → {{to}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Auto-router source-mode transitions (off/copy/mix). Spikes indicate caller churn; sustained one-way rate without an inverse rate suggests a stuck cascade.",
+          "id": 31,
+          "links": [],
+          "title": "Route Transitions",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "stepAfter",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
       }
     },
     "layout": {
@@ -3857,6 +3977,19 @@
               "x": 0,
               "y": 88
             }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-31"
+              },
+              "height": 8,
+              "width": 24,
+              "x": 0,
+              "y": 96
+            }
           }
         ]
       }
@@ -3956,7 +4089,7 @@
             "version": "v0"
           },
           "refresh": "onTimeRangeChanged",
-          "regex": "/guild_id=\"(?\u003cvalue\u003e[^\"]+)\".*guild_name=\"(?\u003ctext\u003e[^\"]+)\"/",
+          "regex": "/guild_id=\"(?<value>[^\"]+)\".*guild_name=\"(?<text>[^\"]+)\"/",
           "regexApplyTo": "value",
           "skipUrlSync": false,
           "sort": "alphabeticalAsc"

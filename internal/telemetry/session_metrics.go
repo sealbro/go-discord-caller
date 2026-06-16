@@ -10,11 +10,12 @@ import (
 
 // SessionMetrics tracks voice raid session lifecycle and fanout health.
 type SessionMetrics struct {
-	active   metric.Int64UpDownCounter
-	starts   metric.Int64Counter
-	stops    metric.Int64Counter
-	speakers metric.Int64Gauge
-	dropped  metric.Int64Counter
+	active           metric.Int64UpDownCounter
+	starts           metric.Int64Counter
+	stops            metric.Int64Counter
+	speakers         metric.Int64Gauge
+	dropped          metric.Int64Counter
+	routeTransitions metric.Int64Counter
 }
 
 func (s *SessionMetrics) init(meter metric.Meter) (err error) {
@@ -43,6 +44,11 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	if s.routeTransitions, err = meter.Int64Counter("gdc.session.route_transitions.total",
+		metric.WithDescription("Auto-router source-mode transitions (off/copy/mix). Labels include the from/to mode names."),
+	); err != nil {
+		return
+	}
 	return nil
 }
 
@@ -64,18 +70,29 @@ func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.I
 	s.stops.Add(ctx, 1, attrs)
 }
 
+// RouteTransition records one source-mode transition (off/copy/mix) for
+// guildID, labelled with the from/to mode names. Call once per source per
+// install swap in the auto-router. context.Background() is used (rather than
+// the session ctx) so a fast-following session-cancel does not drop the
+// last transition record.
+func (s *SessionMetrics) RouteTransition(_ context.Context, guildID snowflake.ID, from, to string) {
+	s.routeTransitions.Add(context.Background(), 1, metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("from", from),
+		attribute.String("to", to),
+	))
+}
+
 // DropPath identifies the pipeline stage where an Opus frame was dropped.
 type DropPath string
 
 const (
-	DropPathMixer           DropPath = "mixer"
-	DropPathDirect          DropPath = "direct"
-	DropPathChannelMixer    DropPath = "channel_mixer"
-	DropPathOwnerStarDirect DropPath = "owner_star_direct"
-	DropPathOwnerStarRelay  DropPath = "owner_star_relay"
-	DropPathRelayBridge     DropPath = "relay_bridge"
-	DropPathProvider        DropPath = "provider"
-	DropPathReceiver        DropPath = "receiver"
+	DropPathMixer        DropPath = "mixer"
+	DropPathDirect       DropPath = "direct"
+	DropPathChannelMixer DropPath = "channel_mixer"
+	DropPathRelayBridge  DropPath = "relay_bridge"
+	DropPathProvider     DropPath = "provider"
+	DropPathReceiver     DropPath = "receiver"
 )
 
 // FrameDropper pre-computes the metric attributes for guildID+path and returns

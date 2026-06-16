@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
@@ -17,7 +18,7 @@ import (
 // setupSpeakers snapshots and joins all enabled, bound speakers for a guild.
 // Returns an error if the guild has no status, already has an active session,
 // or no speakers could join.
-func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool) (*raidSetup, error) {
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool) (*pipeline.Setup, error) {
 	speakers, err := m.snapshotSpeakers(guildID)
 	if err != nil {
 		return nil, err
@@ -31,21 +32,21 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	outs := make([]chan<- []byte, 0, len(joined))
 	joinedSpeakers := make([]guild.Speaker, 0, len(joined))
 	for _, r := range joined {
-		outs = append(outs, r.chOut)
-		joinedSpeakers = append(joinedSpeakers, r.speaker)
+		outs = append(outs, r.ChOut)
+		joinedSpeakers = append(joinedSpeakers, r.Speaker)
 	}
 
-	return &raidSetup{
-		joined:         joined,
-		speakers:       joinedSpeakers,
-		speakerCleanup: buildSpeakerCleanup(guildID, joined),
-		outs:           outs,
+	return &pipeline.Setup{
+		Joined:         joined,
+		Speakers:       joinedSpeakers,
+		SpeakerCleanup: pipeline.BuildSpeakerCleanup(guildID, joined),
+		Outs:           outs,
 	}, nil
 }
 
 // joinSpeakers joins all enabled, bound speakers in parallel.
 // When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool) []speakerResult {
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool) []pipeline.SpeakerResult {
 	var candidates []guild.Speaker
 	for _, sp := range speakers {
 		if sp.Enabled {
@@ -55,7 +56,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 		}
 	}
 
-	resultCh := make(chan speakerResult, len(candidates))
+	resultCh := make(chan pipeline.SpeakerResult, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
 	for _, sp := range candidates {
@@ -74,7 +75,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 			if withCapture {
 				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
 			}
-			chOut := make(chan []byte, audioChanBuf)
+			chOut := make(chan []byte, opus.AudioChanBuf)
 			handle, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
@@ -82,13 +83,13 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 				return
 			}
 			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, handle, allowUser))
-			resultCh <- speakerResult{sp, chOut, handle, gv, cleanup}
+			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup}
 		}(sp)
 	}
 	wg.Wait()
 	close(resultCh)
 
-	results := make([]speakerResult, 0, len(candidates))
+	results := make([]pipeline.SpeakerResult, 0, len(candidates))
 	for r := range resultCh {
 		results = append(results, r)
 	}
@@ -96,6 +97,9 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 }
 
 // commitSession stores session under write lock, re-checking for conflicts.
+// Also publishes the session's AutoRouter into the lock-free activeRouters
+// snapshot so voice-event handlers can dispatch via AutoRoute without
+// taking m.mu.
 func (m *Service) commitSession(session *guild.Session) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -107,6 +111,9 @@ func (m *Service) commitSession(session *guild.Session) error {
 		return ErrSessionExists
 	}
 	st.Session = session
+	if session.AutoRouter != nil {
+		m.setActiveRouter(session.GuildID, session.AutoRouter)
+	}
 	return nil
 }
 
@@ -130,90 +137,6 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 	}
 
 	return handle, cleanup, nil
-}
-
-// iterDeduplicatedCaptures calls fn for the first capturing speaker per voice
-// channel across joined. Subsequent speakers in the same channel keep their
-// FanoutHandle uninstalled — frames received by their VoiceReceiver are silently
-// dropped in dispatchFanout (state == nil), so no drain goroutine is needed.
-func iterDeduplicatedCaptures(joined []speakerResult, fn func(speakerResult)) {
-	seen := map[snowflake.ID]bool{}
-	for _, r := range joined {
-		if r.handle == nil {
-			continue
-		}
-		if seen[r.gv.ChannelID()] {
-			continue
-		}
-		seen[r.gv.ChannelID()] = true
-		fn(r)
-	}
-}
-
-// buildSources returns a deduplicated list of audio sources (one capturing
-// speaker per voice channel). When two speaker bots share a channel only the
-// first is wired into the mixer graph.
-func buildSources(ownerUserID, ownerChannelID snowflake.ID, ownerHandle *opus.FanoutHandle, joined []speakerResult) []sourceEntry {
-	sources := []sourceEntry{{ownerUserID, ownerChannelID, ownerHandle}}
-	iterDeduplicatedCaptures(joined, func(r speakerResult) {
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.handle})
-	})
-	return sources
-}
-
-// buildDestinations groups each speaker's output channel by its destination voice channel.
-func buildDestinations(joined []speakerResult) []*destChannel {
-	destMap := map[snowflake.ID]*destChannel{}
-	for _, r := range joined {
-		d, ok := destMap[r.gv.ChannelID()]
-		if !ok {
-			d = &destChannel{channelID: r.gv.ChannelID()}
-			destMap[r.gv.ChannelID()] = d
-		}
-		d.outs = append(d.outs, r.chOut)
-	}
-	dests := make([]*destChannel, 0, len(destMap))
-	for _, d := range destMap {
-		dests = append(dests, d)
-	}
-	return dests
-}
-
-// buildGuestSources returns deduplicated capture sources from speaker joins.
-// Unlike the host's buildSources, the guest owner bot is provider-only so
-// it contributes no capture handle.
-func buildGuestSources(joined []speakerResult) []sourceEntry {
-	var sources []sourceEntry
-	iterDeduplicatedCaptures(joined, func(r speakerResult) {
-		sources = append(sources, sourceEntry{r.speaker.ID, r.gv.ChannelID(), r.handle})
-	})
-	return sources
-}
-
-// buildSpeakerCleanup returns a function that closes every speaker's
-// provider/receiver and leaves its voice channel, exactly once.
-// Leave calls run in parallel so teardown is bounded by the slowest connection
-// rather than N×voiceLeaveTimeout.
-func buildSpeakerCleanup(guildID snowflake.ID, joined []speakerResult) func() {
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
-			defer cancel()
-			var wg sync.WaitGroup
-			wg.Add(len(joined))
-			for _, r := range joined {
-				go func(r speakerResult) {
-					defer wg.Done()
-					if r.cleanup != nil {
-						r.cleanup()
-					}
-					r.gv.Leave(ctx, guildID)
-				}(r)
-			}
-			wg.Wait()
-		})
-	}
 }
 
 // snapshotSpeakers returns a deep copy of the guild's speakers as a slice.

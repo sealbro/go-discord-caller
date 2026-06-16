@@ -271,17 +271,28 @@ func (m *Mixer) IdleFor() time.Duration {
 }
 
 // Run fires a 20 ms mix tick, waits for it to complete, then schedules the next
-// one. Using time.Timer (reset after each tick) instead of time.Ticker prevents
-// stale-frame buildup: if a tick takes longer than 20 ms under load, the next
-// tick is deferred rather than queued immediately from a backlog.
-// The timer accounts for tick processing time to prevent systematic drift:
-// without correction each period is 20 ms + processing, causing the mixer to
-// under-produce frames relative to the real-time Opus frame rate.
+// one. The next-tick interval is computed against an absolute wall-clock
+// deadline (advanced by mixerFrameDur each cycle) so scheduler wake-up
+// lateness does not accumulate cycle-over-cycle. The previous "subtract
+// elapsed from a relative timer" scheme silently absorbed wake-up lateness
+// into every period; over a few seconds the mixer drifted behind Discord's
+// 50 Hz UDP cadence, the per-user SourceBuffer (cap 3 = 60 ms) filled to
+// its ceiling, and incoming frames were evicted at the producer — observed
+// as 100 % of fanout drops landing on path=mixer with pipeline-latency P99
+// at the 60 ms cap.
+//
+// If the goroutine wakes so late that the next deadline has already passed,
+// we advance the deadline to the next future boundary rather than firing
+// back-to-back catch-up ticks (the dropped frames are gone anyway, so
+// catch-up ticks would just process already-evicted input).
+//
 // The first tick fires immediately so any frames already queued at session
 // start are processed without a one-off 20 ms wait.
 func (m *Mixer) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Microsecond)
 	defer timer.Stop()
+
+	deadline := time.Now()
 
 	for {
 		select {
@@ -292,11 +303,17 @@ func (m *Mixer) Run(ctx context.Context) {
 			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
-			elapsed := time.Since(start)
-			m.metrics.RecordTick(float64(elapsed.Microseconds()) / 1000)
-			// Subtract processing time so the next tick fires closer to 20 ms
-			// after the previous one started, not 20 ms after it finished.
-			next := mixerFrameDur - elapsed
+			m.metrics.RecordTick(float64(time.Since(start).Microseconds()) / 1000)
+
+			deadline = deadline.Add(mixerFrameDur)
+			next := time.Until(deadline)
+			if next < 0 {
+				// Skip past every deadline already in the past so we resume
+				// on a future boundary instead of replaying missed slots.
+				missed := (-next)/mixerFrameDur + 1
+				deadline = deadline.Add(missed * mixerFrameDur)
+				next = time.Until(deadline)
+			}
 			if next < time.Millisecond {
 				next = time.Millisecond
 			}

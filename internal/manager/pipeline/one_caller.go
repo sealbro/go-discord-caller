@@ -83,7 +83,7 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 	// initial Recompute fires after commitSession so the disgo cache has
 	// the post-join voice states.
 	gm := p.GM
-	r := router.New(p.GuildID, p.RoleID, p.VoiceProbe, []*router.SourceSlot{ownerSlot}, dests).
+	r := router.New(p.GuildID, p.AllowFilter.RoleID(), p.VoiceProbe, []*router.SourceSlot{ownerSlot}, dests).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})

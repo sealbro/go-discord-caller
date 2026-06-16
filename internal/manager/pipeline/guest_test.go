@@ -98,7 +98,6 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 		OwnerChOut:     ownerChOut,
 		OwnerHandle:    ownerHandle,
 		GuestGM:        gm,
-		RoleID:         0,
 		AllowFilter:    stubAllowFilter{},
 		VoiceProbe:     stubCallerCounter(2),
 	}
@@ -127,7 +126,7 @@ func TestGuestFor_ReturnsExpectedImpl(t *testing.T) {
 
 func TestGuestListenerPipeline_NoChannelMixers(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := guestFx()
@@ -152,7 +151,7 @@ func TestGuestListenerPipeline_NoChannelMixers(t *testing.T) {
 
 func TestGuestCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := guestFx()
@@ -208,7 +207,7 @@ func TestGuestCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 
 func TestGuestStarCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := guestFx()

@@ -96,7 +96,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		OwnerChOut:     ownerChOut,
 		OwnerHandle:    ownerHandle,
 		GuestGM:        guestGm,
-		RoleID:         allowUser.RoleID(),
 		AllowFilter:    allowUser,
 		VoiceProbe:     &cacheVoiceProbe{svc: m, guildID: guestGuildID},
 	}
@@ -258,7 +257,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		OwnerCleanup: ownerCleanup,
 		OV:           ov,
 		GM:           gm,
-		RoleID:       allowUser.RoleID(),
 		AllowFilter:  allowUser,
 		VoiceProbe:   &cacheVoiceProbe{svc: m, guildID: guildID},
 	}

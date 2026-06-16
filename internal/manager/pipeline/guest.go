@@ -92,7 +92,7 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 	}
 
 	gm := p.GuestGM
-	r := router.New(p.GuestGuildID, p.RoleID, p.VoiceProbe, sourceSlots, dests).
+	r := router.New(p.GuestGuildID, p.AllowFilter.RoleID(), p.VoiceProbe, sourceSlots, dests).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
@@ -204,7 +204,7 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 	}
 
 	gm := p.GuestGM
-	r := router.New(p.GuestGuildID, p.RoleID, p.VoiceProbe, sourceSlots, dests).
+	r := router.New(p.GuestGuildID, p.AllowFilter.RoleID(), p.VoiceProbe, sourceSlots, dests).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})

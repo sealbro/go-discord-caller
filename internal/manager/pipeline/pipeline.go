@@ -12,6 +12,16 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
+// AllowSource binds a capture role to a per-user allow decision updater.
+// Holding both behind one interface prevents Params.RoleID drifting out of
+// sync with Params.AllowFilter (the router would then route on one role and
+// the receiver would filter on another, silently). The manager's
+// *AllowFilter satisfies this interface; pipeline tests provide a stub.
+type AllowSource interface {
+	guild.AllowUpdater
+	RoleID() snowflake.ID
+}
+
 // Params holds all inputs the three host pipeline topologies need.
 // Built once by manager.Service.StartVoiceRaid after the common owner/speaker setup;
 // passed verbatim to HostPipeline.Build.
@@ -28,12 +38,8 @@ type Params struct {
 	OwnerCleanup func()             // closes owner provider/receiver; called on teardown or build error
 	OV           pool.GuildVoice
 	GM           telemetry.GuildMetrics
-	// RoleID is the capture role used by AllowFilter; supplied separately so
-	// pipeline does not need to import the manager package for the concrete
-	// AllowFilter type.
-	RoleID      snowflake.ID
-	AllowFilter guild.AllowUpdater
-	VoiceProbe  router.VoiceProbe // production: *manager.cacheVoiceProbe
+	AllowFilter  AllowSource
+	VoiceProbe   router.VoiceProbe // production: *manager.cacheVoiceProbe
 }
 
 // GuestParams holds all inputs the three guest pipeline topologies need.
@@ -50,8 +56,7 @@ type GuestParams struct {
 	OwnerChOut     chan []byte
 	OwnerHandle    *opus.FanoutHandle // non-nil iff the guest owner bot has an inline-capture VoiceReceiver wired up
 	GuestGM        telemetry.GuildMetrics
-	RoleID         snowflake.ID
-	AllowFilter    guild.AllowUpdater
+	AllowFilter    AllowSource
 	VoiceProbe     router.VoiceProbe
 }
 
@@ -59,6 +64,13 @@ type GuestParams struct {
 // session to commit plus a start func to call after commitSession. start()
 // is responsible for spawning mixer goroutines and seeding initial pause
 // state via the router's Recompute.
+//
+// Lifecycle contract: if Build returns a non-nil start, the caller MUST
+// invoke start exactly once before session.Cleanup, or the owner voice
+// connection leaks — host pipelines wire OwnerCleanup into the relay
+// mixer's deferred EndSession, which only fires after the start-spawned
+// goroutine actually runs.
+//
 // On failure it returns a non-nil error; the caller is responsible for cleaning up
 // speakers, the owner voice connection, and the ally session.
 type HostPipeline interface {
@@ -67,9 +79,15 @@ type HostPipeline interface {
 
 // GuestPipeline builds the audio wiring for one guest topology and returns
 // the session, a start func to call after commitSession, a cleanup func to
-// call on teardown, and an error. On failure the caller is responsible for
-// running speaker/owner cleanup and removing the guest from the session
-// registry.
+// call on teardown, and an error.
+//
+// Lifecycle contract: if Build returns success, the caller MUST invoke
+// start before session.Cleanup and MUST invoke cleanup during teardown.
+// cleanup closes any relay-input channels allocated inside start; calling
+// session.Cleanup without cleanup leaks those channels.
+//
+// On failure the caller is responsible for running speaker/owner cleanup and
+// removing the guest from the session registry.
 type GuestPipeline interface {
 	Build(ctx context.Context, p GuestParams) (session *guild.Session, start func(), cleanup func(), err error)
 }

@@ -15,12 +15,12 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
-// stubAllowFilter is a no-op guild.AllowUpdater for tests that don't exercise
-// allow updates. Pipeline tests never call Set; they only need the interface
-// for guild.Session.AllowFilter assignment.
+// stubAllowFilter is a no-op AllowSource for tests that don't exercise allow
+// updates. RoleID returns 0; pipeline tests never call Set.
 type stubAllowFilter struct{}
 
 func (stubAllowFilter) Set(snowflake.ID, bool) {}
+func (stubAllowFilter) RoleID() snowflake.ID   { return 0 }
 
 // hostFixture bundles the inputs every host pipeline test needs.
 type hostFixture struct {
@@ -89,7 +89,6 @@ func buildHostParams(t *testing.T, ctx context.Context, fx hostFixture, mode gui
 		OwnerCleanup: func() {},
 		OV:           pool.NewGuildVoice(nil, fx.ownerChannelID),
 		GM:           gm,
-		RoleID:       0,
 		AllowFilter:  stubAllowFilter{},
 		// Force every channel into RouteMix so the router-driven pipelines'
 		// initial Recompute attaches mixer inputs immediately.
@@ -154,7 +153,7 @@ func TestHostFor_ReturnsExpectedImpl(t *testing.T) {
 // and attaches an AutoRouter to the session.
 func TestOneCallerPipeline_AlwaysOnGraph(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := hostFx()
@@ -189,7 +188,7 @@ func TestOneCallerPipeline_AlwaysOnGraph(t *testing.T) {
 // mix-minus excludes the source channel from each channel mixer.
 func TestGuildCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := hostFx()
@@ -245,7 +244,7 @@ func TestGuildCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 // relay mixer is exposed alongside it via ChannelMixers (under RelayDestID).
 func TestStarCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := hostFx()
@@ -297,7 +296,7 @@ func TestStarCallerPipeline_BuildsExpectedTopology(t *testing.T) {
 // path when two speakers occupy the same voice channel.
 func TestGuildCallerPipeline_SharedChannel(t *testing.T) {
 	t.Parallel()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	fx := hostFx()

@@ -37,6 +37,13 @@ func NewVoiceProvider(ch <-chan []byte, metrics telemetry.OpusRecorder) *VoicePr
 // 3 frames × 20 ms = 60 ms of tolerated jitter before drain kicks in.
 const providerDrainThreshold = 3
 
+// AudioChanBuf is the buffer size for the single-producer/single-consumer
+// Opus channels feeding VoiceProvider (chOut, drained by the disgo sender
+// goroutine) and the relay bridge input (relayOpusIn, drained by the bridge
+// goroutine). Matched to providerDrainThreshold so the bleed-off path engages
+// exactly when the buffer fills — 3 frames × 20 ms = 60 ms.
+const AudioChanBuf = providerDrainThreshold
+
 // providerHardDrainThreshold is twice the soft threshold. Beyond this point
 // the buffer is clearly recovering from a stall (not normal jitter), and the
 // gentle 1-frame-per-call drain would take many calls to catch up while

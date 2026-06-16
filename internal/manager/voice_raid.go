@@ -64,7 +64,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
 			ownerSetup.WithVoiceReceiver(allowUser.Check, guestGm.Receiver())
 		}
-		ownerChOut = make(chan []byte, audioChanBuf)
+		ownerChOut = make(chan []byte, opus.AudioChanBuf)
 		handle, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
 		if err != nil {
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
@@ -222,7 +222,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// mixed audio from other channels into its own channel (mix-minus).
 	var chOwnerOut chan []byte
 	if mode.WithCapture() {
-		chOwnerOut = make(chan []byte, audioChanBuf)
+		chOwnerOut = make(chan []byte, opus.AudioChanBuf)
 		ownerSetup.WithVoiceProvider(gm.Provider())
 	}
 	ownerHandle, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)

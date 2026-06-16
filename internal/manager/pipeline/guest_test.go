@@ -52,7 +52,7 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 	for i, sid := range fx.speakerIDs {
 		joined = append(joined, SpeakerResult{
 			Speaker: guild.Speaker{ID: sid, Enabled: true},
-			ChOut:   make(chan []byte, audioChanBuf),
+			ChOut:   make(chan []byte, opus.AudioChanBuf),
 			Handle:  opus.NewFanoutHandle(),
 			GV:      pool.NewGuildVoice(nil, fx.speakerChIDs[i]),
 			Cleanup: func() {},
@@ -82,7 +82,7 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 	var ownerChOut chan []byte
 	var ownerHandle *opus.FanoutHandle
 	if guestMode.WithCapture() {
-		ownerChOut = make(chan []byte, audioChanBuf)
+		ownerChOut = make(chan []byte, opus.AudioChanBuf)
 		ownerHandle = opus.NewFanoutHandle()
 	}
 

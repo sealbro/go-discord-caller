@@ -75,7 +75,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 			if withCapture {
 				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
 			}
-			chOut := make(chan []byte, audioChanBuf)
+			chOut := make(chan []byte, opus.AudioChanBuf)
 			handle, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
 			if err != nil {
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))

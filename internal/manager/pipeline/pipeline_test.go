@@ -48,7 +48,7 @@ func buildHostParams(t *testing.T, ctx context.Context, fx hostFixture, mode gui
 	for i, sid := range fx.speakerIDs {
 		joined = append(joined, SpeakerResult{
 			Speaker: guild.Speaker{ID: sid, Enabled: true},
-			ChOut:   make(chan []byte, audioChanBuf),
+			ChOut:   make(chan []byte, opus.AudioChanBuf),
 			Handle:  opus.NewFanoutHandle(),
 			GV:      pool.NewGuildVoice(nil, fx.speakerChIDs[i]),
 			Cleanup: func() {},
@@ -74,7 +74,7 @@ func buildHostParams(t *testing.T, ctx context.Context, fx hostFixture, mode gui
 	ownerHandle := opus.NewFanoutHandle()
 	var chOwnerOut chan []byte
 	if mode.WithCapture() {
-		chOwnerOut = make(chan []byte, audioChanBuf)
+		chOwnerOut = make(chan []byte, opus.AudioChanBuf)
 	}
 	return Params{
 		GuildID:      fx.guildID,

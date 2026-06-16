@@ -14,11 +14,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// audioChanBuf is the buffer size for the single-producer/single-consumer
-// Opus channels constructed inside the pipeline (relayOpusIn). Three frames ×
-// 20 ms = 60 ms of jitter tolerance before the bleed-off path engages.
-const audioChanBuf = 3
-
 // EndSession runs the common host session teardown: invokes ownerCleanup, records
 // the stop metric, ends the tracing span, and logs the session end.
 // Intended to be called as a deferred statement inside session goroutines.
@@ -119,7 +114,7 @@ func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *
 
 	// Single Opus input channel shared across all destination mixers.
 	// Bridge: decode once, fan Frame into every SourceBuffer via Feed.
-	relayOpusIn := make(chan []byte, audioChanBuf)
+	relayOpusIn := make(chan []byte, opus.AudioChanBuf)
 	go func() {
 		defer func() {
 			for _, rs := range relaySources {

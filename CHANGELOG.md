@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Auto-router replaces the manual pause/resume path**: all voice and member events fan into a single debounced re-evaluation, so per-channel mixer pause/resume and copy↔mix transitions stay coherent even under fast caller churn.
 - **Internal restructure into `router` and `pipeline` sub-packages**: voice-raid wiring split out of `manager/` into focused packages. Behaviour unchanged; integrators that imported the unexported pipeline types must move to the new exported `pipeline.Params` / `pipeline.HostFor` / `pipeline.GuestFor` surface.
 
+### Fixed
+- **"Robo voice" with two or more users in the same channel**: the receiver shared one Opus decoder across all speakers, so its state ping-ponged between users and corrupted the decoded PCM. Each speaker now has its own decoder.
+- **Mixer clock drift**: the per-tick timer fell behind Discord's 50 Hz cadence, filled the per-source ring, and dropped frames. The tick now advances against an absolute wallclock deadline.
+- **Mixer re-encode quality**: switched to `hraban.AppAudio`, raised bitrate 48→64 kbps and complexity 5→8, disabled DTX, and pre-attenuated the PCM sum by 1/√N — removes clip-and-distort when multiple speakers peak together.
+
 ## [0.8.2] - 2026-06-09
 
 ### Added

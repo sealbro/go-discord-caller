@@ -163,11 +163,17 @@ type VoiceReceiver struct {
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
 
-	// Per-receiver decoder + scratch buffer for fanout-mode dispatch.
-	// Lazy-init on first SourceTargets dispatch. Single-producer (disgo
+	// Per-user decoder cache + shared scratch buffer for fanout-mode dispatch.
+	// Each speaker gets their OWN hraban.Decoder so its internal state (SILK
+	// predictor, FEC concealment buffer, range coder context) is consistent
+	// across that user's frames. A single shared decoder would have its state
+	// ping-pong between every speaker on each packet, corrupting the decoded
+	// PCM for both — the audible "robo voice" symptom when ≥2 users speak in
+	// the same channel. The scratch buffer is shared because dispatchFanout
+	// copies out of it before the next decode call. Single-producer (disgo
 	// serialises ReceiveOpusFrame per receiver) so no synchronisation needed.
-	decoder *hraban.Decoder
-	scratch []int16
+	decoders map[snowflake.ID]*hraban.Decoder
+	scratch  []int16
 
 	// Same-user lookup cache. Discord typically delivers back-to-back frames
 	// from the same speaker; caching the (state, userID) → SourceBuffer list
@@ -246,16 +252,26 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 		v.cachedUserID = userID
 		v.cachedTargets = sourceTargets
 	}
-	// Lazy-init the decoder on the first frame-target dispatch. A receiver
-	// with only OpusTargets never allocates one.
-	if v.decoder == nil && len(sourceTargets) > 0 {
-		dec, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
-		if err != nil {
-			slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
-			return
+	// Lazy-init the per-user decoder on the first frame-target dispatch for
+	// this speaker. A receiver with only OpusTargets never allocates one.
+	var dec *hraban.Decoder
+	if len(sourceTargets) > 0 {
+		if v.decoders == nil {
+			v.decoders = make(map[snowflake.ID]*hraban.Decoder)
 		}
-		v.decoder = dec
-		v.scratch = make([]int16, MixerPCMBuf)
+		dec = v.decoders[userID]
+		if dec == nil {
+			d, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
+			if err != nil {
+				slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
+				return
+			}
+			dec = d
+			v.decoders[userID] = dec
+			if v.scratch == nil {
+				v.scratch = make([]int16, MixerPCMBuf)
+			}
+		}
 	}
 
 	// Each OpusTarget (VoiceProvider) independently returns its buffer via
@@ -285,11 +301,11 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 		state.opusCallback(buf)
 	}
 
-	if len(sourceTargets) == 0 || v.decoder == nil {
+	if len(sourceTargets) == 0 || dec == nil {
 		return
 	}
 
-	n, err := v.decoder.Decode(opusBytes, v.scratch)
+	n, err := dec.Decode(opusBytes, v.scratch)
 	if err != nil {
 		slog.Debug("voice receiver: decode failed", slog.Any("err", err))
 		return
@@ -312,6 +328,12 @@ func (v *VoiceReceiver) recordReceiveLatency(start time.Time) {
 
 func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 	slog.Debug("cleanup user", slog.Any("userID", userID))
+	if v.cachedUserID == userID {
+		v.cachedState = nil
+		v.cachedUserID = 0
+		v.cachedTargets = nil
+	}
+	delete(v.decoders, userID)
 }
 
 // Close stops this receiver. Does NOT close the FanoutHandle — that lives

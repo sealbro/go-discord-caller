@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -29,19 +30,20 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
-	mixerBitrate    = 48000 // bits per second sent to Opus encoder
+	mixerBitrate    = 64000 // bits per second sent to Opus encoder; matches Discord source bitrate
 )
 
-// mixerComplexity is the Opus encoder complexity (0–10).
-// 5 is a good middle ground: significantly better quality than 3 for mixed
-// multi-source paths with modest additional CPU (~15% over complexity 3).
-const mixerComplexity = 5
+// mixerComplexity is the Opus encoder complexity (0–10). 8 keeps audible
+// quality close to Discord's source for mix-mode re-encodes (same-channel
+// multi-speaker paths) at sub-millisecond CPU per tick — there is plenty of
+// headroom because encode is only invoked when len(framesBuf) >= 2.
+const mixerComplexity = 8
 
 // encodedFrameCap is the pool buffer capacity for re-encoded Opus output frames,
 // calculated as 4× the nominal CBR frame size to absorb VBR overshoot and FEC padding.
 // Nominal: mixerBitrate (bps) × frame duration (ms) / 1000 / 8 bytes
 //
-//	= 48000 × 20 / 1000 / 8 = 120 bytes  →  pool cap = 480 bytes.
+//	= 64000 × 20 / 1000 / 8 = 160 bytes  →  pool cap = 640 bytes.
 //
 // frame duration in ms = mixerFrameSize samples / (mixerSampleRate / 1000) = 960 / 48 = 20.
 const encodedFrameCap = mixerBitrate * (mixerFrameSize / (mixerSampleRate / 1000)) / 1000 / 8 * 4
@@ -147,18 +149,21 @@ type Mixer struct {
 // metrics is a pre-baked recorder (guild_id already embedded); obtain one via
 // OpusMetrics.For(guildID).
 func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
-	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppVoIP)
+	// AppAudio rather than AppVoIP: the mixer's input is summed PCM from
+	// multiple simultaneous speakers, not a single-voice stream. AppVoIP's
+	// voice-processing (noise suppression, DTX hangover) distorts mixed
+	// audio with audible artifacts ("robo voice") on same-channel multi-
+	// speaker paths. AppAudio preserves the speech content of the sum.
+	enc, err := hraban.NewEncoder(mixerSampleRate, mixerChannels, hraban.AppAudio)
 	if err != nil {
 		return nil, fmt.Errorf("mixer: new encoder: %w", err)
 	}
 	if err := enc.SetComplexity(mixerComplexity); err != nil {
 		return nil, fmt.Errorf("mixer: set complexity: %w", err)
 	}
-	if err := enc.SetDTX(true); err != nil {
-		return nil, fmt.Errorf("mixer: set dtx: %w", err)
-	}
-	// 16 kbps is sufficient for voice relay; default (~32 kbps) produces larger
-	// frames than needed and wastes channel buffer space.
+	// DTX is intentionally left off (default). For a relay mixer it injects
+	// comfort-noise packets at low-amplitude moments which the listener
+	// decodes as glitchy artifacts at every speech onset.
 	if err := enc.SetBitrate(mixerBitrate); err != nil {
 		return nil, fmt.Errorf("mixer: set bitrate: %w", err)
 	}
@@ -443,8 +448,16 @@ func (m *Mixer) mixAndEncode() ([]byte, error) {
 		PutPCM(f.PCM)
 	}
 
-	// Clamp to int16 range and write into pcm for re-encoding.
+	// Equal-power attenuation: scale the sum by 1/sqrt(N) so two normal-volume
+	// speakers do not clip on peaks (raw sum of two 10 k peaks ≈ 20 k; three
+	// would clip at ~30 k against the int16 ceiling of 32767). sqrt rather
+	// than 1/N preserves perceived loudness for the dominant speaker.
+	// len(framesBuf) is always ≥ 2 here — the single-source case took the
+	// passthrough branch above. Computed in Q15 fixed-point to keep the
+	// clamp loop integer-only and SIMD-friendly.
+	scale := int32(float64(1<<15) / math.Sqrt(float64(len(m.framesBuf))))
 	for i, v := range m.mixed {
+		v = (v * scale) >> 15
 		if v > 32767 {
 			v = 32767
 		} else if v < -32768 {

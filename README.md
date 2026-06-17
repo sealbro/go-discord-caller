@@ -73,14 +73,15 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 - **Role-based access control** – a dedicated manager role controls who can start/stop raids without granting full admin
 - **Auto-seeding** – speaker bots already in a guild are automatically registered on startup or when they join later
 - **Speaker gateway watchdog** – reconnects any speaker gateway that failed at startup; logs health every 30 s
+- **Localization** – slash-command descriptions and the setup UI are translated into 7 languages (English, Español, Deutsch, Français, Português, Polski, Русский); the language is auto-detected from each user's Discord client locale and can be pinned per guild from `/setup`
 
 ## Slash commands
 
-> Manager role is configured via `/setup`. `/status` is available to everyone.
+> The manager role is configured inside `/setup`. `/status` is available to everyone.
 
 | Command                        | Required role | Description                                                                                                                                       |
 |--------------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
-| `/setup`                       | Manager       | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder)                                               |
+| `/setup`                       | Administrator | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder, language)                                     |
 | `/start`                       | Manager       | Start a voice raid in **one-caller** mode — only the designated caller is captured; speakers play back in listen-only                             |
 | `/start mode:one-many`         | Manager       | Start a voice raid in **hub-and-spoke** mode — the owner hears all speakers, but speakers only hear the owner; prevents cross-talk in large raids |
 | `/start mode:many`             | Manager       | Start a voice raid in **many-callers** mode — every bound channel captures and plays back audio with mix-minus echo prevention                    |
@@ -88,8 +89,6 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 | `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when host uses `mode:many`)               |
 | `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
 | `/status`                      | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
-
-> **Warning:** In `one-caller` and `one-many` modes only **one user with the capture role** should be speaking in the owner channel at a time. If multiple users with the capture role are active simultaneously the mixed output may sound robotic or corrupted. Use `mode:many` for multi-speaker scenarios.
 
 ## Inter-guild relay
 
@@ -156,6 +155,7 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
    - Bind the **manager role** — members with this role can use `/start` and `/stop`
    - Bind the **owner bot** to a voice channel
    - Add speaker bots via the **Add Speaker** button and bind each to a voice channel
+   - Optionally pin a **language** for the server (otherwise each user sees their own Discord client language)
 2. Run `/start` to begin a voice raid.
 3. Share your relay code (from `/status`) with another server so they can join with `/start code:XXXXXX`.
 

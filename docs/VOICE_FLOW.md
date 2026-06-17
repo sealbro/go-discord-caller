@@ -23,8 +23,7 @@ The router decides between two modes for the owner source:
   directly to speaker chOuts and broadcasts raw Opus to the relay. No decode,
   no mix, no re-encode on the hot path.
 - **Mix mode** (`C(owner) >= 2`): owner's `FanoutHandle` is installed with
-  `SourceTargets` (one `SourceBuffer` per `(user, destination mixer)` pair —
-  the §4.3 per-user keying fix). Per-channel mixers and the relay mixer run;
+  `SourceTargets`. Per-channel mixers and the relay mixer run;
   the relay's sink calls `ally.Session.BroadcastFromGuild`.
 
 The diagram below shows **copy mode** (the common case for OneCaller).

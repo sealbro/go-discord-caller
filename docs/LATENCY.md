@@ -45,8 +45,6 @@ Total: ~200ms (single guild, many-callers/mix mode; ~185ms in OneCaller copy mod
 | Discord voice server → listener client    | 20–50ms    | |
 | **Total (single guild)**                  | **~200ms** | Discord network dominates; in-process pipeline measures ~40ms                                            |
 
-> Measured 2026-06-17 from `grafanacloud-sealbro-prom` (30d aggregate; histograms only populate during live sessions). In-process stages run faster than the original conservative estimates — the ~60ms `SourceBuffer` + tick stage is the only meaningful in-process cost.
-
 **Inter-guild relay** (`ally.Session` → relay mixer → guest `VoiceProvider`) adds ~60ms on top (extra mixer tick alignment + guest guild network leg) → **~260ms total**.
 
 ---

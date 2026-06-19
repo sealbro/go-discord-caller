@@ -75,7 +75,6 @@ nav:
   - How it works: https://github.com/sealbro/go-discord-caller/blob/main/docs/VOICE_FLOW.md
   - Audio latency: https://github.com/sealbro/go-discord-caller/blob/main/docs/LATENCY.md
   - Metrics: https://github.com/sealbro/go-discord-caller/blob/main/docs/METRICS.md
-  - Integration tests: https://github.com/sealbro/go-discord-caller/blob/main/docs/INTEGRATION_TESTS_SETUP.md
 
 extra:
   google_site_verification: "LC0mRZXVM3g4S6fw5eF3phmaxlQ0sPlEdB6VtqpcuH4"

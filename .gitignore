@@ -42,3 +42,6 @@ store.yaml
 AGENTS.md
 CLAUDE.md
 .claude/
+
+# MkDocs build output (site_dir: misc/www)
+misc/www/

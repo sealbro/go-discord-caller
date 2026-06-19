@@ -1,0 +1,87 @@
+site_name: go-discord-caller
+site_description: >-
+  Free, open-source, self-hosted Discord shot caller and voice relay bot written
+  in Go. One shot caller speaks and their voice is broadcast live to multiple
+  speaker bots across one or many Discord servers, with mix-minus mixing and DAVE
+  end-to-end encryption.
+site_author: sealbro
+# IMPORTANT: change this to your custom domain once configured (e.g. https://caller.sealway.dev/)
+# It powers canonical URLs, the sitemap.xml, and Open Graph tags — required for good indexing.
+site_url: https://sealbro.github.io/go-discord-caller/
+
+repo_name: sealbro/go-discord-caller
+repo_url: https://github.com/sealbro/go-discord-caller
+copyright: Copyright &copy; sealbro — Apache-2.0
+
+# Public marketing site sources live in misc/website/; build output goes to misc/www/
+docs_dir: misc/website
+site_dir: misc/www
+
+theme:
+  name: material
+  custom_dir: misc/overrides
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+nav:
+  - Home: index.md
+  - Free Shot Caller Bot: free-shot-caller-bot.md
+  - How it works: https://github.com/sealbro/go-discord-caller/blob/main/docs/VOICE_FLOW.md
+  - Audio latency: https://github.com/sealbro/go-discord-caller/blob/main/docs/LATENCY.md
+  - Metrics: https://github.com/sealbro/go-discord-caller/blob/main/docs/METRICS.md
+  - Integration tests: https://github.com/sealbro/go-discord-caller/blob/main/docs/INTEGRATION_TESTS_SETUP.md
+
+extra:
+  keywords: >-
+    discord shot caller bot, discord voice relay bot, discord voice command system,
+    gaming guild voice bot, cross-server voice relay, multi-squad voice coordination,
+    pvp voice comms, guild war voice bot, raid voice relay, tactical voice communication,
+    free shot caller bot, paid shot caller alternative, free discord voice bot, self-hosted discord bot
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/sealbro/go-discord-caller
+    - icon: fontawesome/brands/discord
+      link: https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565762894144

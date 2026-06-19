@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"log"
+	"log/slog"
 	"os"
 	"testing"
 	"time"
@@ -16,6 +17,12 @@ import (
 var h *test.Harness
 
 func TestMain(m *testing.M) {
+	// Silence application slog output (the bots log a line per voice event) so
+	// test output stays readable. Set TEST_LOG=1 to keep logs when debugging.
+	if os.Getenv("TEST_LOG") == "" {
+		slog.SetDefault(slog.New(slog.DiscardHandler))
+	}
+
 	cfg, err := test.LoadConfig()
 	if err != nil {
 		log.Fatalf("integration config: %v", err)

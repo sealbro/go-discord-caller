@@ -27,9 +27,19 @@ func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 // StartChannelMixers runs each per-channel mixer with a sink that distributes
 // produced frames directly to every speaker output channel for the destination.
 // Removing the per-mixer forwarder goroutine cuts one channel hop and one
-// scheduler wake-up per produced frame. destOuts are closed after Run returns
-// so VoiceProvider goroutines shut down cleanly; this goroutine is the sole
-// writer to destOuts after the sink stops being invoked (Run has returned).
+// scheduler wake-up per produced frame.
+//
+// TEMP(teardown-close-race): this goroutine used to close destOuts after Run
+// returned, on the assumption it was their sole writer. That is false in copy
+// mode (router.RouteCopy), where opus.VoiceReceiver.dispatchFanout writes the
+// raw Opus packet straight into these same channels on the UDP receive
+// goroutine — so close(out) raced that send (caught by `go test -race` in the
+// integration suite, and a send-on-closed panic hazard). With two producers,
+// neither may own the close. We now leave the channels for GC: VoiceProvider
+// exits on its own Close() (v.done), which teardown invokes via
+// BuildSpeakerCleanup, so no goroutine leaks. Proper fix: a single teardown
+// step that stops every writer (mixer sink + receiver) before reclaiming the
+// channels. Re-validate with the integration -race suite when revisiting.
 func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer) {
 	drop := gm.Drop(telemetry.DropPathChannelMixer)
 	for _, dest := range dests {
@@ -44,12 +54,7 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 				}
 			}
 		})
-		go func(mx *opus.Mixer, destOuts []chan<- []byte) {
-			mx.Run(ctx)
-			for _, out := range destOuts {
-				close(out)
-			}
-		}(mx, destOuts)
+		go mx.Run(ctx)
 		go opus.NewDrainWatcher(mx, opus.DrainIdleTimeout).Run(ctx)
 	}
 }

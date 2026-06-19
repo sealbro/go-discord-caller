@@ -58,6 +58,49 @@ The diagram above shows the default **one-caller** mode. The system uses **two t
 
 All speaker gateways are pre-connected at startup. When a voice raid is started, the owner bot joins its channel, every enabled speaker joins theirs, and audio is streamed in real time via [disgo](https://github.com/disgoorg/disgo) + [godave / libdave](https://github.com/disgoorg/godave) (Discord's DAVE E2EE audio protocol).
 
+### Caller modes
+
+Who hears who depends on the mode (🟢 solid = can hear, 🔇 red dashed = cannot hear).
+
+```mermaid
+flowchart TB
+    subgraph M1["1️⃣ One caller — /start mode:one"]
+        direction LR
+        O1["🎙️ Owner"] -->|"🟢 hears"| A1["🔊 Speaker 1"]
+        O1 -->|"🟢 hears"| B1["🔊 Speaker 2"]
+        A1 -.->|"🔇 can't"| O1
+        B1 -.->|"🔇 can't"| O1
+        A1 -.->|"🔇 can't"| B1
+    end
+
+    subgraph M2["2️⃣ Many callers — /start mode:many"]
+        direction LR
+        O2["🎙️ Owner"] <-->|"🟢"| A2["🔊 Speaker 1"]
+        O2 <-->|"🟢"| B2["🔊 Speaker 2"]
+        A2 <-->|"🟢"| B2
+    end
+
+    subgraph M3["3️⃣ One ↔ many / star — /start mode:one-many"]
+        direction LR
+        O3["🎙️ Owner ⭐ hub"] -->|"🟢 owner → all"| A3["🔊 Speaker 1"]
+        O3 -->|"🟢 owner → all"| B3["🔊 Speaker 2"]
+        A3 -->|"🟢 → owner"| O3
+        B3 -->|"🟢 → owner"| O3
+        A3 -.->|"🔇 can't"| B3
+        B3 -.->|"🔇 can't"| A3
+    end
+
+    M1 ~~~ M2
+    M2 ~~~ M3
+
+    linkStyle 0,1,5,6,7,8,9,10,11 stroke:#22c55e,stroke-width:3px
+    linkStyle 2,3,4,12,13 stroke:#ef4444,stroke-width:1.5px,stroke-dasharray:4
+```
+
+- **1️⃣ One caller** — the owner talks, speakers only listen and can't talk back.
+- **2️⃣ Many callers** — full conference: everyone hears everyone (mix-minus echo prevention).
+- **3️⃣ One ↔ many / star** — the owner is the hub: it hears all speakers, but each speaker only hears the owner, not each other.
+
 ## Features
 
 - **Multi-speaker relay** – unlimited speaker bots, each bound to a different voice channel

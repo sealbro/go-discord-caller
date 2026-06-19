@@ -110,17 +110,17 @@ func (m *Service) SetSessionIdleTimeout(d time.Duration) {
 }
 
 // startSessionIdleWatcher launches a goroutine that cancels the session when
-// every channel mixer has been paused continuously for m.sessionIdleTimeout.
-// Safe to call for any session — it no-ops when the timeout is disabled, the
-// session has no channel mixers (direct-passthrough mode), or no mixer
-// satisfies opus.PauseProbe.
+// every mixer has been quiet (paused, or no audio for DrainIdleTimeout)
+// continuously for m.sessionIdleTimeout. Safe to call for any session — it
+// no-ops when the timeout is disabled, the session has no channel mixers
+// (direct-passthrough mode), or no mixer satisfies opus.IdleProbe.
 func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc context.CancelFunc, session *guild.Session) {
 	if m.sessionIdleTimeout <= 0 || len(session.ChannelMixers) == 0 {
 		return
 	}
-	probes := make([]opus.PauseProbe, 0, len(session.ChannelMixers))
+	probes := make([]opus.IdleProbe, 0, len(session.ChannelMixers))
 	for _, mx := range session.ChannelMixers {
-		if p, ok := mx.(opus.PauseProbe); ok {
+		if p, ok := mx.(opus.IdleProbe); ok {
 			probes = append(probes, p)
 		}
 	}

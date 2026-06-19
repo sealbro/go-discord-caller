@@ -163,6 +163,18 @@ type VoiceReceiver struct {
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
 
+	// cacheMu guards decoders + the same-user cache fields below.
+	//
+	// TEMP(disgo-cleanup-goroutine): ReceiveOpusFrame → dispatchFanout is
+	// single-producer (disgo serialises it per receiver), but disgo also invokes
+	// CleanupUser from the voice GATEWAY goroutine (voice/conn.go handleMessage),
+	// not the UDP receive goroutine — so the "single-producer, no sync" invariant
+	// these fields were designed around is violated and the maps/fields race
+	// (caught by `go test -race` in the integration suite). This mutex is a local
+	// workaround; remove it if/when disgo routes CleanupUser onto the receive
+	// goroutine. Held only around map/cache access — never across CGO decode.
+	cacheMu sync.Mutex
+
 	// Per-user decoder cache + shared scratch buffer for fanout-mode dispatch.
 	// Each speaker gets their OWN hraban.Decoder so its internal state (SILK
 	// predictor, FEC concealment buffer, range coder context) is consistent
@@ -170,8 +182,8 @@ type VoiceReceiver struct {
 	// ping-pong between every speaker on each packet, corrupting the decoded
 	// PCM for both — the audible "robo voice" symptom when ≥2 users speak in
 	// the same channel. The scratch buffer is shared because dispatchFanout
-	// copies out of it before the next decode call. Single-producer (disgo
-	// serialises ReceiveOpusFrame per receiver) so no synchronisation needed.
+	// copies out of it before the next decode call; it is only touched on the
+	// receive goroutine, so it stays outside cacheMu.
 	decoders map[snowflake.ID]*hraban.Decoder
 	scratch  []int16
 
@@ -179,7 +191,7 @@ type VoiceReceiver struct {
 	// from the same speaker; caching the (state, userID) → SourceBuffer list
 	// skips a map lookup on every Opus packet. Invalidated automatically
 	// whenever Install swaps in a new state pointer or the userID changes.
-	// Single-producer: ReceiveOpusFrame is serialised per receiver.
+	// Guarded by cacheMu (see above).
 	cachedState   *fanoutDispatch
 	cachedUserID  snowflake.ID
 	cachedTargets []*SourceBuffer
@@ -234,16 +246,17 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	return nil
 }
 
-// dispatchFanout decodes once and multicasts the packet to all configured
-// targets. Allocates exactly one shared pooled Opus buffer (referenced by all
-// frame and opus targets) and one PCM buffer per frame target.
-// receivedAt is the timestamp captured at the top of ReceiveOpusFrame before any
-// filtering or decode work — used as Frame.CreatedAt so gdc.mixer.pipeline.latency
-// measures the full Discord-receive → mixer-output span.
-// userID identifies the speaker so per-user SourceBuffer entries can be
-// looked up via fanoutDispatch.installTargetsForUser.
-func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.ID, opusBytes []byte, receivedAt time.Time) {
-	var sourceTargets []*SourceBuffer
+// targetsAndDecoder resolves the per-user SourceBuffer targets and decoder for
+// userID, refreshing the same-user cache and lazily allocating the decoder. All
+// access to the cache fields and the decoders map happens under cacheMu so it
+// cannot race with CleanupUser (which runs on the gateway goroutine). The
+// returned dec pointer stays valid after unlock — a concurrent CleanupUser
+// delete only drops the map entry; the decoder is GC-kept while referenced —
+// so the caller decodes unlocked.
+func (v *VoiceReceiver) targetsAndDecoder(state *fanoutDispatch, userID snowflake.ID) (sourceTargets []*SourceBuffer, dec *hraban.Decoder) {
+	v.cacheMu.Lock()
+	defer v.cacheMu.Unlock()
+
 	if v.cachedState == state && v.cachedUserID == userID {
 		sourceTargets = v.cachedTargets
 	} else {
@@ -254,25 +267,39 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 	}
 	// Lazy-init the per-user decoder on the first frame-target dispatch for
 	// this speaker. A receiver with only OpusTargets never allocates one.
-	var dec *hraban.Decoder
-	if len(sourceTargets) > 0 {
-		if v.decoders == nil {
-			v.decoders = make(map[snowflake.ID]*hraban.Decoder)
+	if len(sourceTargets) == 0 {
+		return sourceTargets, nil
+	}
+	if v.decoders == nil {
+		v.decoders = make(map[snowflake.ID]*hraban.Decoder)
+	}
+	if dec = v.decoders[userID]; dec == nil {
+		d, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
+		if err != nil {
+			slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
+			return sourceTargets, nil
 		}
-		dec = v.decoders[userID]
-		if dec == nil {
-			d, err := hraban.NewDecoder(MixerSampleRate, MixerChannels)
-			if err != nil {
-				slog.Error("voice receiver: failed to init decoder", slog.Any("err", err))
-				return
-			}
-			dec = d
-			v.decoders[userID] = dec
-			if v.scratch == nil {
-				v.scratch = make([]int16, MixerPCMBuf)
-			}
+		dec = d
+		v.decoders[userID] = dec
+		if v.scratch == nil {
+			v.scratch = make([]int16, MixerPCMBuf)
 		}
 	}
+	return sourceTargets, dec
+}
+
+// dispatchFanout decodes once and multicasts the packet to all configured
+// targets. Allocates exactly one shared pooled Opus buffer (referenced by all
+// frame and opus targets) and one PCM buffer per frame target.
+// receivedAt is the timestamp captured at the top of ReceiveOpusFrame before any
+// filtering or decode work — used as Frame.CreatedAt so gdc.mixer.pipeline.latency
+// measures the full Discord-receive → mixer-output span.
+// userID identifies the speaker so per-user SourceBuffer entries can be
+// looked up via fanoutDispatch.installTargetsForUser.
+func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.ID, opusBytes []byte, receivedAt time.Time) {
+	// Resolve targets + decoder under cacheMu (see cacheMu doc), then release the
+	// lock before the decode/send work below — CGO decode must not run locked.
+	sourceTargets, dec := v.targetsAndDecoder(state, userID)
 
 	// Each OpusTarget (VoiceProvider) independently returns its buffer via
 	// PutEncodedFrame after the UDP send completes. Sharing one buffer across
@@ -326,8 +353,14 @@ func (v *VoiceReceiver) recordReceiveLatency(start time.Time) {
 	v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
 }
 
+// CleanupUser drops the per-user decoder and invalidates the same-user cache.
+// disgo calls this from the voice gateway goroutine (not the UDP receive
+// goroutine), so it must take cacheMu to avoid racing dispatchFanout/
+// targetsAndDecoder. See the cacheMu doc.
 func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 	slog.Debug("cleanup user", slog.Any("userID", userID))
+	v.cacheMu.Lock()
+	defer v.cacheMu.Unlock()
 	if v.cachedUserID == userID {
 		v.cachedState = nil
 		v.cachedUserID = 0

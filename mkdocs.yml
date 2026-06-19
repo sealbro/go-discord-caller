@@ -54,6 +54,9 @@ markdown_extensions:
   - attr_list
   - md_in_html
   - tables
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
   - toc:
       permalink: true
   - pymdownx.highlight:
@@ -75,6 +78,7 @@ nav:
   - Integration tests: https://github.com/sealbro/go-discord-caller/blob/main/docs/INTEGRATION_TESTS_SETUP.md
 
 extra:
+  google_site_verification: "LC0mRZXVM3g4S6fw5eF3phmaxlQ0sPlEdB6VtqpcuH4"
   keywords: >-
     discord shot caller bot, discord voice relay bot, discord voice command system,
     gaming guild voice bot, cross-server voice relay, multi-squad voice coordination,

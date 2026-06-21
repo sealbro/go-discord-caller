@@ -22,14 +22,14 @@ Most Discord shot-caller bots are paid, hosted services — a "speak once, reach
 
 | | go-discord-caller | Typical paid shot-caller service |
 |---|---|---|
-| **Price** | Free & open source (Apache-2.0) | Monthly subscription (tiered) |
-| **Servers** | Unlimited (inter-guild relay) | Usually capped by plan |
-| **Speaker channels / parties** | Unlimited (one speaker bot per channel) | Usually capped by plan |
-| **Hosting** | Self-hosted — you own the data | Managed SaaS |
-| **Caller modes** | One-caller, hub-and-spoke, full conference (mix-minus) | Typically one-way broadcast |
-| **Encryption** | DAVE end-to-end encrypted voice | Varies / often unstated |
-| **Localization** | 7 languages | Often English only |
-| **Source code** | Open on GitHub | Closed |
+| **Price** | ✅ Free & open source (Apache-2.0) | 💸 Monthly subscription (tiered) |
+| **Servers** | ✅ Unlimited (inter-guild relay) | ⚠️ Usually capped by plan |
+| **Speaker channels / parties** | ✅ Unlimited (one speaker bot per channel) | ⚠️ Usually capped by plan |
+| **Hosting** | ✅ Self-hosted — you own the data | ☁️ Managed SaaS |
+| **Caller modes** | ✅ One-caller, hub-and-spoke, full conference (mix-minus) | ➖ Typically one-way broadcast |
+| **Encryption** | ✅ DAVE end-to-end encrypted voice | ❓ Varies / often unstated |
+| **Localization** | ✅ 7 languages | ❌ Often English only |
+| **Source code** | ✅ Open on GitHub | 🔒 Closed |
 
 > Capabilities of paid services vary by provider and plan; check each vendor for current details.
 

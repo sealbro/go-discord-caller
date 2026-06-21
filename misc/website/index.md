@@ -11,15 +11,14 @@ description: >-
 
 **go-discord-caller** captures your **shot caller's** voice and **broadcasts it live to multiple speaker bots — across one or many Discord servers at once**. It supports single-caller broadcast, hub-and-spoke, and full multi-channel conference modes with mix-minus audio mixing and Discord's DAVE end-to-end encryption.
 
-It is **100% free and open source** — you self-host it with your own bot tokens and own your data. No subscriptions, no per-server caps, no party limits.
-
 [:simple-discord: Try the hosted bot (demo)](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565762894144){ .md-button .md-button--primary }
 [:material-github: View on GitHub](https://github.com/sealbro/go-discord-caller){ .md-button }
-[Free vs paid shot-caller bots →](free-shot-caller-bot.md){ .md-button }
 
 *The hosted demo is for evaluation and has a limited number of speakers. Self-host for unlimited speakers and servers.*
 
 ## Why use it
+
+[Free vs paid shot-caller bots →](free-shot-caller-bot.md){ .md-button }
 
 - **Free & open source (Apache-2.0)** — no monthly fee, no trial wall.
 - **Unlimited servers & speakers** — inter-guild relay across any number of Discord servers; one speaker bot per voice channel, as many as you want.

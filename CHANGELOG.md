@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-06-21
+
+### Changed
+- **Dependency refresh**: updated Go modules to current versions.
+
+### Fixed
+- **Voice processing data races**: concurrent access to the member cache during audio capture is now mutex-guarded, eliminating intermittent races that could surface under the race detector and during fast caller churn.
+- **Session idle timeout reliability**: the idle watcher now uses a dedicated idle probe to detect silence, so forgotten raids auto-stop dependably instead of occasionally lingering.
+
 ## [0.9.0] - 2026-06-16
 
 ### Added

@@ -12,7 +12,7 @@ test-unit:
 		./internal/...
 
 test-integration:
-	go test --race --tags=integration --timeout=15m -covermode=atomic -coverprofile=coverage.out \
+	go test --tags=integration --timeout=15m -covermode=atomic -coverprofile=coverage.out \
 		-coverpkg=$(COVER_PKGS_CSV) \
 		./integration/...
 

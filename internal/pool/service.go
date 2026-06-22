@@ -28,29 +28,38 @@ type PoolService interface {
 
 // Service manages the lifecycle of the pool of speaker bot gateways.
 // poolClients maps bot user ID → client for speaker bots only.
-// extraBots holds bots (e.g. the owner bot) that are tracked for the info
-// metric but not managed by the pool lifecycle.
+// extraBots holds bots (e.g. the owner bot) that are tracked for the info and
+// gateway-latency metrics but not managed by the pool lifecycle.
 type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client
-	extraBots   map[snowflake.ID]string // id → username
+	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
 	metrics     *telemetry.PoolMetrics
+}
+
+// extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
+// by the pool (e.g. the owner bot). client may be nil (name-only registration).
+type extraBot struct {
+	name   string
+	client *bot.Client
 }
 
 // NewService creates a new speaker Service.
 func NewService(metrics *telemetry.PoolMetrics) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
-		extraBots:   make(map[snowflake.ID]string),
+		extraBots:   make(map[snowflake.ID]extraBot),
 		metrics:     metrics,
 	}
 }
 
-// RegisterBot adds a bot to the info metric that is not part of the speaker pool
-// (e.g. the owner bot). Safe to call concurrently.
-func (s *Service) RegisterBot(id snowflake.ID, name string) {
+// RegisterBot adds a bot to the info and gateway-latency metrics that is not part
+// of the speaker pool (e.g. the owner bot). Pass the bot's client so its gateway
+// heartbeat RTT is reported alongside the pool bots; client may be nil to record
+// the name only. Safe to call concurrently.
+func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) {
 	s.mu.Lock()
-	s.extraBots[id] = name
+	s.extraBots[id] = extraBot{name: name, client: client}
 	s.mu.Unlock()
 }
 
@@ -160,8 +169,14 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
 		}
 	}
-	for id, name := range s.extraBots {
-		s.metrics.ObserveBotInfo(o, id.String(), name)
+	for id, eb := range s.extraBots {
+		s.metrics.ObserveBotInfo(o, id.String(), eb.name)
+		// Report the owner bot's gateway RTT too, so it appears in the latency
+		// panels alongside the pool bots (it is not part of poolClients).
+		if isConnected(eb.client) {
+			latMs := float64(eb.client.Gateway.Latency().Milliseconds())
+			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+		}
 	}
 	s.mu.RUnlock()
 	s.metrics.ObservePoolBots(o, total, connected)

@@ -16,7 +16,6 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
@@ -103,31 +102,59 @@ func (m *Service) clearActiveRouter(guildID snowflake.ID) {
 }
 
 // SetSessionIdleTimeout configures the duration after which a session whose
-// every channel mixer has been continuously paused is auto-stopped.
+// voice channels have all been empty of non-bot users is auto-stopped.
 // Pass 0 to disable. Call once at startup, before any session is started.
 func (m *Service) SetSessionIdleTimeout(d time.Duration) {
 	m.sessionIdleTimeout = d
 }
 
-// startSessionIdleWatcher launches a goroutine that cancels the session when
-// every mixer has been quiet (paused, or no audio for DrainIdleTimeout)
-// continuously for m.sessionIdleTimeout. Safe to call for any session — it
-// no-ops when the timeout is disabled, the session has no channel mixers
-// (direct-passthrough mode), or no mixer satisfies opus.IdleProbe.
+// startSessionIdleWatcher launches a goroutine that stops the session once every
+// voice channel involved in it has been empty of non-bot users continuously for
+// m.sessionIdleTimeout. Safe to call for any session — it no-ops when the
+// timeout is disabled or the session has no bound channels to watch.
 func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc context.CancelFunc, session *guild.Session) {
-	if m.sessionIdleTimeout <= 0 || len(session.ChannelMixers) == 0 {
+	if m.sessionIdleTimeout <= 0 {
 		return
 	}
-	probes := make([]opus.IdleProbe, 0, len(session.ChannelMixers))
-	for _, mx := range session.ChannelMixers {
-		if p, ok := mx.(opus.IdleProbe); ok {
-			probes = append(probes, p)
+	channels := m.sessionChannels(session)
+	if len(channels) == 0 {
+		return
+	}
+	w := &sessionPresenceWatcher{
+		guildID:     session.GuildID,
+		channels:    channels,
+		probe:       &cacheVoiceProbe{svc: m, guildID: session.GuildID},
+		cancelFunc:  cancelFunc,
+		idleTimeout: m.sessionIdleTimeout,
+	}
+	go w.Run(ctx)
+}
+
+// sessionChannels returns the deduplicated set of voice channels to watch for a
+// session: the owner bot's bound channel plus every session speaker's bound
+// channel. These are the channels users connect to; if all of them are empty,
+// nobody is using the session.
+func (m *Service) sessionChannels(session *guild.Session) []snowflake.ID {
+	guildID := session.GuildID
+	seen := make(map[snowflake.ID]struct{})
+	var channels []snowflake.ID
+	add := func(id snowflake.ID, ok bool) {
+		if !ok || id == 0 {
+			return
 		}
+		if _, dup := seen[id]; dup {
+			return
+		}
+		seen[id] = struct{}{}
+		channels = append(channels, id)
 	}
-	if len(probes) == 0 {
-		return
+	ownerCh, ok := m.store.GetBoundChannel(guildID, m.ownerBotID)
+	add(ownerCh, ok)
+	for _, sp := range session.Speakers {
+		chID, ok := m.store.GetBoundChannel(guildID, sp.ID)
+		add(chID, ok)
 	}
-	go opus.NewSessionIdleWatcher(probes, cancelFunc, m.sessionIdleTimeout).Run(ctx)
+	return channels
 }
 
 // StartMetrics registers OTel observable metric callbacks.

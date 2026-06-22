@@ -32,8 +32,8 @@ type Config struct {
 	OtelEndpoint string
 	// LogLevel is the minimum log level (default: info); controlled by LOG_LEVEL env var
 	LogLevel slog.Level
-	// SessionIdleTimeout is how long every channel mixer in a voice raid may stay
-	// continuously paused (no audible activity) before the session auto-stops.
+	// SessionIdleTimeout is how long every voice channel in a raid may stay empty
+	// of non-bot users (nobody connected) before the session auto-stops.
 	// Default: 10m. Set SESSION_IDLE_TIMEOUT=0 to disable.
 	SessionIdleTimeout time.Duration
 	// Test holds optional test/debug audio overrides

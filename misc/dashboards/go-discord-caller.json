@@ -2105,9 +2105,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (bot_id) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "expr": "max by (user_id) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) * on(user_id) group_left(bot_name) label_replace(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}, \"user_id\", \"$1\", \"bot_id\", \"(.+)\")",
                         "instant": false,
-                        "legendFormat": "{{bot_id}}",
+                        "legendFormat": "{{bot_name}}",
                         "range": true
                       },
                       "version": "v0"

@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/disgoorg/disgo"
@@ -200,17 +202,13 @@ func (b *Bot) Run(ctx context.Context) error {
 	}()
 
 	// Wait for the Ready event to deliver guild IDs, then sync slash commands.
-	// Falls back to global sync on timeout.
 	var guildIDs []snowflake.ID
 	select {
 	case guildIDs = <-b.guildReadyCh:
 	case <-time.After(10 * time.Second):
-		slog.WarnContext(ctx, "timed out waiting for Ready event, syncing commands globally")
+		slog.WarnContext(ctx, "timed out waiting for Ready event, skipping command sync")
 	}
-	slog.InfoContext(ctx, "discovered guilds for command sync", slog.Int("count", len(guildIDs)))
-	if err := handler.SyncCommands(b.client, BuildCommands(b.bundle), guildIDs); err != nil {
-		slog.WarnContext(ctx, "failed to sync slash commands", slog.Any("err", err))
-	}
+	b.syncCommands(ctx, guildIDs)
 
 	if selfUser, ok := b.client.Caches.SelfUser(); ok {
 		slog.InfoContext(ctx, "owner bot invite URL",
@@ -226,6 +224,52 @@ func (b *Bot) Run(ctx context.Context) error {
 	slog.Info("shutting down...")
 
 	return nil
+}
+
+// syncCommands refreshes the owner bot's slash commands: any command edited in
+// BuildCommands is overwritten and any removed one is deleted, because each
+// per-guild sync fully replaces that guild's command set.
+//
+// Commands are registered per guild (instant propagation, unlike the ~1h global
+// cache). Because we never register globally, the global set must stay empty:
+// a global command left over from an earlier build shows up as a ghost duplicate
+// that survives guild re-syncs and only clears with a manual delete + restart.
+// Overwriting the global set with an empty list on every boot prevents that.
+func (b *Bot) syncCommands(ctx context.Context, guildIDs []snowflake.ID) {
+	commands := BuildCommands(b.bundle)
+
+	names := make([]string, 0, len(commands))
+	for _, c := range commands {
+		names = append(names, c.CommandName())
+	}
+	slices.Sort(names)
+
+	appID := b.client.ApplicationID
+
+	if _, err := b.client.Rest.SetGlobalCommands(appID, nil); err != nil {
+		slog.WarnContext(ctx, "failed to clear global commands", slog.Any("err", err))
+	}
+
+	if len(guildIDs) == 0 {
+		slog.WarnContext(ctx, "no guilds discovered, skipping guild command sync")
+		return
+	}
+
+	slog.InfoContext(ctx, "syncing slash commands", slog.Int("guilds", len(guildIDs)))
+	for _, gid := range guildIDs {
+		if _, err := b.client.Rest.SetGuildCommands(appID, gid, commands); err != nil {
+			slog.ErrorContext(ctx, "failed to sync guild commands",
+				slog.String("guild_id", gid.String()),
+				slog.Any("err", err),
+			)
+			continue
+		}
+		slog.InfoContext(ctx, "synced guild commands",
+			slog.String("guild_id", gid.String()),
+			slog.Int("count", len(commands)),
+			slog.String("commands", strings.Join(names, ", ")),
+		)
+	}
 }
 
 // NewOwnerClient builds a disgo client for the owner (manager) bot.

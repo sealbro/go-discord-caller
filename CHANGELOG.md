@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-08-01
+
+### Changed
+- **Presence-based idle detection**: a voice raid now auto-stops based on whether its channels still have real (non-bot) users connected, instead of inferring silence from mixer audio activity — so forgotten raids shut down reliably even when audio was still being relayed to an empty room. The `SESSION_IDLE_TIMEOUT` setting and default (`10m`) are unchanged.
+- **Owner bot on the latency dashboards**: the owner/caller bot's gateway round-trip time is now reported alongside the speaker pool, and the online-bots panel labels bots by name rather than raw ID.
+- **Dependency refresh**: updated Go modules (Opus binding, gRPC) to current versions.
+
 ## [0.9.1] - 2026-06-21
 
 ### Changed

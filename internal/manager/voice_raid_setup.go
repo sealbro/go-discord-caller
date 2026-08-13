@@ -70,6 +70,14 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speake
 			conn, err := gv.Join(ctx, guildID)
 			if err != nil {
 				slog.WarnContext(ctx, "speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
+				// Drop the half-open conn. Join failures are usually Open
+				// timeouts, and disgo leaves the conn registered in its voice
+				// manager: the handshake may still complete afterwards, leaving
+				// the bot parked in the channel with no provider/receiver and a
+				// stale token buffered in the conn's openedChan. CreateConn
+				// hands that same conn to the next session, where Open then
+				// returns instantly off the stale token without being connected.
+				gv.Leave(ctx, guildID)
 				return
 			}
 			if withCapture {
@@ -135,6 +143,9 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 	if err != nil {
 		return nil, nil, err
 	}
+	// Repair the pipeline if disgo silently re-identifies this voice gateway;
+	// that swaps the UDP socket out from under the sender/receiver.
+	m.watchVoiceReady(guildID, speakerID, conn)
 
 	return handle, cleanup, nil
 }

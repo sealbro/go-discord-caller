@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-08-13
+
+### Fixed
+- **Speakers going silent part-way through a session**: when a bot's voice connection quietly re-established itself in the background, the bot stayed sitting in its channel but stopped both capturing and playing audio, with nothing in the logs to show for it — the only way back was to move the bot out of the channel and in again. Audio is now restored automatically when this happens, and because the bot never leaves the channel there is no join/leave sound: listeners hear a short gap instead of permanent silence.
+- **Leftover connections after a failed join**: if a speaker timed out joining its channel, the half-finished connection was left behind and could be picked up by the next raid, which then started in a broken state. Failed joins are now cleaned up properly.
+
+### Changed
+- **Voice diagnostics reach the logs**: warnings from the voice layer, including connection drops and their close codes, were previously discarded outright. They are now exported at warning level, so audio outages leave a trace that can be investigated.
+
 ## [0.9.2] - 2026-08-01
 
 ### Changed

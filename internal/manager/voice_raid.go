@@ -73,6 +73,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerCleanup = cleanup
 			ownerHandle = handle
 			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, handle, allowUser.Check))
+			m.watchVoiceReady(guestGuildID, m.ownerBotID, conn)
 		}
 	}
 	guestCleanupOwner := func() {
@@ -231,6 +232,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
 	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Check))
+	m.watchVoiceReady(guildID, m.ownerBotID, conn)
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	span.SetAttributes(

@@ -161,6 +161,11 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 			receiver = opus.NewVoiceReceiver(botID, allowUser, gm.Receiver(), handle)
 		}
 		conn.SetOpusFrameReceiver(receiver)
+
+		// Re-arm the re-identify watcher. ReconnectBotChannel reaches this with a
+		// brand-new conn that carries no handler yet; reapplyAfterVoiceReady
+		// reaches it with the same conn, where this is a harmless overwrite.
+		m.watchVoiceReady(guildID, botID, conn)
 	}
 }
 

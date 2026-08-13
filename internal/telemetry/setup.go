@@ -41,6 +41,25 @@ func (h levelHandler) WithGroup(name string) slog.Handler {
 
 const ServiceName = "go-discord-caller"
 
+// VoiceLogger returns the logger handed to disgo's voice manager.
+//
+// This used to be slog.DiscardHandler, which silently dropped every diagnostic
+// from the voice layer — gateway closes, reconnect attempts, UDP open failures,
+// encryption-mode errors. Voice connections break far more often than the
+// application layer can observe (a re-identify leaves no application-visible
+// trace at all; see Service.watchVoiceReady), so those lines are the only
+// direct evidence when audio goes silent.
+//
+// Gated at Warn: disgo's voice Debug output is per-event and includes a line
+// for every VoiceStateUpdate, which would swamp the OTLP log pipeline. Warn and
+// above is exactly the set worth exporting.
+func VoiceLogger() *slog.Logger {
+	return slog.New(levelHandler{
+		level:   slog.LevelWarn,
+		Handler: slog.Default().Handler(),
+	}).With(slog.String("component", "voice"))
+}
+
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.
 // All three signals are exported via OTLP gRPC to a single endpoint.
 // Returns a shutdown function that flushes and closes all providers.

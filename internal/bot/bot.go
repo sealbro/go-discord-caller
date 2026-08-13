@@ -280,7 +280,7 @@ func NewOwnerClient(token string, opts ...bot.ConfigOpt) (*bot.Client, error) {
 		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			voice.WithLogger(slog.New(slog.DiscardHandler)),
+			voice.WithLogger(telemetry.VoiceLogger()),
 		),
 	}
 	return disgo.New(token, append(base, opts...)...)

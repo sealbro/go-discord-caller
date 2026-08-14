@@ -167,9 +167,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	cmdHandlers := NewCommandHandlers(managerSvc, &metrics.Bot, bundle)
 	cmdHandlers.Register(r)
 
-	client.AddEventListeners(EventListeners(managerSvc, &metrics.Bot)...)
-
-	return &Bot{
+	b := &Bot{
 		client:        client,
 		manager:       managerSvc,
 		store:         st,
@@ -177,7 +175,13 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 		speakerTokens: cfg.SpeakerTokens,
 		guildReadyCh:  guildReadyCh,
 		bundle:        bundle,
-	}, nil
+	}
+
+	// Built before the listeners are attached so onGuildJoin can call back into
+	// b.syncGuildCommands. No network I/O happens here — the gateway opens in Run.
+	client.AddEventListeners(EventListeners(managerSvc, &metrics.Bot, b.syncGuildCommands)...)
+
+	return b, nil
 }
 
 // Run connects the speaker pool, opens the owner gateway, registers slash commands,
@@ -238,12 +242,6 @@ func (b *Bot) Run(ctx context.Context) error {
 func (b *Bot) syncCommands(ctx context.Context, guildIDs []snowflake.ID) {
 	commands := BuildCommands(b.bundle)
 
-	names := make([]string, 0, len(commands))
-	for _, c := range commands {
-		names = append(names, c.CommandName())
-	}
-	slices.Sort(names)
-
 	appID := b.client.ApplicationID
 
 	if _, err := b.client.Rest.SetGlobalCommands(appID, nil); err != nil {
@@ -257,19 +255,42 @@ func (b *Bot) syncCommands(ctx context.Context, guildIDs []snowflake.ID) {
 
 	slog.InfoContext(ctx, "syncing slash commands", slog.Int("guilds", len(guildIDs)))
 	for _, gid := range guildIDs {
-		if _, err := b.client.Rest.SetGuildCommands(appID, gid, commands); err != nil {
-			slog.ErrorContext(ctx, "failed to sync guild commands",
-				slog.String("guild_id", gid.String()),
-				slog.Any("err", err),
-			)
-			continue
-		}
-		slog.InfoContext(ctx, "synced guild commands",
-			slog.String("guild_id", gid.String()),
-			slog.Int("count", len(commands)),
-			slog.String("commands", strings.Join(names, ", ")),
-		)
+		b.setGuildCommands(ctx, gid, commands)
 	}
+}
+
+// syncGuildCommands registers the full command set for a single guild.
+//
+// syncCommands only covers the guilds present in the Ready payload at boot, and
+// because nothing is ever registered globally there is no fallback: a guild the
+// bot joins while running would otherwise show no commands at all until the next
+// restart. Wired into onGuildJoin so a fresh invite is usable immediately.
+func (b *Bot) syncGuildCommands(ctx context.Context, guildID snowflake.ID) {
+	b.setGuildCommands(ctx, guildID, BuildCommands(b.bundle))
+}
+
+// setGuildCommands replaces one guild's command set. Guild-scoped registration
+// propagates instantly, unlike the ~1h global command cache.
+func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, commands []discord.ApplicationCommandCreate) {
+	if _, err := b.client.Rest.SetGuildCommands(b.client.ApplicationID, guildID, commands); err != nil {
+		slog.ErrorContext(ctx, "failed to sync guild commands",
+			slog.String("guild_id", guildID.String()),
+			slog.Any("err", err),
+		)
+		return
+	}
+
+	names := make([]string, 0, len(commands))
+	for _, c := range commands {
+		names = append(names, c.CommandName())
+	}
+	slices.Sort(names)
+
+	slog.InfoContext(ctx, "synced guild commands",
+		slog.String("guild_id", guildID.String()),
+		slog.Int("count", len(commands)),
+		slog.String("commands", strings.Join(names, ", ")),
+	)
 }
 
 // NewOwnerClient builds a disgo client for the owner (manager) bot.

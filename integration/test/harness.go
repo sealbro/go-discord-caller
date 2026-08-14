@@ -116,7 +116,9 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	if len(h.activeListeners) > 0 {
 		h.Owner.RemoveEventListeners(h.activeListeners...)
 	}
-	h.activeListeners = internalbot.EventListeners(svc, &metrics.Bot)
+	// nil syncer: the harness binds a pre-existing test guild rather than
+	// inviting the bot, so there is no new guild whose commands need registering.
+	h.activeListeners = internalbot.EventListeners(svc, &metrics.Bot, nil)
 	h.Owner.AddEventListeners(h.activeListeners...)
 
 	return svc, st

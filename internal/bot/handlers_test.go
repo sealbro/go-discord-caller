@@ -191,24 +191,70 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Fatalf("timeout waiting for %s", msg)
 }
 
-func TestOnGuildJoin_SeedsGuild(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{}
-	h := onGuildJoin(f)
-
-	guildID := snowflake.ID(42)
+func fireGuildJoin(h func(*events.GuildJoin), guildID snowflake.ID) {
 	h(&events.GuildJoin{
 		GenericGuild: &events.GenericGuild{
 			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
 			GuildID:      guildID,
 		},
 	})
+}
+
+func TestOnGuildJoin_SeedsGuild(t *testing.T) {
+	t.Parallel()
+	f := &fakeManager{}
+	h := onGuildJoin(f, nil)
+
+	guildID := snowflake.ID(42)
+	fireGuildJoin(h, guildID)
 
 	waitFor(t, func() bool { return len(f.snapshotCalls().seedCalls) == 1 }, "SeedExistingSpeakers")
 	got := f.snapshotCalls().seedCalls[0]
 	if len(got) != 1 || got[0] != guildID {
 		t.Errorf("SeedExistingSpeakers args: want [%s] got %v", guildID, got)
 	}
+}
+
+// A guild joined while the bot is running is never covered by the boot-time
+// sync, and nothing is registered globally — without this call it would show no
+// slash commands at all until the next restart (issue #46).
+func TestOnGuildJoin_SyncsCommands(t *testing.T) {
+	t.Parallel()
+	f := &fakeManager{}
+
+	var mu sync.Mutex
+	var synced []snowflake.ID
+	h := onGuildJoin(f, func(_ context.Context, gid snowflake.ID) {
+		mu.Lock()
+		synced = append(synced, gid)
+		mu.Unlock()
+	})
+
+	guildID := snowflake.ID(42)
+	fireGuildJoin(h, guildID)
+
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(synced) == 1
+	}, "syncGuildCommands")
+
+	mu.Lock()
+	defer mu.Unlock()
+	if synced[0] != guildID {
+		t.Errorf("synced guild: want %s got %s", guildID, synced[0])
+	}
+}
+
+// The E2E harness passes a nil syncer; seeding must still run.
+func TestOnGuildJoin_NilSyncerStillSeeds(t *testing.T) {
+	t.Parallel()
+	f := &fakeManager{}
+	h := onGuildJoin(f, nil)
+
+	fireGuildJoin(h, snowflake.ID(7))
+
+	waitFor(t, func() bool { return len(f.snapshotCalls().seedCalls) == 1 }, "SeedExistingSpeakers")
 }
 
 func TestOnGuildMemberAdd_BotOnly(t *testing.T) {

@@ -10,13 +10,19 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
+// GuildCommandSyncer registers the owner bot's slash commands for one guild.
+// Implemented by Bot.syncGuildCommands; may be nil when command registration is
+// out of scope for the caller (the E2E harness drives handlers directly and
+// never invites the bot to a new guild).
+type GuildCommandSyncer func(ctx context.Context, guildID snowflake.ID)
+
 // EventListeners returns all event listeners to register with the owner bot client.
 // Called by the production bot and by the E2E harness so both use identical handler logic.
-func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics) []bot.EventListener {
+func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics, syncGuild GuildCommandSyncer) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),
-		bot.NewListenerFunc(onGuildJoin(managerSvc)),
+		bot.NewListenerFunc(onGuildJoin(managerSvc, syncGuild)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate(managerSvc)),
@@ -68,9 +74,19 @@ func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*eve
 }
 
 // onGuildJoin is called when the owner bot is added to a new guild.
-// It seeds speakers and ensures the guild has a persistent relay code.
-func onGuildJoin(m ManagerService) func(*events.GuildJoin) {
+// It registers the guild's slash commands, seeds speakers, and ensures the guild
+// has a persistent relay code.
+//
+// GuildJoin fires only for genuinely new guilds. GuildAvailable, by contrast,
+// fires for every guild on every gateway reconnect, so syncing there would
+// re-register the whole command set against the REST API on each reconnect.
+func onGuildJoin(m ManagerService, syncGuild GuildCommandSyncer) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
+		if syncGuild != nil {
+			// Commands first: until they are registered the guild sees a bot that
+			// appears to do nothing at all.
+			go syncGuild(context.Background(), e.GuildID)
+		}
 		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
 	}
 }

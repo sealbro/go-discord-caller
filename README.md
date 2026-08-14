@@ -158,8 +158,22 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)                                               |
 | `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
 | `LOG_LEVEL`                   | ❌        | Minimum log level: `debug`, `info`, `warn`, `error` (default: `info`)                                   |
+| `DAVE_IMPL`                   | ❌        | DAVE (E2EE voice) implementation: `libdave` (default) or `dave-go` — see below                          |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.
+
+### DAVE implementation (`DAVE_IMPL`)
+
+Discord voice is end-to-end encrypted with the DAVE protocol, and two implementations of it are supported:
+
+- **`libdave`** (default) — [`disgoorg/godave`](https://github.com/disgoorg/godave), a CGO binding around [Discord's own libdave](https://github.com/discord/libdave). This is what every release so far has shipped, and what the Docker image builds.
+- **`dave-go`** — [`thomas-vilte/dave-go`](https://github.com/thomas-vilte/dave-go), a pure Go implementation on top of an RFC 9420 MLS library.
+
+The switch exists because the two behave differently while the MLS group re-keys, which happens on every voice join and leave. `libdave` drops its crypto state at the start of that window ([godave#5](https://github.com/disgoorg/godave/pull/5), still open), so audio can cut out until the handshake completes — and if the following commit is rejected, a session can stay silent for minutes while the bot still looks connected ([#43](https://github.com/sealbro/go-discord-caller/issues/43)). `dave-go` keeps the previous send ratchet and previous epochs alive across that window instead.
+
+`dave-go` is the less battle-tested of the two — a young single-maintainer project with no third-party security audit — so it is opt-in. Switching does **not** remove the CGO requirement: the mixer still links libopus.
+
+The setting is per process and applies to the owner bot and every speaker; changing it takes effect on restart. The selected implementation is logged at startup (`dave: E2EE voice implementation selected`).
 
 ## Discord app setup
 

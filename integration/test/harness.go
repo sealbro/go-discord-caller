@@ -39,8 +39,11 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	h := &Harness{Cfg: cfg}
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
+	// The owner and the speaker pool follow DAVE_IMPL (via config.Load), while the
+	// harness's own source/listener bots stay on golibdave — so a run with
+	// DAVE_IMPL=dave-go doubles as a cross-implementation interop check.
 	var err error
-	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken,
+	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken, cfg.DaveImpl,
 		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -60,7 +63,7 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build metrics: %w", err)
 	}
-	h.Pool = pool.NewService(&metrics.Pool)
+	h.Pool = pool.NewService(&metrics.Pool, cfg.DaveImpl)
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
 	h.Pool.ConnectPool(poolCtx, cfg.SpeakerTokens)
 	poolCancel()

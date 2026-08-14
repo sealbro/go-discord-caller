@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+	"github.com/sealbro/go-discord-caller/internal/dave"
 )
 
 // TestConfig holds optional test overrides.
@@ -36,6 +37,9 @@ type Config struct {
 	// of non-bot users (nobody connected) before the session auto-stops.
 	// Default: 10m. Set SESSION_IDLE_TIMEOUT=0 to disable.
 	SessionIdleTimeout time.Duration
+	// DaveImpl selects the DAVE E2EE implementation for all voice connections
+	// (DAVE_IMPL: "libdave" — default — or "dave-go").
+	DaveImpl dave.Impl
 	// Test holds optional test/debug audio overrides
 	Test TestConfig
 }
@@ -79,10 +83,27 @@ func Load() (*Config, error) {
 		OtelEndpoint:       os.Getenv("OTEL_ENDPOINT"),
 		LogLevel:           parseLogLevel(os.Getenv("LOG_LEVEL")),
 		SessionIdleTimeout: parseSessionIdleTimeout(os.Getenv("SESSION_IDLE_TIMEOUT")),
+		DaveImpl:           parseDaveImpl(os.Getenv("DAVE_IMPL")),
 		Test: TestConfig{
 			AllowBots: os.Getenv("TEST_ALLOW_BOTS") == "true",
 		},
 	}, nil
+}
+
+// parseDaveImpl parses DAVE_IMPL into a dave.Impl. Empty selects the default
+// (libdave). An unknown value falls back to the default with a warning rather
+// than refusing to start: the process is a voice relay, and a typo in an
+// optional tuning knob should not take it offline.
+func parseDaveImpl(s string) dave.Impl {
+	impl, err := dave.Parse(s)
+	if err != nil {
+		slog.Warn("invalid DAVE_IMPL; using default",
+			slog.String("value", s),
+			slog.String("default", string(dave.Default)),
+			slog.Any("err", err),
+		)
+	}
+	return impl
 }
 
 // parseSessionIdleTimeout parses SESSION_IDLE_TIMEOUT (e.g. "10m", "0s") into a

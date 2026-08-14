@@ -11,8 +11,8 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
-	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/dave"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/metric"
@@ -35,6 +35,7 @@ type Service struct {
 	poolClients map[snowflake.ID]*bot.Client
 	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
 	metrics     *telemetry.PoolMetrics
+	daveImpl    dave.Impl // DAVE implementation every speaker client is built with
 }
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
@@ -44,12 +45,15 @@ type extraBot struct {
 	client *bot.Client
 }
 
-// NewService creates a new speaker Service.
-func NewService(metrics *telemetry.PoolMetrics) *Service {
+// NewService creates a new speaker Service. daveImpl selects the DAVE
+// implementation for every speaker client the pool builds, including the ones
+// the watchdog rebuilds on reconnect.
+func NewService(metrics *telemetry.PoolMetrics, daveImpl dave.Impl) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
 		extraBots:   make(map[snowflake.ID]extraBot),
 		metrics:     metrics,
+		daveImpl:    daveImpl,
 	}
 }
 
@@ -64,13 +68,13 @@ func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) 
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string) (*bot.Client, error) {
+func (s *Service) newPoolClient(token string) (*bot.Client, error) {
 	return disgo.New(token,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			voice.WithDaveSessionCreateFunc(dave.SessionCreateFunc(s.daveImpl)),
 			voice.WithLogger(telemetry.VoiceLogger()),
 		),
 	)
@@ -101,7 +105,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			client, err := newPoolClient(token)
+			client, err := s.newPoolClient(token)
 			if err != nil {
 				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
@@ -209,7 +213,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	s.metrics.ReconnectAttempt(ctx, botUserID)
 
-	newClient, err := newPoolClient(token)
+	newClient, err := s.newPoolClient(token)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),

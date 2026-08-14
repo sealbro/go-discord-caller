@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Switchable voice encryption backend**: the new `DAVE_IMPL` setting chooses which implementation of Discord's end-to-end encrypted voice protocol the bot uses — `libdave` (the default, unchanged from previous releases) or `dave-go`, a pure Go alternative. It is worth trying `dave-go` on servers where audio cuts out for a minute or two whenever someone joins or leaves the voice channel: the default backend discards its encryption keys while the channel re-keys, whereas the alternative keeps the previous keys alive until the new ones are ready. The setting applies to the owner bot and all speakers together and takes effect on restart; the choice is logged at startup.
+
 ## [0.9.3] - 2026-08-13
 
 ### Fixed

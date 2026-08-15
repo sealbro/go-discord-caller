@@ -49,3 +49,11 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260810153831-ec0a7760b754 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )
+
+// Pinned to v0.19.3: v0.19.4-v0.19.6 break bot reconnection when moved between
+// voice channels. Drop these excludes once a release later than v0.19.6 lands.
+exclude (
+	github.com/disgoorg/disgo v0.19.4
+	github.com/disgoorg/disgo v0.19.5
+	github.com/disgoorg/disgo v0.19.6
+)

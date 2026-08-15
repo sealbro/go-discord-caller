@@ -1,5 +1,6 @@
 // Package dave selects the DAVE (Discord end-to-end encrypted voice)
-// implementation used by every voice connection this bot opens.
+// implementation used by every voice connection this bot opens, and tracks the
+// sessions the pure Go backend creates so their health can be exported.
 //
 // Two implementations satisfy godave.Session and are wired identically into
 // disgo's voice manager:
@@ -20,15 +21,15 @@
 // Both are selected per process, not per guild: the choice is a property of
 // the binary's voice stack, and mixing them would make an outage impossible to
 // attribute.
+//
+// This package deliberately imports neither backend, so it stays free of CGO
+// and can be pulled in by config and any other pure Go caller. The factory
+// that does import them lives in internal/dave/backend.
 package dave
 
 import (
 	"fmt"
 	"strings"
-
-	"github.com/disgoorg/godave"
-	"github.com/disgoorg/godave/golibdave"
-	davego "github.com/thomas-vilte/dave-go/session"
 )
 
 // Impl identifies a DAVE session implementation.
@@ -58,20 +59,5 @@ func Parse(s string) (Impl, error) {
 		return ImplDaveGo, nil
 	default:
 		return Default, fmt.Errorf("unknown DAVE implementation %q (want %q or %q)", s, ImplLibdave, ImplDaveGo)
-	}
-}
-
-// SessionCreateFunc returns the godave.SessionCreateFunc for impl, ready to
-// hand to voice.WithDaveSessionCreateFunc. An unrecognised Impl falls back to
-// Default rather than returning nil, because a nil create func would leave
-// disgo without any DAVE session and break voice outright.
-func SessionCreateFunc(impl Impl) godave.SessionCreateFunc {
-	switch impl {
-	case ImplDaveGo:
-		return davego.CreateFunc()
-	case ImplLibdave:
-		return golibdave.NewSession
-	default:
-		return golibdave.NewSession
 	}
 }

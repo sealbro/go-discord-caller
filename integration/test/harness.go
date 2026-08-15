@@ -14,6 +14,8 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	internalbot "github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
+	"github.com/sealbro/go-discord-caller/internal/dave"
+	"github.com/sealbro/go-discord-caller/internal/dave/backend"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
@@ -29,6 +31,7 @@ type Harness struct {
 	Owner           *disgobot.Client
 	OwnerID         snowflake.ID
 	Pool            *pool.Service
+	DaveReg         *dave.Registry
 	Speaker         *Speaker
 	Speaker2        *Speaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
 	Listener        *Listener
@@ -43,7 +46,10 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	// harness's own source/listener bots stay on golibdave — so a run with
 	// DAVE_IMPL=dave-go doubles as a cross-implementation interop check.
 	var err error
-	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken, cfg.DaveImpl,
+	daveReg := dave.NewRegistry()
+	daveSessions := backend.SessionCreateFunc(cfg.DaveImpl, daveReg)
+	h.DaveReg = daveReg
+	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken, daveSessions,
 		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -63,7 +69,7 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build metrics: %w", err)
 	}
-	h.Pool = pool.NewService(&metrics.Pool, cfg.DaveImpl)
+	h.Pool = pool.NewService(&metrics.Pool, daveSessions)
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
 	h.Pool.ConnectPool(poolCtx, cfg.SpeakerTokens)
 	poolCancel()
@@ -98,7 +104,7 @@ func (h *Harness) NewManager(speakerChannelIDs ...snowflake.ID) (*manager.Servic
 func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
 	st := store.NewInMemoryStore()
 	metrics, _ := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
-	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics)
+	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics, h.DaveReg)
 
 	st.BindChannel(guildID, h.OwnerID, ownerChannelID)
 	st.BindRole(guildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)
@@ -133,7 +139,7 @@ func (h *Harness) DisconnectSpeakerVoice(ctx context.Context, guildID, speakerID
 	if !ok {
 		return
 	}
-	pool.NewGuildVoice(client.VoiceManager, 0).Leave(ctx, guildID)
+	pool.NewGuildVoice(client.VoiceManager, 0, nil).Leave(ctx, guildID)
 }
 
 // MoveSpeakerVoice simulates an admin dragging a speaker bot into targetChannelID.

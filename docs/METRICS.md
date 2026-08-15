@@ -88,6 +88,40 @@ the opus pipeline via `FrameDropper`.
 
 ---
 
+## 🔐 DAVE / E2EE voice (`internal/telemetry/dave_metrics.go`)
+
+**Only emitted when `DAVE_IMPL=dave-go`.** The default `libdave` backend exposes
+no counters, so no callback is registered and none of these series exist — their
+absence is expected, not a failure.
+
+Every instrument is observable: the counters live inside the DAVE sessions and
+are polled by the callback registered in `internal/dave/registry.go`. Values are
+summed across all sessions of the process (live ones plus the final values of
+sessions already closed), so they stay monotonic as connections come and go —
+there are deliberately **no per-session or per-guild attributes**, which would
+churn one series per voice join.
+
+| OTel instrument | Type | Prometheus series | Attributes | Description |
+|-----------------|------|-------------------|------------|-------------|
+| `gdc.dave.commits.total`                | ObservableCounter | `gdc_dave_commits_total`                | `result`=`processed`\|`failed` | MLS commits handled. `failed` is the counterpart of the `bad_optional_access` failures in [#43](https://github.com/sealbro/go-discord-caller/issues/43). |
+| `gdc.dave.welcomes.total`               | ObservableCounter | `gdc_dave_welcomes_total`               | `result`=`joined`\|`failed` | MLS welcomes handled. |
+| `gdc.dave.recoveries.total`             | ObservableCounter | `gdc_dave_recoveries_total`             | `cause`=`mls`\|`transport` | Session recoveries armed. `mls` = the crypto handshake broke; `transport` = the voice gateway was down. Only `mls` implicates the DAVE stack. |
+| `gdc.dave.frame.failures.total`         | ObservableCounter | `gdc_dave_frame_failures_total`         | `op`=`encrypt`\|`decrypt` | Frames that failed crypto. Bursts right after a join/move are protocol-normal; sustained growth is not. |
+| `gdc.dave.frames.total`                 | ObservableCounter | `gdc_dave_frames_total`                 | `kind`=`passthrough`\|`transition` | `passthrough` = no epoch active; `transition` = encrypted with the *retained previous* ratchet during a re-key. |
+| `gdc.dave.transition.windows.total`     | ObservableCounter | `gdc_dave_transition_windows_total`     | — | Re-key windows entered (one per epoch activation with a ratchet to retain). |
+| `gdc.dave.rejections.total`             | ObservableCounter | `gdc_dave_rejections_total`             | `kind`=`replay`\|`proposal` | Inputs refused by validation. Non-zero means a diverged peer, a duplicate, or something probing the session. |
+| `gdc.dave.downgrades.total`             | ObservableCounter | `gdc_dave_downgrades_total`             | — | Downgrades from E2EE to transport-only (a non-supporting client joined). |
+| `gdc.dave.degraded.seconds.total`       | ObservableCounter (`s`) | `gdc_dave_degraded_seconds_total`  | — | Time spent without an active epoch, across recoveries that succeeded. **The direct measure of the outage in #43.** |
+| `gdc.dave.transport.retry.seconds.total`| ObservableCounter (`s`) | `gdc_dave_transport_retry_seconds_total` | — | Time spent in send-retry backoff with the voice gateway down. |
+| `gdc.dave.sessions.live`                | ObservableGauge | `gdc_dave_sessions_live`                | — | Sessions currently attached to a voice connection. |
+| `gdc.dave.sessions.degraded`            | ObservableGauge | `gdc_dave_sessions_degraded`            | — | Live sessions that expect E2EE but have no active epoch *right now*. Protocol-version-0 channels are excluded — they never get an epoch by design. |
+
+`gdc_dave_frames_total{kind="transition"}` is the metric that shows the reason
+for running `dave-go` at all: those are frames carried through a re-key window
+that the default backend would have dropped.
+
+---
+
 ## 🎙️ Opus / mixer timing (`internal/telemetry/opus_metrics.go`)
 
 All histograms, unit `ms`, attribute `guild_id`. Recorded on the hot path via a
@@ -106,7 +140,8 @@ pre-baked `OpusRecorder` (`Metrics.ForGuild`) — zero-alloc per frame.
 ## Implementation
 
 Instruments are defined in `internal/telemetry/`, split by subsystem:
-`bot_metrics.go`, `pool_metrics.go`, `session_metrics.go`, `opus_metrics.go`.
+`bot_metrics.go`, `pool_metrics.go`, `session_metrics.go`, `opus_metrics.go`,
+`dave_metrics.go`.
 `metrics.go` wires them together (`NewMetrics`); `setup.go` configures the OTLP
 exporters (traces, metrics, logs) and the periodic metric reader (15 s interval).
 
@@ -126,6 +161,15 @@ sum by (path) (rate(gdc_fanout_frames_dropped_total[5m]))
 
 # speaker bots connected vs registered
 gdc_pool_bots_connected / gdc_pool_bots_total
+
+# time DAVE sessions spent without encryption keys (dave-go backend only)
+rate(gdc_dave_degraded_seconds_total[5m])
+
+# frames rescued by the retained ratchet during MLS re-keys
+rate(gdc_dave_frames_total{kind="transition"}[5m])
+
+# MLS handshake failures vs. mere network blips
+sum by (cause) (rate(gdc_dave_recoveries_total[5m]))
 
 # active voice raids
 sum(gdc_voice_sessions_active)

@@ -59,7 +59,7 @@ func (s *Speaker) StartPlaying(ctx context.Context, guildID, channelID snowflake
 		return nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
 	}
 
-	gv := pool.NewGuildVoice(s.client.VoiceManager, channelID)
+	gv := pool.NewGuildVoice(s.client.VoiceManager, channelID, nil)
 	// Leave any previous connection for this guild before joining.
 	// CreateConn returns the existing conn if one is still registered, which
 	// would cause Open to hang if that conn is partially closed.

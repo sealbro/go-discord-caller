@@ -50,7 +50,7 @@ func buildHostParams(t *testing.T, ctx context.Context, fx hostFixture, mode gui
 			Speaker: guild.Speaker{ID: sid, Enabled: true},
 			ChOut:   make(chan []byte, opus.AudioChanBuf),
 			Handle:  opus.NewFanoutHandle(),
-			GV:      pool.NewGuildVoice(nil, fx.speakerChIDs[i]),
+			GV:      pool.NewGuildVoice(nil, fx.speakerChIDs[i], nil),
 			Cleanup: func() {},
 		})
 	}
@@ -87,7 +87,7 @@ func buildHostParams(t *testing.T, ctx context.Context, fx hostFixture, mode gui
 		OwnerHandle:  ownerHandle,
 		ChOwnerOut:   chOwnerOut,
 		OwnerCleanup: func() {},
-		OV:           pool.NewGuildVoice(nil, fx.ownerChannelID),
+		OV:           pool.NewGuildVoice(nil, fx.ownerChannelID, nil),
 		GM:           gm,
 		AllowFilter:  stubAllowFilter{},
 		// Force every channel into RouteMix so the router-driven pipelines'

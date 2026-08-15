@@ -11,8 +11,8 @@ import (
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/dave"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/metric"
@@ -35,7 +35,9 @@ type Service struct {
 	poolClients map[snowflake.ID]*bot.Client
 	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
 	metrics     *telemetry.PoolMetrics
-	daveImpl    dave.Impl // DAVE implementation every speaker client is built with
+	// daveSessions builds the DAVE session for every speaker voice connection,
+	// including the ones the watchdog rebuilds on reconnect.
+	daveSessions godave.SessionCreateFunc
 }
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
@@ -45,15 +47,15 @@ type extraBot struct {
 	client *bot.Client
 }
 
-// NewService creates a new speaker Service. daveImpl selects the DAVE
-// implementation for every speaker client the pool builds, including the ones
-// the watchdog rebuilds on reconnect.
-func NewService(metrics *telemetry.PoolMetrics, daveImpl dave.Impl) *Service {
+// NewService creates a new speaker Service. daveSessions is the DAVE session
+// factory used for every speaker client the pool builds (see
+// internal/dave/backend); it must be the same one the owner bot uses.
+func NewService(metrics *telemetry.PoolMetrics, daveSessions godave.SessionCreateFunc) *Service {
 	return &Service{
-		poolClients: make(map[snowflake.ID]*bot.Client),
-		extraBots:   make(map[snowflake.ID]extraBot),
-		metrics:     metrics,
-		daveImpl:    daveImpl,
+		poolClients:  make(map[snowflake.ID]*bot.Client),
+		extraBots:    make(map[snowflake.ID]extraBot),
+		metrics:      metrics,
+		daveSessions: daveSessions,
 	}
 }
 
@@ -74,7 +76,7 @@ func (s *Service) newPoolClient(token string) (*bot.Client, error) {
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(dave.SessionCreateFunc(s.daveImpl)),
+			voice.WithDaveSessionCreateFunc(s.daveSessions),
 			voice.WithLogger(telemetry.VoiceLogger()),
 		),
 	)

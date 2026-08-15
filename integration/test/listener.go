@@ -129,7 +129,7 @@ func (l *Listener) StartListening(ctx context.Context, guildID, channelID snowfl
 	// Fresh receiver per listening session so prior frames don't bleed in.
 	l.Receiver = NewCountingReceiver()
 
-	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID)
+	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID, nil)
 	conn, err := gv.Join(ctx, guildID)
 	if err != nil {
 		return nil, fmt.Errorf("listener bot join channel: %w", err)
@@ -172,7 +172,7 @@ func (l *Listener) StartPlaying(ctx context.Context, guildID, channelID snowflak
 		return nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
 	}
 
-	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID)
+	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID, nil)
 	leaveCtx, leaveCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	gv.Leave(leaveCtx, guildID)
 	leaveCancel()

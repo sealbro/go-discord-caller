@@ -43,12 +43,14 @@ type Service struct {
 	test               config.TestConfig
 	sessions           *ally.Manager
 	metrics            *telemetry.Metrics
-	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
-	sessionIdleTimeout time.Duration  // 0 disables; set via SetSessionIdleTimeout
+	reconnect          reconnectState     // typed reconnect subsystem (applier registry + in-flight guard)
+	daveSessions       pool.SessionCloser // releases DAVE sessions of discarded voice conns; may be nil
+	sessionIdleTimeout time.Duration      // 0 disables; set via SetSessionIdleTimeout
 }
 
-// NewService creates a new manager Service.
-func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig, metrics *telemetry.Metrics) *Service {
+// NewService creates a new manager Service. daveSessions releases the DAVE
+// session of every voice connection this service tears down; it may be nil.
+func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Client, ownerID snowflake.ID, test config.TestConfig, metrics *telemetry.Metrics, daveSessions pool.SessionCloser) *Service {
 	s := &Service{
 		statuses:    make(map[snowflake.ID]*guild.Status),
 		store:       st,
@@ -59,6 +61,8 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		sessions:    ally.NewManager(),
 		metrics:     metrics,
 		reconnect:   newReconnectState(),
+
+		daveSessions: daveSessions,
 	}
 	empty := map[snowflake.ID]guild.AutoRouter{}
 	s.activeRouters.Store(&empty)
@@ -219,7 +223,7 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 // configured channel. Use Join/Leave on the result to manage the connection.
 func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
 	channelID, _ := m.store.GetBoundChannel(guildID, m.ownerBotID)
-	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID)
+	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID, m.daveSessions)
 }
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
@@ -428,7 +432,7 @@ func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice
 		return pool.GuildVoice{}, false
 	}
 	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
-	return pool.NewGuildVoice(client.VoiceManager, channelID), true
+	return pool.NewGuildVoice(client.VoiceManager, channelID, m.daveSessions), true
 }
 
 // CheckGuildChannelAccess checks Connect+Speak permissions for the owner bot and

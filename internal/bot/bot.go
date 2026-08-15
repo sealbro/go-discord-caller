@@ -16,10 +16,12 @@ import (
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/dave"
+	"github.com/sealbro/go-discord-caller/internal/dave/backend"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
 	"github.com/sealbro/go-discord-caller/internal/manager"
@@ -102,6 +104,7 @@ type Bot struct {
 	poolSvc       *pool.Service
 	speakerTokens []string
 	guildReadyCh  chan []snowflake.ID
+	daveReg       *dave.Registry
 	bundle        *i18n.Bundle
 }
 
@@ -116,8 +119,15 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	// Buffered channel (cap 1) receives guild IDs from the Ready event for command sync.
 	guildReadyCh := make(chan []snowflake.ID, 1)
 
+	// DAVE session factory, shared by the owner bot and every speaker: they sit
+	// in the same voice channels, so a mismatch would be an audio outage that
+	// looks like a protocol bug. The registry only collects anything under the
+	// dave-go backend (see dave.Registry).
+	daveReg := dave.NewRegistry()
+	daveSessions := backend.SessionCreateFunc(cfg.DaveImpl, daveReg)
+
 	// Manager (owner) bot client — production adds GuildMessages intent and the command router.
-	client, err := NewOwnerClient(cfg.OwnerBotToken, cfg.DaveImpl,
+	client, err := NewOwnerClient(cfg.OwnerBotToken, daveSessions,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -155,8 +165,17 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 
 	slog.Info("dave: E2EE voice implementation selected", slog.String("impl", string(cfg.DaveImpl)))
 
-	poolSvc := pool.NewService(&metrics.Pool, cfg.DaveImpl)
-	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
+	// Only dave-go exposes session counters, so only it gets an observable
+	// callback; under libdave the registry is left unregistered and no
+	// gdc.dave.* series is produced at all.
+	if cfg.DaveImpl == dave.ImplDaveGo {
+		if err := daveReg.StartMetrics(&metrics.Dave); err != nil {
+			return nil, fmt.Errorf("failed to register dave metrics: %w", err)
+		}
+	}
+
+	poolSvc := pool.NewService(&metrics.Pool, daveSessions)
+	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics, daveReg)
 	managerSvc.SetSessionIdleTimeout(cfg.SessionIdleTimeout)
 
 	bundle, err := i18n.NewBundle()
@@ -178,6 +197,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 		poolSvc:       poolSvc,
 		speakerTokens: cfg.SpeakerTokens,
 		guildReadyCh:  guildReadyCh,
+		daveReg:       daveReg,
 		bundle:        bundle,
 	}, nil
 }
@@ -199,6 +219,10 @@ func (b *Bot) Run(ctx context.Context) error {
 		// Graceful shutdown: stop all raids, close all speaker gateways, then the owner gateway.
 		shutdownCtx := context.Background()
 		b.manager.Shutdown(shutdownCtx)
+		// Backstop for DAVE sessions on connections that never went through
+		// GuildVoice.Leave (a speaker client closed outright takes its voice
+		// connections with it).
+		b.daveReg.CloseAll()
 		b.store.Close()
 		b.client.Close(shutdownCtx)
 	}()
@@ -277,13 +301,14 @@ func (b *Bot) syncCommands(ctx context.Context, guildIDs []snowflake.ID) {
 // NewOwnerClient builds a disgo client for the owner (manager) bot.
 // Base config covers DAVE E2EE voice and FlagsAll cache. Callers supply
 // their own intents and any extra options (e.g. event listeners, extra intents).
-// daveImpl selects the DAVE implementation; it must match the one the speaker
-// pool was built with, since owner and speakers share every voice channel.
-func NewOwnerClient(token string, daveImpl dave.Impl, opts ...bot.ConfigOpt) (*bot.Client, error) {
+// daveSessions is the DAVE session factory (see internal/dave/backend); it must
+// be the same one the speaker pool was built with, since the owner and the
+// speakers share every voice channel.
+func NewOwnerClient(token string, daveSessions godave.SessionCreateFunc, opts ...bot.ConfigOpt) (*bot.Client, error) {
 	base := []bot.ConfigOpt{
 		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(dave.SessionCreateFunc(daveImpl)),
+			voice.WithDaveSessionCreateFunc(daveSessions),
 			voice.WithLogger(telemetry.VoiceLogger()),
 		),
 	}

@@ -54,7 +54,7 @@ func buildGuestParams(t *testing.T, ctx context.Context, fx guestFixture, hostMo
 			Speaker: guild.Speaker{ID: sid, Enabled: true},
 			ChOut:   make(chan []byte, opus.AudioChanBuf),
 			Handle:  opus.NewFanoutHandle(),
-			GV:      pool.NewGuildVoice(nil, fx.speakerChIDs[i]),
+			GV:      pool.NewGuildVoice(nil, fx.speakerChIDs[i], nil),
 			Cleanup: func() {},
 		})
 	}

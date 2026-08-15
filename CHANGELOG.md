@@ -5,10 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.4] - 2026-08-14
+## [0.9.4] - 2026-08-15
 
 ### Fixed
 - **No slash commands after inviting the bot to a new server** ([#46](https://github.com/sealbro/go-discord-caller/issues/46)): commands were only registered for servers the bot was already in when it started, so a freshly invited server saw a bot with no commands at all until the operator restarted it. Commands are now registered as soon as the bot joins.
+
+### Changed
+- **Dependency refresh**: updated the OpenTelemetry stack and related Go modules to current versions; no change in behaviour for operators.
 
 ## [0.9.3] - 2026-08-13
 

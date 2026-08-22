@@ -29,17 +29,20 @@ func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 // Removing the per-mixer forwarder goroutine cuts one channel hop and one
 // scheduler wake-up per produced frame.
 //
-// TEMP(teardown-close-race): this goroutine used to close destOuts after Run
-// returned, on the assumption it was their sole writer. That is false in copy
-// mode (router.RouteCopy), where opus.VoiceReceiver.dispatchFanout writes the
-// raw Opus packet straight into these same channels on the UDP receive
-// goroutine — so close(out) raced that send (caught by `go test -race` in the
-// integration suite, and a send-on-closed panic hazard). With two producers,
-// neither may own the close. We now leave the channels for GC: VoiceProvider
-// exits on its own Close() (v.done), which teardown invokes via
-// BuildSpeakerCleanup, so no goroutine leaks. Proper fix: a single teardown
-// step that stops every writer (mixer sink + receiver) before reclaiming the
-// channels. Re-validate with the integration -race suite when revisiting.
+// Historical note (teardown-close-race): this goroutine used to close destOuts
+// after Run returned, on the assumption it was their sole writer. That is
+// false in copy mode (router.RouteCopy), where opus.VoiceReceiver.dispatchFanout
+// writes the raw Opus packet straight into these same channels on the UDP
+// receive goroutine — so close(out) raced that send (caught by `go test -race`
+// in the integration suite, and a send-on-closed panic hazard). With two
+// producers, neither may own the close, so the channels are left for GC:
+// VoiceProvider exits on its own Close() (v.done), which teardown invokes via
+// BuildSpeakerCleanup, so no goroutine leaks. The single-teardown-step half of
+// the fix — stopping every writer before reclaiming the channels — now lives
+// in router.Router.Close(), which re-Installs an empty FanoutInstall{} on
+// every source (silencing dispatchFanout for both copy and mix mode) before
+// session.Cleanup calls speakerCleanup(). Re-validate with the integration
+// -race suite when revisiting either side of this.
 func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer) {
 	drop := gm.Drop(telemetry.DropPathChannelMixer)
 	for _, dest := range dests {

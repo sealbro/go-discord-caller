@@ -28,7 +28,7 @@ func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics, sy
 		bot.NewListenerFunc(onGuildMemberUpdate(managerSvc)),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
-		bot.NewListenerFunc(onVoiceMove(managerSvc)),
+		bot.NewListenerFunc(onVoiceMove(managerSvc, metrics)),
 	}
 }
 
@@ -183,7 +183,10 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 			slog.String("guildID", guildID.String()),
 		)
 
-		if m.HasCallerRole(guildID, e.Member.RoleIDs) {
+		// Guard the channel pointer: OldVoiceState.ChannelID is nil for a state
+		// change that was not a real channel exit, and dereferencing it here
+		// would panic before the nil check further down.
+		if e.OldVoiceState.ChannelID != nil && m.HasCallerRole(guildID, e.Member.RoleIDs) {
 			metrics.VoiceCallerAdd(context.Background(), -1, guildID.String(), e.OldVoiceState.ChannelID.String())
 		}
 
@@ -198,7 +201,7 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 }
 
 // onVoiceMove is called whenever a user moves between voice channels.
-func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
+func onVoiceMove(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceMove) {
 	return func(e *events.GuildVoiceMove) {
 		guildID := e.VoiceState.GuildID
 
@@ -207,6 +210,21 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 			// bot was displaced from its bound channel and reconnects if needed.
 			m.OnBotVoiceMove(context.Background(), guildID, e.Member.User.ID, e.VoiceState.ChannelID)
 			return
+		}
+
+		// A move emits neither a join nor a leave, so the caller counter has to be
+		// carried across here by hand: without this the user is decremented from
+		// the destination on their eventual leave having never been counted into
+		// it, driving gdc.voice.callers permanently negative (it is an UpDown
+		// counter, so the skew never resets until the process restarts).
+		if m.HasCallerRole(guildID, e.Member.RoleIDs) {
+			ctx := context.Background()
+			if e.OldVoiceState.ChannelID != nil {
+				metrics.VoiceCallerAdd(ctx, -1, guildID.String(), e.OldVoiceState.ChannelID.String())
+			}
+			if e.VoiceState.ChannelID != nil {
+				metrics.VoiceCallerAdd(ctx, 1, guildID.String(), e.VoiceState.ChannelID.String())
+			}
 		}
 
 		// Auto-route both channels: the source channel loses a caller, the

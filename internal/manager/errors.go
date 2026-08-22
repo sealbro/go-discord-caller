@@ -18,7 +18,20 @@ var (
 	// seeded yet.
 	ErrNoGuildStatus = errors.New("no guild status found — seed the guild first")
 
-	// ErrNoSpeakers is returned when no speaker bots could join their bound
-	// channels (all offline or unbound).
+	// ErrNoSpeakers is returned when speaker bots were configured for this
+	// guild but none of them managed to join its bound channel — offline
+	// gateway, missing channel permissions, or a voice timeout.
 	ErrNoSpeakers = errors.New("no speakers joined: verify speaker channels are bound and bots are online in this guild")
+
+	// ErrNoBoundSpeakers is returned when the guild has no speaker that is both
+	// enabled AND bound to a voice channel, so no join was even attempted.
+	// Distinct from ErrNoSpeakers because the remedy is completely different:
+	// this one is "you never configured this server", not "something failed".
+	//
+	// It is the normal outcome for a guest guild that joined with a relay code
+	// but was never set up — bindings are per-guild, and the code carries none
+	// of the host's configuration. CheckGuildChannelAccess cannot catch it
+	// first: it skips speakers with no bound channel, so an entirely unbound
+	// guild passes the permission pre-flight cleanly.
+	ErrNoBoundSpeakers = errors.New("no speaker bots are configured in this server: run /setup → Bind Speakers to enable a speaker and pick its voice channel")
 )

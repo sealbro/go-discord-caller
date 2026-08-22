@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/disgoorg/disgo/discord"
@@ -9,6 +10,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
+	"github.com/sealbro/go-discord-caller/internal/manager"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -65,7 +67,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
 				cancelFunc()
-				slog.WarnContext(cmdCtx, "failed to join relay session", slog.String("code", code), slog.Any("err", err))
+				slog.WarnContext(cmdCtx, "failed to join relay session",
+					slog.String("guildID", guildID.String()), slog.String("code", code), slog.Any("err", err))
+				if errors.Is(err, manager.ErrNoBoundSpeakers) {
+					h.followUp(e, loc.T("raid.no_bound_speakers"))
+					return
+				}
 				h.followUp(e, loc.T("raid.join_failed", "Code", code, "Err", err.Error()))
 				return
 			}
@@ -95,7 +102,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
-			slog.WarnContext(cmdCtx, "failed to start voice raid", slog.Any("err", err))
+			slog.WarnContext(cmdCtx, "failed to start voice raid",
+				slog.String("guildID", guildID.String()), slog.Any("err", err))
+			if errors.Is(err, manager.ErrNoBoundSpeakers) {
+				h.followUp(e, loc.T("raid.no_bound_speakers"))
+				return
+			}
 			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error()))
 			return
 		}

@@ -181,6 +181,17 @@ func (h *Harness) MustStartPlaying(t testing.TB, ctx context.Context, speaker *S
 	return stop
 }
 
+// MustStartPlayingMutable calls speaker.StartPlayingMutable and fatals on error.
+// Use when a test needs the caller to fall silent without leaving the channel.
+func (h *Harness) MustStartPlayingMutable(t testing.TB, ctx context.Context, speaker *Speaker, channelID snowflake.ID) (func(), func(bool)) {
+	t.Helper()
+	stop, setMuted, err := speaker.StartPlayingMutable(ctx, h.Cfg.GuildID, channelID, h.Cfg.SamplesDir)
+	if err != nil {
+		t.Fatalf("speaker.StartPlayingMutable: %v", err)
+	}
+	return stop, setMuted
+}
+
 // MustStartPlayingListener calls Listener.StartPlaying and fatals on error.
 func (h *Harness) MustStartPlayingListener(t testing.TB, ctx context.Context, channelID snowflake.ID) func() {
 	t.Helper()

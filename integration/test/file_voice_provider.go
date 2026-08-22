@@ -33,7 +33,21 @@ type RandomFileVoiceProvider struct {
 	voice.OpusFrameProvider
 	entry *dcaEntry
 	done  chan struct{}
+	// muted makes ProvideOpusFrame yield no audio while keeping the provider —
+	// and therefore the voice connection — open. See SetMuted.
+	muted atomic.Bool
 }
+
+// SetMuted stops or resumes audio without closing the provider or leaving the
+// voice channel. A muted provider returns a zero-length frame, which disgo's
+// audio sender treats as "nothing to send" (it emits its silence frames and
+// stops speaking) rather than as an error or a disconnect.
+//
+// This is the only way to reproduce a *lull*: closing the provider makes the
+// bot leave voice, and the resulting voice-state event triggers a router
+// Recompute that resets every mixer's pause state — masking any bug that
+// depends on a mixer staying idle while its callers remain connected.
+func (v *RandomFileVoiceProvider) SetMuted(muted bool) { v.muted.Store(muted) }
 
 // NewRandomFileVoiceProvider picks one file at random from paths, opens it,
 // and returns a provider that loops that file indefinitely. Paths must not be empty.
@@ -63,6 +77,10 @@ func (v *RandomFileVoiceProvider) ProvideOpusFrame() ([]byte, error) {
 	case <-v.done:
 		return nil, fmt.Errorf("random voice provider is closed")
 	default:
+	}
+
+	if v.muted.Load() {
+		return nil, nil
 	}
 
 	for {

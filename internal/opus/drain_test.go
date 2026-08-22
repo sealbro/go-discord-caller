@@ -99,6 +99,43 @@ func TestDrainWatcher_ResumesAfterLull(t *testing.T) {
 		"mixer must emit again once audio resumes")
 }
 
+// TestDrainWatcher_DoesNotOverrideRouterPause pins the pause-ownership rule.
+//
+// The router pauses destinations with no human listener. Now that a paused
+// mixer records arriving audio as activity, IdleFor() stays small while its
+// callers talk — so a watcher that simply mirrored "idle?" onto SetPaused
+// would immediately undo the router and emit into an empty channel. It must
+// only reverse pauses it applied itself.
+func TestDrainWatcher_DoesNotOverrideRouterPause(t *testing.T) {
+	t.Parallel()
+	m, _ := newTestMixer(t)
+
+	src := newSource()
+	if err := m.AddInput(1, src); err != nil {
+		t.Fatalf("AddInput: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	const idle = 200 * time.Millisecond
+	go NewDrainWatcher(m, idle).Run(ctx)
+
+	// Audio flows continuously for the whole test.
+	stopPump := startPump(ctx, src, generateTestFrames(t, 440, 4, 8000))
+	defer stopPump()
+	waitFor(t, 2*time.Second, func() bool { return !m.Paused() }, "mixer should be running while audio flows")
+
+	// The router pauses it — the destination lost its last listener.
+	m.SetPaused(true)
+
+	// Several watcher ticks pass with audio still arriving. The pause holds.
+	time.Sleep(5 * idle)
+	if !m.Paused() {
+		t.Fatal("router pause was overridden by DrainWatcher; a destination with no listeners must stay paused")
+	}
+}
+
 // waitFor polls cond until it holds or the deadline expires.
 func waitFor(t *testing.T, within time.Duration, cond func() bool, msg string) {
 	t.Helper()

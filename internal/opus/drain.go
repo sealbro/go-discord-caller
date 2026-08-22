@@ -18,6 +18,10 @@ type DrainWatcher struct {
 	mixer     *Mixer
 	idle      time.Duration
 	keepAlive func() bool
+	// pausedByWatcher records that the pause currently in effect is this
+	// watcher's doing, so Run only ever reverses its own decision. Touched
+	// solely from the Run goroutine.
+	pausedByWatcher bool
 }
 
 // NewDrainWatcher creates a DrainWatcher for mx with the given idle threshold.
@@ -39,9 +43,16 @@ func (w *DrainWatcher) WithKeepAlive(fn func() bool) *DrainWatcher {
 }
 
 // Run checks mixer activity every idle/2 until ctx is cancelled.
-// Pauses the mixer when idle; unpauses when frames resume — so a user who
-// reconnects without triggering a voice-state event is handled automatically.
+// Pauses the mixer when idle; unpauses when frames resume — so a caller who
+// simply stops talking for a while, without any voice-state event to trigger a
+// router Recompute, is handled automatically.
 // Mixers held live by WithKeepAlive are left exactly as the router set them.
+//
+// Pause ownership matters here. The router pauses destinations that have no
+// human listener (or nothing to mix), and that decision must not be undone
+// just because audio is still arriving — so Run reverses a pause only when it
+// was the one that applied it. Anything else it observes belongs to the router
+// and is left alone.
 func (w *DrainWatcher) Run(ctx context.Context) {
 	t := time.NewTicker(w.idle / 2)
 	defer t.Stop()
@@ -53,7 +64,31 @@ func (w *DrainWatcher) Run(ctx context.Context) {
 			if w.keepAlive != nil && w.keepAlive() {
 				continue
 			}
-			w.mixer.SetPaused(w.mixer.IdleFor() > w.idle)
+			w.step()
 		}
+	}
+}
+
+// step applies one pause/unpause decision. Split out so tests can drive it
+// deterministically instead of racing the ticker.
+func (w *DrainWatcher) step() {
+	idle := w.mixer.IdleFor() > w.idle
+	paused := w.mixer.Paused()
+
+	// The router unpaused it (or never paused it): drop our claim.
+	if !paused {
+		w.pausedByWatcher = false
+		if idle {
+			w.mixer.SetPaused(true)
+			w.pausedByWatcher = true
+		}
+		return
+	}
+
+	// Paused. Only lift it if the pause is ours and audio has resumed;
+	// a router pause stays put no matter how busy the inputs are.
+	if w.pausedByWatcher && !idle {
+		w.mixer.SetPaused(false)
+		w.pausedByWatcher = false
 	}
 }

@@ -334,9 +334,14 @@ func (m *Mixer) tick() error {
 	paused := m.paused.Load()
 	entries := m.readInputsSnapshot()
 
-	m.collectFrames(entries, paused)
+	drained := m.collectFrames(entries, paused)
 
-	if len(m.framesBuf) > 0 {
+	// Activity means "audio arrived", not "audio was mixed". A paused mixer
+	// still has to record it: otherwise IdleFor() grows without bound while
+	// its callers are talking, and DrainWatcher — whose pause condition is
+	// exactly IdleFor() > idle — can never reverse its own decision, so the
+	// mixer discards every frame from then on.
+	if len(m.framesBuf) > 0 || drained > 0 {
 		m.lastActivityAt.Store(time.Now().UnixNano())
 	}
 
@@ -383,12 +388,18 @@ func (m *Mixer) readInputsSnapshot() []*inputEntry {
 // collectFrames pulls one frame per input into m.framesBuf. When paused, every
 // input is fully drained (incrementing pausedDrops by the drained count) so
 // SourceBuffer ring memory does not accumulate while the mixer is silent.
-func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) {
+//
+// Returns the number of frames discarded by the paused path, which the caller
+// needs in order to tell "no audio is arriving" apart from "audio is arriving
+// and being thrown away" — see tick.
+func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) int {
 	m.framesBuf = m.framesBuf[:0]
+	drained := 0
 	for _, e := range entries {
 		if paused {
 			if n := e.src.Len(); n > 0 {
 				m.pausedDrops.Add(uint64(n))
+				drained += n
 			}
 			e.src.Drain()
 			continue
@@ -398,6 +409,7 @@ func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) {
 			m.framesBuf = append(m.framesBuf, f)
 		}
 	}
+	return drained
 }
 
 // recyclePCMBuffers returns each frame's PCM buffer to the pool. Used by the

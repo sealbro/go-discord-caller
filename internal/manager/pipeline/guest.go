@@ -118,7 +118,9 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 	start := func() {
 		// Local destination ChOuts receive audio from the host's broadcast
 		// via AddGuild → ally session → speaker chOut. The router only
-		// handles the outbound (capture → relay) side.
+		// handles the outbound (capture → relay) side, so no destination here
+		// is relay-fed — but this guest captures, so peers must know.
+		WatchRelayMembership(p.AllySession, p.GuestGuildID, r, true)
 		p.AllySession.AddGuild(p.GuestGuildID, allOuts)
 		StartGuestRelayBroadcast(ctx, relayMixer, p.AllySession, p.GuestGuildID)
 		r.Recompute()
@@ -161,12 +163,18 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 		return nil, nil, nil, fmt.Errorf("guest caller: create relay mixer: %w", err)
 	}
 
+	// The host's broadcast lands in every channel mixer via RegisterRelayInputs
+	// in start(), so each destination needs a RelayFeed predicate — otherwise a
+	// quiet guest guild pauses its own mixers and never plays the host's audio
+	// (issue #51, guest side).
+	relayFeed := RelayFeedFor(p.AllySession, p.GuestGuildID)
 	dests := make([]*router.DestSlot, 0, len(destinations)+1)
 	for _, dest := range destinations {
 		dests = append(dests, &router.DestSlot{
 			ChannelID: dest.ChannelID,
 			Mixer:     channelMixers[dest.ChannelID],
 			ChOuts:    dest.Outs,
+			RelayFeed: relayFeed,
 		})
 	}
 	relaySlot := &router.DestSlot{ChannelID: RelayDestID, Mixer: relayMixer}
@@ -235,8 +243,11 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 	// because the teardown goroutine in JoinSession only runs after start().
 	var relayInputs []chan<- []byte
 	start := func() {
+		// AllyCaller guests capture, so peers must route their relay-fed
+		// destinations as live for as long as this guest is attached.
+		WatchRelayMembership(p.AllySession, p.GuestGuildID, r, true)
 		relayInputs = RegisterRelayInputs(ctx, p.GuestGM, p.AllySession, destinations, channelMixers)
-		StartChannelMixers(ctx, p.GuestGM, destinations, channelMixers)
+		StartChannelMixers(ctx, p.GuestGM, destinations, channelMixers, relayFeed)
 		StartGuestRelayBroadcast(ctx, relayMixer, p.AllySession, p.GuestGuildID)
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)

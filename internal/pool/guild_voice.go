@@ -37,6 +37,8 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 }
 
 // Leave closes the bot's current voice connection in the guild, if any.
+// Safe on a connection whose Open never completed — see safeUDPConn, which the
+// voice manager installs via SafeUDPConnOpt.
 func (v GuildVoice) Leave(ctx context.Context, guildID snowflake.ID) {
 	if conn := v.vm.GetConn(guildID); conn != nil {
 		conn.Close(ctx)

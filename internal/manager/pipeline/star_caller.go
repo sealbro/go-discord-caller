@@ -70,10 +70,18 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 	for _, d := range ownerDests {
 		hubChOuts = append(hubChOuts, d.Outs...)
 	}
+	// Guest audio enters at the hub mixer only (see start()), so the hub is the
+	// one destination that needs a RelayFeed predicate to stay unpaused while
+	// the local guild is quiet.
+	var relayFeed func() bool
+	if p.Mode.AllowGuestCapture() {
+		relayFeed = RelayFeedFor(p.AllySession, p.GuildID)
+	}
 	hubSlot := &router.DestSlot{
 		ChannelID: p.OV.ChannelID(),
 		Mixer:     hubMixer,
 		ChOuts:    hubChOuts,
+		RelayFeed: relayFeed,
 	}
 	relaySlot := &router.DestSlot{ChannelID: RelayDestID, Mixer: relayMixer}
 	dests := []*router.DestSlot{hubSlot, relaySlot}
@@ -150,8 +158,9 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 			channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}
 			RegisterRelayInputs(ctx, p.GM, p.AllySession, ownerDests, channelMixers)
 		}
+		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
 		channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}
-		StartChannelMixers(ctx, p.GM, ownerDests, channelMixers)
+		StartChannelMixers(ctx, p.GM, ownerDests, channelMixers, relayFeed)
 		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup)
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)

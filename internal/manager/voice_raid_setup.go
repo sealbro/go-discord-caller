@@ -11,6 +11,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/store"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -24,7 +25,14 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 		return nil, err
 	}
 
-	joined := m.joinSpeakers(ctx, guildID, speakers, mode.WithCapture(), allowUser)
+	// Separate "nothing configured" from "configured but nothing connected" —
+	// the two have different remedies, so they get different errors.
+	candidates := boundSpeakers(m.store, guildID, speakers)
+	if len(candidates) == 0 {
+		return nil, ErrNoBoundSpeakers
+	}
+
+	joined := m.joinSpeakers(ctx, guildID, candidates, mode.WithCapture(), allowUser)
 	if len(joined) == 0 {
 		return nil, ErrNoSpeakers
 	}
@@ -44,18 +52,27 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	}, nil
 }
 
-// joinSpeakers joins all enabled, bound speakers in parallel.
-// When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, speakers []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool) []pipeline.SpeakerResult {
+// boundSpeakers returns the speakers eligible to join: enabled AND bound to a
+// voice channel in this guild. An empty result means the guild was never set up
+// (see ErrNoBoundSpeakers), not that a join failed.
+func boundSpeakers(st store.Store, guildID snowflake.ID, speakers []guild.Speaker) []guild.Speaker {
 	var candidates []guild.Speaker
 	for _, sp := range speakers {
-		if sp.Enabled {
-			if _, ok := m.store.GetBoundChannel(guildID, sp.ID); ok {
-				candidates = append(candidates, sp)
-			}
+		if !sp.Enabled {
+			continue
 		}
+		if _, ok := st.GetBoundChannel(guildID, sp.ID); !ok {
+			continue
+		}
+		candidates = append(candidates, sp)
 	}
+	return candidates
+}
 
+// joinSpeakers joins the given candidate speakers in parallel; callers filter
+// with boundSpeakers first.
+// When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool) []pipeline.SpeakerResult {
 	resultCh := make(chan pipeline.SpeakerResult, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))

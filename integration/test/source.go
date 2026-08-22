@@ -33,6 +33,7 @@ func newTestSpeaker(ctx context.Context, token string) (*Speaker, error) {
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			pool.SafeUDPConnOpt(),
 			voice.WithLogger(slog.New(slog.DiscardHandler)),
 		),
 	)
@@ -50,13 +51,22 @@ func newTestSpeaker(ctx context.Context, token string) (*Speaker, error) {
 // samplesDir in random order. Returns a cleanup func that stops playback
 // and leaves the channel. The cleanup func is safe to call more than once.
 func (s *Speaker) StartPlaying(ctx context.Context, guildID, channelID snowflake.ID, samplesDir string) (func(), error) {
+	stop, _, err := s.StartPlayingMutable(ctx, guildID, channelID, samplesDir)
+	return stop, err
+}
+
+// StartPlayingMutable is StartPlaying plus a setMuted func that silences the
+// bot without disconnecting it, so a test can create a lull while the caller
+// stays in the channel. See RandomFileVoiceProvider.SetMuted for why leaving
+// the channel is not an acceptable substitute.
+func (s *Speaker) StartPlayingMutable(ctx context.Context, guildID, channelID snowflake.ID, samplesDir string) (func(), func(bool), error) {
 	paths, err := filepath.Glob(filepath.Join(samplesDir, "*.dca"))
 	if err != nil || len(paths) == 0 {
-		return nil, fmt.Errorf("no .dca files found in %q", samplesDir)
+		return nil, nil, fmt.Errorf("no .dca files found in %q", samplesDir)
 	}
 	provider, err := NewRandomFileVoiceProvider(paths)
 	if err != nil {
-		return nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
+		return nil, nil, fmt.Errorf("open dca files in %q: %w", samplesDir, err)
 	}
 
 	gv := pool.NewGuildVoice(s.client.VoiceManager, channelID)
@@ -70,7 +80,7 @@ func (s *Speaker) StartPlaying(ctx context.Context, guildID, channelID snowflake
 	conn, err := gv.Join(ctx, guildID)
 	if err != nil {
 		provider.Close()
-		return nil, fmt.Errorf("source bot join channel: %w", err)
+		return nil, nil, fmt.Errorf("source bot join channel: %w", err)
 	}
 
 	conn.SetOpusFrameProvider(provider)
@@ -81,7 +91,7 @@ func (s *Speaker) StartPlaying(ctx context.Context, guildID, channelID snowflake
 		leaveCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		gv.Leave(leaveCtx, guildID)
-		return nil, fmt.Errorf("source bot set speaking: %w", err)
+		return nil, nil, fmt.Errorf("source bot set speaking: %w", err)
 	}
 
 	var stopped bool
@@ -95,7 +105,7 @@ func (s *Speaker) StartPlaying(ctx context.Context, guildID, channelID snowflake
 		defer cancel()
 		gv.Leave(leaveCtx, guildID)
 	}
-	return cleanup, nil
+	return cleanup, provider.SetMuted, nil
 }
 
 // ID returns the bot's Discord user ID.

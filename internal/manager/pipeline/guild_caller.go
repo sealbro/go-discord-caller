@@ -51,12 +51,21 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 	}
 
 	// destSlots in router order: per-channel destinations, then relay.
+	// Guest audio enters every channel mixer via RegisterRelayInputs below, so
+	// each of those destinations carries a RelayFeed predicate — without it the
+	// router would pause them whenever this guild is quiet and drop everything
+	// the guests relay in (issue #51).
+	var relayFeed func() bool
+	if p.Mode.AllowGuestCapture() {
+		relayFeed = RelayFeedFor(p.AllySession, p.GuildID)
+	}
 	dests := make([]*router.DestSlot, 0, len(destinations)+1)
 	for _, dest := range destinations {
 		dests = append(dests, &router.DestSlot{
 			ChannelID: dest.ChannelID,
 			Mixer:     channelMixers[dest.ChannelID],
 			ChOuts:    dest.Outs,
+			RelayFeed: relayFeed,
 		})
 	}
 	relaySlot := &router.DestSlot{ChannelID: RelayDestID, Mixer: relayMixer}
@@ -127,7 +136,11 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 		if p.Mode.AllowGuestCapture() {
 			RegisterRelayInputs(ctx, p.GM, p.AllySession, destinations, channelMixers)
 		}
-		StartChannelMixers(ctx, p.GM, destinations, channelMixers)
+		// The host always broadcasts, so guests' relay-fed destinations must
+		// see it as capturing; the observer re-routes this guild when a guest
+		// attaches or leaves.
+		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
+		StartChannelMixers(ctx, p.GM, destinations, channelMixers, relayFeed)
 		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup)
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)

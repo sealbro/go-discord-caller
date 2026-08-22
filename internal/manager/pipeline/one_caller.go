@@ -114,7 +114,11 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 	}
 
 	start := func() {
-		StartChannelMixers(ctx, p.GM, destinations, channelMixers)
+		// OneCaller never registers relay inputs (guests are listener-only), so
+		// no destination here carries a RelayFeed — but guests still need to
+		// see this guild as capturing.
+		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
+		StartChannelMixers(ctx, p.GM, destinations, channelMixers, nil)
 		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup)
 		// Initial route: the cache is now up to date with voice states for
 		// every member in the owner channel (prefetchChannelMembers and the

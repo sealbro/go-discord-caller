@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -354,4 +355,104 @@ func typeName(v any) string {
 		t = t.Elem()
 	}
 	return t.String()
+}
+
+// Issue #51: a host guild whose own members are silent must still play audio
+// relayed in by a capturing guest. The relay input is not a router source, so
+// without DestSlot.RelayFeed the cascade paused every channel mixer and
+// Mixer.collectFrames drained the guest's packets on the floor.
+func TestGuildCallerPipeline_RelayFedMixersRunWhileHostIsQuiet(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	fx := hostFx()
+	p := buildHostParams(t, ctx, fx, guild.RaidModeGuildCaller)
+	p.VoiceProbe = stubCallerCounter(0) // nobody in the host guild is speaking
+
+	session, start, err := HostFor(guild.RaidModeGuildCaller).Build(ctx, p)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	start()
+	t.Cleanup(func() {
+		cancel()
+		p.OwnerHandle.Close()
+		for _, r := range p.Setup.Joined {
+			r.Handle.Close()
+		}
+	})
+
+	localChannels := []snowflake.ID{fx.ownerChannelID, fx.speakerChIDs[0], fx.speakerChIDs[1]}
+	for _, chID := range localChannels {
+		if !mixerOf(t, session.ChannelMixers[chID]).Paused() {
+			t.Errorf("channel %s: no callers and no guest attached — mixer should be paused", chID)
+		}
+	}
+
+	// A capturing guest attaches: every relay-fed mixer must resume, otherwise
+	// the guest's audio never reaches this guild's speakers.
+	p.AllySession.SetCapturing(snowflake.ID(999))
+	recomputeOf(t, session).Recompute()
+	for _, chID := range localChannels {
+		if mixerOf(t, session.ChannelMixers[chID]).Paused() {
+			t.Errorf("channel %s: mixer still paused with a capturing guest — guest audio is dropped", chID)
+		}
+	}
+
+	// Guest leaves: back to the cheap paused state.
+	p.AllySession.RemoveGuild(snowflake.ID(999))
+	recomputeOf(t, session).Recompute()
+	for _, chID := range localChannels {
+		if !mixerOf(t, session.ChannelMixers[chID]).Paused() {
+			t.Errorf("channel %s: mixer should pause again once the guest is gone", chID)
+		}
+	}
+}
+
+// The membership observer registered by the host pipeline must recompute the
+// route when a guest attaches, without anyone calling Recompute by hand.
+func TestGuildCallerPipeline_GuestJoinTriggersRecompute(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	fx := hostFx()
+	p := buildHostParams(t, ctx, fx, guild.RaidModeGuildCaller)
+	p.VoiceProbe = stubCallerCounter(0)
+
+	session, start, err := HostFor(guild.RaidModeGuildCaller).Build(ctx, p)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	start()
+	t.Cleanup(func() {
+		cancel()
+		p.OwnerHandle.Close()
+		for _, r := range p.Setup.Joined {
+			r.Handle.Close()
+		}
+	})
+
+	p.AllySession.SetCapturing(snowflake.ID(999))
+
+	mx := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
+	deadline := time.Now().Add(2 * time.Second)
+	for mx.Paused() && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mx.Paused() {
+		t.Error("guest join must trigger a router recompute that unpauses the relay-fed mixer")
+	}
+}
+
+// recomputeOf exposes the concrete router's Recompute, which guild.AutoRouter
+// deliberately keeps out of its interface (event handlers only Debounce).
+func recomputeOf(t *testing.T, s *guild.Session) interface{ Recompute() } {
+	t.Helper()
+	r, ok := s.AutoRouter.(interface{ Recompute() })
+	if !ok {
+		t.Fatalf("session.AutoRouter (%T) does not expose Recompute", s.AutoRouter)
+	}
+	return r
 }

@@ -4,7 +4,10 @@ MODULE := github.com/sealbro/go-discord-caller
 COVER_PKGS := $(shell go list ./... | grep -v -E '^$(MODULE)/(cmd|integration)(/|$$)' | grep -v '$(MODULE)/internal/telemetry')
 COVER_PKGS_CSV := $(shell echo $(COVER_PKGS) | tr ' ' ',')
 
-.PHONY: test test-unit test-integration coverage
+.PHONY: test test-unit test-integration coverage clean-cache
+
+clean-cache:
+	go clean -testcache
 
 test-unit:
 	go test --race -covermode=atomic -coverprofile=unit.out \

@@ -7,6 +7,7 @@ import (
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // callerCount is a VoiceProbe that returns canned values per channel and
@@ -52,7 +53,7 @@ func TestComputeRoutes_NPlus3MixMinusAlwaysRunsMixer(t *testing.T) {
 	}
 	counts := map[snowflake.ID]int{chID(1): 1, chID(2): 1, chID(3): 1}
 
-	sourceModes, destMix := computeRoutes(sources, dests, counts)
+	sourceModes, destMix := computeRoutes(sources, dests, counts, nil)
 
 	for _, s := range sources {
 		if sourceModes[s.id] != RouteMix {
@@ -77,7 +78,7 @@ func TestComputeRoutes_N2MixMinusAllCopyWhenBothC1(t *testing.T) {
 	}
 	counts := map[snowflake.ID]int{chID(1): 1, chID(2): 1}
 
-	sourceModes, destMix := computeRoutes(sources, dests, counts)
+	sourceModes, destMix := computeRoutes(sources, dests, counts, nil)
 
 	for _, s := range sources {
 		if sourceModes[s.id] != RouteCopy {
@@ -102,7 +103,7 @@ func TestComputeRoutes_OffWhenChannelEmpty(t *testing.T) {
 	}
 	counts := map[snowflake.ID]int{chID(1): 0, chID(2): 1}
 
-	sourceModes, _ := computeRoutes(sources, dests, counts)
+	sourceModes, _ := computeRoutes(sources, dests, counts, nil)
 
 	if sourceModes[chID(1)] != RouteOff {
 		t.Errorf("empty channel: want RouteOff, got %v", sourceModes[chID(1)])
@@ -125,7 +126,7 @@ func TestComputeRoutes_OneTwoCallerChannelCascadesAcrossMixMinus(t *testing.T) {
 	}
 	counts := map[snowflake.ID]int{chID(1): 1, chID(2): 2, chID(3): 1}
 
-	sourceModes, destMix := computeRoutes(sources, dests, counts)
+	sourceModes, destMix := computeRoutes(sources, dests, counts, nil)
 
 	for _, s := range sources {
 		if sourceModes[s.id] != RouteMix {
@@ -150,7 +151,7 @@ func TestComputeRoutes_OffSourceStaysOffEvenWhenItsDestNeedsMix(t *testing.T) {
 	}
 	counts := map[snowflake.ID]int{chID(10): 0, chID(20): 2}
 
-	sourceModes, destMix := computeRoutes(sources, dests, counts)
+	sourceModes, destMix := computeRoutes(sources, dests, counts, nil)
 
 	if sourceModes[chID(10)] != RouteOff {
 		t.Errorf("off source must stay off through cascade; got %v", sourceModes[chID(10)])
@@ -172,7 +173,7 @@ func TestComputeRoutes_OneCallerSingleSourceNoCascade(t *testing.T) {
 
 	for c := 0; c <= 3; c++ {
 		counts := map[snowflake.ID]int{chID(1): c}
-		sourceModes, destMix := computeRoutes(sources, dests, counts)
+		sourceModes, destMix := computeRoutes(sources, dests, counts, nil)
 		var wantSource RouteMode
 		var wantMix bool
 		switch {
@@ -381,5 +382,84 @@ func TestRouter_CloseStopsPendingTimers(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 	if got := counter.calls.Load(); got != 0 {
 		t.Errorf("Close should cancel pending timers; got %d Recompute(s)", got)
+	}
+}
+
+// A relay-fed destination must be marked mix even when no local source is
+// live, and any local copy-mode source feeding it must be promoted to mix so
+// its raw Opus writer cannot race the mixer sink on the shared ChOuts.
+// Regression guard for issue #51.
+func TestComputeRoutes_RelayFedDestRunsWithoutLocalCallers(t *testing.T) {
+	sources := []routeSource{{id: chID(1), channelID: chID(1)}}
+	dests := []routeDest{{channelID: chID(2), sourceIDs: []snowflake.ID{chID(1)}}}
+	relayFed := map[snowflake.ID]bool{chID(2): true}
+
+	for _, c := range []int{0, 1} {
+		counts := map[snowflake.ID]int{chID(1): c}
+		sourceModes, destMix := computeRoutes(sources, dests, counts, relayFed)
+		if !destMix[chID(2)] {
+			t.Errorf("c=%d: relay-fed dest must be marked mix so guest audio is not dropped", c)
+		}
+		wantSource := RouteOff
+		if c == 1 {
+			wantSource = RouteMix
+		}
+		if sourceModes[chID(1)] != wantSource {
+			t.Errorf("c=%d: want source %v, got %v", c, wantSource, sourceModes[chID(1)])
+		}
+	}
+}
+
+// Without a relay feed the dest keeps the cheap copy/off route.
+func TestComputeRoutes_NoRelayFeedKeepsCopyRoute(t *testing.T) {
+	sources := []routeSource{{id: chID(1), channelID: chID(1)}}
+	dests := []routeDest{{channelID: chID(2), sourceIDs: []snowflake.ID{chID(1)}}}
+	counts := map[snowflake.ID]int{chID(1): 1}
+
+	sourceModes, destMix := computeRoutes(sources, dests, counts, map[snowflake.ID]bool{chID(2): false})
+	if destMix[chID(2)] {
+		t.Error("dest without relay feed must not be forced into mix")
+	}
+	if sourceModes[chID(1)] != RouteCopy {
+		t.Errorf("want RouteCopy, got %v", sourceModes[chID(1)])
+	}
+}
+
+// The RelayFeed predicate is re-evaluated on every Recompute, so a mixer
+// paused while no peer was attached resumes as soon as one is.
+func TestRouter_RelayFeedTogglesDestPause(t *testing.T) {
+	counter := &callerCount{counts: map[snowflake.ID]int{chID(1): 0}}
+	mx, err := opus.NewMixer(telemetry.OpusRecorder{})
+	if err != nil {
+		t.Fatalf("NewMixer: %v", err)
+	}
+	var fed atomic.Bool
+	src := &SourceSlot{ID: chID(1), ChannelID: chID(1)}
+	dst := &DestSlot{
+		ChannelID: chID(2),
+		Mixer:     mx,
+		Sources:   []*SourceSlot{src},
+		ChOuts:    []chan<- []byte{make(chan []byte, 1)},
+		RelayFeed: fed.Load,
+	}
+	src.Feeds = []*DestSlot{dst}
+
+	r := New(chID(1), chID(7), counter, []*SourceSlot{src}, []*DestSlot{dst})
+
+	r.Recompute()
+	if !mx.Paused() {
+		t.Error("no local callers and no relay feed: mixer should be paused")
+	}
+
+	fed.Store(true)
+	r.Recompute()
+	if mx.Paused() {
+		t.Error("relay feed live: mixer must run so relayed guest audio is emitted")
+	}
+
+	fed.Store(false)
+	r.Recompute()
+	if !mx.Paused() {
+		t.Error("relay feed gone: mixer should pause again")
 	}
 }

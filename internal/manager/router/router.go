@@ -141,6 +141,21 @@ type DestSlot struct {
 	// ally guests rather than a local voice channel); the router then skips
 	// the listener check for it.
 	ChOuts []chan<- []byte
+
+	// RelayFeed, when non-nil, reports whether this destination's mixer is
+	// currently fed by an ally relay input (pipeline.RegisterRelayInputs) that
+	// can carry audio — i.e. some OTHER guild in the session is capturing.
+	//
+	// The relay input is not a router SourceSlot, so without this the cascade
+	// only sees local sources and pauses the mixer whenever the local guild is
+	// quiet — silently discarding every packet the peer guild sends
+	// (Mixer.collectFrames drains inputs while paused). A live relay feed
+	// therefore forces the destination into mix mode, which also forces its
+	// local copy-mode sources to mix: otherwise a raw-Opus writer and the
+	// mixer sink would race on the same ChOuts.
+	//
+	// Evaluated on every Recompute with the router lock released.
+	RelayFeed func() bool
 }
 
 // routeSource is the slice-shaped input to computeRoutes — one entry per
@@ -168,7 +183,11 @@ type routeDest struct {
 //   - At least one feeding source is already RouteMix (the C≥2 cascade), OR
 //   - Two or more live (non-off) sources feed the destination. With multiple
 //     copy-mode writers their OpusTargets would race on the same chOuts, so
-//     the mixer is mandatory regardless of per-channel C.
+//     the mixer is mandatory regardless of per-channel C, OR
+//   - relayFed[d] — an ally relay input is feeding the destination's mixer.
+//     The relay is not a routeSource, so it contributes no live/mix count of
+//     its own; without this clause a quiet local guild pauses the mixer and
+//     drops everything the peer guild relays in (issue #51).
 //
 // Every RouteCopy source feeding a promoted destination is then forced into
 // RouteMix. RouteOff sources stay off — they contribute no audio so they
@@ -176,7 +195,7 @@ type routeDest struct {
 //
 // The cascade is iterated to fixpoint. For any sane topology it converges in
 // 1–2 passes; the loop guard tolerates pathological inputs without panic.
-func computeRoutes(sources []routeSource, destinations []routeDest, callerCounts map[snowflake.ID]int) (sourceModes map[snowflake.ID]RouteMode, destMix map[snowflake.ID]bool) {
+func computeRoutes(sources []routeSource, destinations []routeDest, callerCounts map[snowflake.ID]int, relayFed map[snowflake.ID]bool) (sourceModes map[snowflake.ID]RouteMode, destMix map[snowflake.ID]bool) {
 	sourceModes = make(map[snowflake.ID]RouteMode, len(sources))
 	destMix = make(map[snowflake.ID]bool, len(destinations))
 
@@ -204,7 +223,7 @@ func computeRoutes(sources []routeSource, destinations []routeDest, callerCounts
 					mix++
 				}
 			}
-			needsMix := mix > 0 || live >= 2
+			needsMix := mix > 0 || live >= 2 || relayFed[d.channelID]
 			if !needsMix {
 				continue
 			}
@@ -371,6 +390,7 @@ func (r *Router) Recompute() {
 	}
 	routeDests := make([]routeDest, 0, len(r.destinations))
 	listenerChecks := make([]snowflake.ID, 0, len(r.destinations))
+	relayChecks := make(map[snowflake.ID]func() bool, len(r.destinations))
 	for chID, d := range r.destinations {
 		ids := make([]snowflake.ID, 0, len(d.Sources))
 		for _, s := range d.Sources {
@@ -379,6 +399,9 @@ func (r *Router) Recompute() {
 		routeDests = append(routeDests, routeDest{channelID: chID, sourceIDs: ids})
 		if len(d.ChOuts) > 0 {
 			listenerChecks = append(listenerChecks, chID)
+		}
+		if d.RelayFeed != nil {
+			relayChecks[chID] = d.RelayFeed
 		}
 	}
 	roleID := r.roleID
@@ -395,8 +418,12 @@ func (r *Router) Recompute() {
 	for _, chID := range listenerChecks {
 		listenersPerChannel[chID] = r.enumerator.HasListeners(chID)
 	}
+	relayFed := make(map[snowflake.ID]bool, len(relayChecks))
+	for chID, fed := range relayChecks {
+		relayFed[chID] = fed()
+	}
 
-	sourceModes, destMix := computeRoutes(routeSources, routeDests, callerCounts)
+	sourceModes, destMix := computeRoutes(routeSources, routeDests, callerCounts, relayFed)
 	r.applyModes(sourceModes, destMix, usersPerChannel, listenersPerChannel)
 }
 

@@ -25,9 +25,11 @@ type Session struct {
 
 	done chan struct{}
 
-	mu     sync.RWMutex
-	outs   map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
-	guests map[snowflake.ID]struct{}        // guest guild IDs (host not included)
+	mu        sync.RWMutex
+	outs      map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
+	guests    map[snowflake.ID]struct{}        // guest guild IDs (host not included)
+	capturing map[snowflake.ID]struct{}        // guilds that may broadcast into the session
+	observers map[snowflake.ID]func()          // guildID → membership-change callback
 }
 
 func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Session {
@@ -38,6 +40,8 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 		done:        make(chan struct{}),
 		outs:        make(map[snowflake.ID][]chan<- []byte),
 		guests:      make(map[snowflake.ID]struct{}),
+		capturing:   make(map[snowflake.ID]struct{}),
+		observers:   make(map[snowflake.ID]func()),
 	}
 }
 
@@ -97,10 +101,70 @@ func (s *Session) BroadcastFromGuild(srcGuildID snowflake.ID, pkt []byte) {
 // AddGuild registers a guild's speaker output channels with this session.
 func (s *Session) AddGuild(guildID snowflake.ID, chs []chan<- []byte) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.outs[guildID] = chs
 	if guildID != s.HostGuildID {
 		s.guests[guildID] = struct{}{}
+	}
+	fns := s.observersLocked()
+	s.mu.Unlock()
+	notify(fns)
+}
+
+// SetCapturing marks guildID as a guild that may broadcast captured audio into
+// the session. Listener-only guests never call it, so their peers keep the
+// cheap copy-mode route. Cleared by RemoveGuild.
+func (s *Session) SetCapturing(guildID snowflake.ID) {
+	s.mu.Lock()
+	s.capturing[guildID] = struct{}{}
+	fns := s.observersLocked()
+	s.mu.Unlock()
+	notify(fns)
+}
+
+// HasCapturingPeers reports whether any guild OTHER than guildID may broadcast
+// into the session — i.e. whether guildID's relay input can carry audio.
+// Destinations fed by the relay must run their mixer while this holds, since
+// the relay is not a router-visible source (see router.DestSlot.RelayFeed).
+func (s *Session) HasCapturingPeers(guildID snowflake.ID) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for id := range s.capturing {
+		if id != guildID {
+			return true
+		}
+	}
+	return false
+}
+
+// SetRouteObserver registers fn to run whenever the set of attached or
+// capturing guilds changes, so guildID's auto-router can re-evaluate its
+// relay-fed destinations. Removed by RemoveGuild.
+//
+// fn is invoked on its own goroutine with s.mu released — it is free to call
+// back into the session (HasCapturingPeers) without deadlocking.
+func (s *Session) SetRouteObserver(guildID snowflake.ID, fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.observers[guildID] = fn
+}
+
+// observersLocked snapshots the registered callbacks. Caller must hold s.mu.
+func (s *Session) observersLocked() []func() {
+	if len(s.observers) == 0 {
+		return nil
+	}
+	fns := make([]func(), 0, len(s.observers))
+	for _, fn := range s.observers {
+		fns = append(fns, fn)
+	}
+	return fns
+}
+
+// notify runs each membership callback on its own goroutine. Never called with
+// s.mu held.
+func notify(fns []func()) {
+	for _, fn := range fns {
+		go fn()
 	}
 }
 
@@ -113,9 +177,13 @@ func (s *Session) AddGuild(guildID snowflake.ID, chs []chan<- []byte) {
 // finished sending, after which it is safe to close the channels.
 func (s *Session) RemoveGuild(guildID snowflake.ID) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.outs, guildID)
 	delete(s.guests, guildID)
+	delete(s.capturing, guildID)
+	delete(s.observers, guildID)
+	fns := s.observersLocked()
+	s.mu.Unlock()
+	notify(fns)
 }
 
 // GuestGuildIDs returns the IDs of all guest guilds attached to this session

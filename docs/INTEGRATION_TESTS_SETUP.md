@@ -16,7 +16,7 @@ go test --tags=integration --timeout=15m ./integration/...
 | **owner bot** | existing production owner | same token as `DISCORD_OWNER_BOT_TOKEN`; keep permissions identical to production |
 | **speaker bot(s)** | existing production speakers | same tokens as `DISCORD_SPEAKER_BOT_TOKEN_N` |
 | **source bot** | harness audio source | new dedicated bot; must never be a production speaker |
-| **source bot 2** | second harness source | required for E2, E5b, E5c, E6, E12, E13–E15 (mix-minus, star topology, auto-route, cross-guild caller) |
+| **source bot 2** | second harness source | required for E2, E5b, E5c, E5d, E5f, E6, E12, E13–E15 (mix-minus, star topology, auto-route, cross-guild caller) |
 | **listener bot** | harness frame counter + **test-admin** | new dedicated bot; grant **Administrator** in the test guild only |
 
 The **listener bot** doubles as the test-admin for privileged REST calls (E9: move
@@ -67,11 +67,13 @@ After inviting, run `/setup` or the equivalent commands to bind the owner and sp
 - source bot
 - source bot 2 (if used)
 
-### 2.2 Guest guild (E5 / E5b / E5c)
+### 2.2 Guest guild (E5 / E5b / E5c / E5d / E5e / E5f)
 
 Required for the inter-guild relay tests `TestE5_InterGuildRelay`,
-`TestE5b_AllyCaller`, and `TestE5c_OneManyAllyCaller`. Create a second private
-server. (E5b and E5c additionally need source bot 2; E5c needs
+`TestE5b_AllyCaller`, `TestE5c_OneManyAllyCaller`, `TestE5d_RelayResumesAfterIdleHost`,
+`TestE5e_RelayResumesAfterIdleGuest`, and `TestE5f_StarRelayResumesAfterIdleHost`.
+Create a second private
+server. (E5b, E5c, E5d and E5f additionally need source bot 2; E5c needs
 `E2E_SPEAKER2_CHANNEL_ID` in the host guild.)
 
 - Invite owner bot and at least one speaker bot.
@@ -282,7 +284,7 @@ harness.
 |------|-----------|---------|
 | `main_test.go` | `integration` \|\| `stress` | `TestMain`, shared `h *Harness` |
 | `host_test.go` | `integration` | E1, E2, E4, E6, E7 — host-guild audio relay tests |
-| `guest_test.go` | `integration` | E5, E5b, E5c — inter-guild relay |
+| `guest_test.go` | `integration` | E5, E5b, E5c, E5d, E5e, E5f — inter-guild relay |
 | `handlers_test.go` | `integration` | E8–E12 — Discord event handler tests |
 | `auto_route_test.go` | `integration` | E13–E15 — auto-router copy↔mix transitions |
 | `stress_test.go` | `stress` | long-running by-ear / soak tests (see §5.1) |
@@ -299,6 +301,9 @@ harness.
 | E5 | guest | `OneCaller` / `AllyListener` | inter-guild relay: host audio reaches guest speaker channel | guest guild |
 | E5b | guest | `GuildCaller` / `AllyCaller` | bidirectional cross-guild: guest captures audio into host relay mixer | guest guild, source bot 2 |
 | E5c | guest | `OneManyGuildCaller` / `OneManyAllyCaller` | star-topology guest: host owner audio → guest speakers, guests feed back | guest guild, source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
+| E5d | guest | `GuildCaller` / `AllyCaller` | issue #51: guest→host relay survives an idle lull past `DrainIdleTimeout` (relay-fed mixers must not be paused by the cascade or the drain watcher) | guest guild, source bot 2 |
+| E5e | guest | `GuildCaller` / `AllyCaller` | issue #51: host→guest relay survives the same lull when the guest joined in caller mode | guest guild |
+| E5f | guest | `OneManyGuildCaller` / `OneManyAllyCaller` | issue #51 in star topology: guest→host relay into the hub mixer survives the lull (the direction E5c does not assert) | guest guild, source bot 2 |
 | E6 | host | `OneManyGuildCaller` | star topology (hub hears all) | source bot 2 |
 | E7 | host | `OneCaller` | `RequestMembers` pre-fetch allows pre-joined source | — |
 | E8 | handlers | `OneCaller` | `onVoiceLeave` → `ReconnectBotChannel` after voice disconnect | — |

@@ -71,6 +71,7 @@ func newPoolClient(token string) (*bot.Client, error) {
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			SafeUDPConnOpt(),
 			voice.WithLogger(telemetry.VoiceLogger()),
 		),
 	)

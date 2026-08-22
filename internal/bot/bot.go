@@ -301,6 +301,7 @@ func NewOwnerClient(token string, opts ...bot.ConfigOpt) (*bot.Client, error) {
 		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			pool.SafeUDPConnOpt(),
 			voice.WithLogger(telemetry.VoiceLogger()),
 		),
 	}

@@ -550,6 +550,17 @@ func (r *Router) ScheduleRecompute(delay time.Duration) {
 // every active source's teardown closure to release mixer inputs allocated
 // during the last install. Call from session-end teardown before closing
 // FanoutHandles.
+// Close stops the router. Every source's FanoutHandle is re-installed with an
+// empty FanoutInstall{} first, so dispatchFanout becomes a no-op immediately
+// for every source regardless of its active mode — this is the "stop every
+// writer before reclaiming the channels" step BuildSpeakerCleanup depends on.
+// RouteMix's activeTeardown (RemoveInput + SourceBuffer.Drain) runs a no-op
+// for RouteCopy sources (see routerInstallBuilder), so without the empty
+// Install a copy-mode source keeps writing raw Opus straight into the
+// destination ChOuts — including ones whose VoiceProvider a concurrent
+// BuildSpeakerCleanup goroutine has already Closed — until that source's own
+// VoiceReceiver.Close() happens to run. Session.Cleanup calls Close() before
+// speakerCleanup(), so this ordering closes that window.
 func (r *Router) Close() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -559,6 +570,9 @@ func (r *Router) Close() {
 		delete(r.debounceTimers, chID)
 	}
 	for _, s := range r.sources {
+		if s.Handle != nil {
+			s.Handle.Install(opus.FanoutInstall{})
+		}
 		if s.activeTeardown != nil {
 			s.activeTeardown()
 			s.activeTeardown = nil

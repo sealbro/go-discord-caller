@@ -136,6 +136,10 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 			continue // invalid token
 		}
 		s.poolClients[r.botUserID] = r.client
+		// Seed a zero data point so the reconnect-attempts/failures series exist
+		// (and the dashboard panels show 0 instead of "No data") even for bots
+		// that never need a reconnect.
+		s.metrics.SeedReconnectSeries(ctx, r.botUserID)
 	}
 	s.mu.Unlock()
 }

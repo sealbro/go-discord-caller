@@ -87,6 +87,19 @@ func (p *PoolMetrics) ObserveGatewayLatency(o metric.Observer, botID string, ms 
 	)
 }
 
+// SeedReconnectSeries registers a zero data point for botID on both reconnect
+// counters. OTel counters emit no Prometheus series at all until their first
+// Add call, so a bot pool that has never needed a reconnect leaves the
+// "Pool Reconnect Attempts / Failures" dashboard panels blank ("No data")
+// rather than showing a flat 0 line. Call once per bot right after the pool
+// is populated (before any real reconnect can occur) so the series exists
+// from startup.
+func (p *PoolMetrics) SeedReconnectSeries(ctx context.Context, botID snowflake.ID) {
+	attrs := metric.WithAttributes(attribute.String("bot_id", botID.String()))
+	p.reconnectAttempts.Add(ctx, 0, attrs)
+	p.reconnectFailures.Add(ctx, 0, attrs)
+}
+
 // ReconnectAttempt records one watchdog reconnect attempt for botID.
 func (p *PoolMetrics) ReconnectAttempt(ctx context.Context, botID snowflake.ID) {
 	p.reconnectAttempts.Add(ctx, 1, metric.WithAttributes(attribute.String("bot_id", botID.String())))

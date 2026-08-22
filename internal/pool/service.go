@@ -165,22 +165,24 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 		}
 		s.metrics.ObserveBotInfo(o, id.String(), botName)
 
-		if isConnected(c) {
-			connected++
-			// Emit per-bot gateway heartbeat RTT.
-			// Latency() returns 0 until the first heartbeat ACK is received.
-			latMs := float64(c.Gateway.Latency().Milliseconds())
-			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+		if c == nil || !isConnected(c) {
+			continue
 		}
+		connected++
+		// Emit per-bot gateway heartbeat RTT.
+		// Latency() returns 0 until the first heartbeat ACK is received.
+		latMs := float64(c.Gateway.Latency().Milliseconds())
+		s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
 	}
 	for id, eb := range s.extraBots {
 		s.metrics.ObserveBotInfo(o, id.String(), eb.name)
 		// Report the owner bot's gateway RTT too, so it appears in the latency
 		// panels alongside the pool bots (it is not part of poolClients).
-		if isConnected(eb.client) {
-			latMs := float64(eb.client.Gateway.Latency().Milliseconds())
-			s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+		if eb.client == nil || !isConnected(eb.client) {
+			continue
 		}
+		latMs := float64(eb.client.Gateway.Latency().Milliseconds())
+		s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
 	}
 	s.mu.RUnlock()
 	s.metrics.ObservePoolBots(o, total, connected)

@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2026-08-22
+
+### Fixed
+- **Listeners going silent a few seconds into a raid**: with two or more people talking, a pause longer than five seconds cut the audio for good. It now resumes on its own.
+- **Guest servers losing the host's audio after a quiet spell** ([#51](https://github.com/sealbro/go-discord-caller/issues/51)): a lull could permanently cut audio to the guest server while the host still heard the guest.
+- **Bot crashing when a speaker failed to join**: a speaker timing out on its voice channel could take the whole bot down, along with every other server's session.
+- **Unhelpful error when joining a relay code on an unconfigured server**: the failure blamed offline bots; it now points to `/setup` → **Bind Speakers**.
+- **Wrong caller counts on the dashboards**: channel moves went uncounted, so the figures drifted down over time. Restart once after upgrading to clear existing drift.
+- **Missing and broken monitoring panels**: gateway latency could fail on bots still starting up, and the speaker reconnect panels showed "No data" instead of zero.
+
+### Changed
+- **Pinned away from known-bad library versions**: excluded three Discord library releases that caused bots to drop and reconnect repeatedly.
+- **Dependency refresh**: updated gRPC and related Go modules; no change in behaviour.
+
 ## [0.9.4] - 2026-08-15
 
 ### Fixed

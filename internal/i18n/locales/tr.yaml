@@ -1,0 +1,101 @@
+# Türkçe
+
+# ── Eğik çizgi komutu açıklamaları ────────────────────────────────────────────
+cmd.setup.description: "Bu sunucudaki tüm hoparlör botlarını listele ve yapılandır"
+
+cmd.start.description: "Bir ses baskını başlat veya başka bir sunucunun aktif ses baskınına aktarım koduyla misafir olarak katıl"
+cmd.start.opt.code.description: "Başka bir sunucunun aktif ses baskınına ait aktarım kodu (yeni bir baskın başlatmak için boş bırakın)"
+cmd.start.opt.mode.description: "Ses modu: Tek Arayan / Çok Arayan / Tek↔Çok. Varsayılan: Tek Arayan."
+cmd.start.opt.mode.choice.one: "Tek Arayan"
+cmd.start.opt.mode.choice.many: "Çok Arayan"
+cmd.start.opt.mode.choice.one_many: "Tek↔Çok Arayan"
+
+cmd.stop.description: "Tüm aktif hoparlörlerin ses kanallarından ayrılmasını sağla"
+cmd.status.description: "Mevcut hoparlör bağlantılarını ve ses baskını durumunu göster"
+
+# ── Genel hatalar ─────────────────────────────────────────────────────────────
+err.need_manager: "❌ Bu komutu kullanmak için Sunucuyu Yönet iznine veya sunucunun yönetici rolüne sahip olmalısınız."
+err.need_admin: "❌ Bu komutu kullanmak için Yönetici iznine veya sunucunun yönetici rolüne sahip olmalısınız."
+err.guild_only: "bu komut yalnızca bir sunucu içinde kullanılabilir"
+err.unexpected_data_type: "beklenmeyen etkileşim veri türü"
+err.invalid_speaker_id: "geçersiz hoparlör kimliği"
+err.speaker_not_found: "❌ Bu sunucuda hoparlör bulunamadı."
+err.no_more_tokens: "❌ Havuzdaki tüm hoparlör tokenları zaten eklenmiş."
+
+# ── Ses baskını yanıtları ─────────────────────────────────────────────────────
+setup.blocked_active_raid: "⚠️ Bir ses baskını aktifken kurulum kullanılamaz. Önce baskını durdurun."
+
+raid.already_active: "⚠️ Bu sunucuda zaten aktif bir ses baskını var."
+raid.none_active: "⚠️ Bu sunucuda aktif bir ses baskını yok."
+raid.join_blocked_permissions: "❌ Aktarım oturumuna katılınamıyor: önce bot izinlerini düzeltin."
+raid.start_blocked_permissions: "❌ Ses baskını başlatılamıyor: önce bot izinlerini düzeltin."
+raid.join_failed: "❌ `{{.Code}}` aktarım oturumuna katılma başarısız oldu: {{.Err}}"
+raid.no_bound_speakers: "⚠️ Bu sunucuda yapılandırılmış hoparlör botu yok. `/setup` → **Hoparlörleri Bağla** menüsünü açın, bir hoparlörü etkinleştirip ses kanalını seçin ve tekrar deneyin.\n_Bağlantılar sunucuya özeldir — aktarım kodu diğer sunucunun yapılandırmasını taşımaz._"
+raid.start_failed: "❌ Ses baskını başlatılamadı: {{.Err}}"
+raid.stop_failed: "❌ Ses baskını durdurulamadı: {{.Err}}"
+raid.joined: "🔴 **Aktarım oturumuna katılındı:** `{{.Code}}`, mod: {{.Mode}}. Hoparlörler bağlı oldukları kanallara bağlanıyor."
+raid.started: "🔴 **Ses baskını başladı.** Etkinleştirilmiş tüm hoparlörler bağlı oldukları kanallara katıldı."
+raid.started_with_code: "🔴 **Ses baskını başladı.** Etkinleştirilmiş tüm hoparlörler bağlı oldukları kanallara katıldı. Aktarım kodu: `{{.Code}}`"
+raid.stopped: "⚫ **Ses baskını durduruldu.** Tüm hoparlörler kanallarından ayrıldı."
+
+# ── İzin uyarısı ──────────────────────────────────────────────────────────────
+permissions.warning_header: "\n\n⚠️ **Bazı botlar kanallarına erişemiyor (Bağlan/Konuş izni eksik):**"
+
+# ── Kurulum arayüzü ───────────────────────────────────────────────────────────
+setup.main_title: "**Hoparlör Kurulumu**"
+setup.roles_title: "**Rol Bağlantıları**"
+setup.speakers_title: "**Hoparlör Bağlantıları** — Sayfa {{.Page}}/{{.Total}}"
+setup.no_speakers: "_Henüz kayıtlı hoparlör yok._"
+setup.speakers_count:
+  one: "_Toplam {{.Count}} hoparlör._"
+  other: "_Toplam {{.Count}} hoparlör._"
+
+setup.bind_caller_placeholder: "Komutçu botu bir ses kanalına bağlayın…"
+setup.bind_speaker_placeholder: "{{.Username}} kullanıcısını bir ses kanalına bağlayın…"
+setup.select_caller_role: "Sesi yakalanacak rolünü seçin…"
+setup.select_manager_role: "Yönetici rolünü seçin…"
+setup.locale_placeholder: "Bot dilini seçin…"
+setup.locale_auto: "🌐 Otomatik (kullanıcının istemci dili)"
+
+speaker.add_title: "**Hoparlör Botu Ekle**"
+speaker.add_steps: "1. **Sunucuya Davet Et** düğmesine tıklayın — bot bu sunucu için önceden seçilecektir.\n2. Tarayıcıda yetkilendirme işlemini tamamlayın.\n3. Bot sunucuya katıldığında otomatik olarak kaydedilecektir."
+
+# ── Düğmeler ──────────────────────────────────────────────────────────────────
+btn.main_menu: "🏠 Ana Menü"
+btn.bind_roles: "🎭 Rolleri Bağla"
+btn.bind_speakers: "⚙️ Hoparlörleri Bağla"
+btn.add_speaker: "➕ Hoparlör Ekle"
+btn.invite: "🔗 Sunucuya Davet Et"
+btn.enable: "Etkinleştir"
+btn.disable: "Devre Dışı Bırak"
+
+# ── Durum (Status.Render) ─────────────────────────────────────────────────────
+status.guild: "Sunucu"
+status.capture_role: "Yakalama Rolü"
+status.manager_role: "Yönetici Rolü"
+status.owner_channel: "Ana Bot Kanalı"
+status.not_set: "ayarlanmadı"
+status.unbound: "bağlı değil"
+status.ally_code: "Müttefik Kodu"
+status.raid: "Ses Baskını"
+status.raid_inactive: "⚫ aktif değil"
+status.speakers_header:
+  one: "Hoparlörler ({{.Count}}):"
+  other: "Hoparlörler ({{.Count}}):"
+status.raid_active:
+  one: "🔴 aktif ({{.Count}} hoparlör katıldı)"
+  other: "🔴 aktif ({{.Count}} hoparlör katıldı)"
+status.raid_active_with_guests:
+  one: "🔴 aktif ({{.Count}} hoparlör katıldı) — misafirler: {{.Guests}}"
+  other: "🔴 aktif ({{.Count}} hoparlör katıldı) — misafirler: {{.Guests}}"
+status.raid_guest:
+  one: "🔴 misafir aktarımı → {{.Host}} ({{.Count}} hoparlör katıldı)"
+  other: "🔴 misafir aktarımı → {{.Host}} ({{.Count}} hoparlör katıldı)"
+
+# ── Baskın modu etiketleri (RaidMode.Pretty) ──────────────────────────────────
+raid_mode.one_caller_host: "Tek Komutçu (sunucu)"
+raid_mode.many_callers_host: "Çoklu Komutçu (sunucu)"
+raid_mode.listener_guest: "Dinleyici (misafir)"
+raid_mode.caller_guest: "Komutçu (misafir)"
+raid_mode.one_many_callers_host: "Tek↔Çok Arayan (sunucu)"
+raid_mode.one_many_caller_guest: "Tek↔Çok Arayan (misafir)"

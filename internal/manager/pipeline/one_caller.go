@@ -119,7 +119,7 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 		// see this guild as capturing.
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
 		StartChannelMixers(ctx, p.GM, destinations, channelMixers, nil)
-		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup)
+		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup, string(p.Mode))
 		// Initial route: the cache is now up to date with voice states for
 		// every member in the owner channel (prefetchChannelMembers and the
 		// pre-StartVoiceRaid cache warm ran already), so Recompute can

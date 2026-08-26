@@ -161,7 +161,7 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
 		channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}
 		StartChannelMixers(ctx, p.GM, ownerDests, channelMixers, relayFeed)
-		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup)
+		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup, string(p.Mode))
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)
 	}

@@ -60,13 +60,13 @@ func (g GuildMetrics) Drop(path DropPath) func() {
 }
 
 // SessionStarted records a raid start using the bundled guild ID.
-func (g GuildMetrics) SessionStarted(speakerCount int) {
-	g.session.SessionStarted(g.ctx, g.guildID, speakerCount)
+func (g GuildMetrics) SessionStarted(speakerCount int, mode string) {
+	g.session.SessionStarted(g.ctx, g.guildID, speakerCount, mode)
 }
 
 // SessionStopped records a raid stop using the bundled guild ID.
-func (g GuildMetrics) SessionStopped() {
-	g.session.SessionStopped(g.ctx, g.guildID)
+func (g GuildMetrics) SessionStopped(mode string) {
+	g.session.SessionStopped(g.ctx, g.guildID, mode)
 }
 
 // RouteTransition records one auto-router source-mode transition using the

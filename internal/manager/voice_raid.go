@@ -120,7 +120,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	start()
 
-	guestGm.SessionStarted(len(setup.Joined))
+	guestGm.SessionStarted(len(setup.Joined), string(guestMode))
 	span.SetAttributes(attribute.Int("speaker.count", len(setup.Joined)))
 	slog.InfoContext(ctx, "guest joined relay session",
 		slog.String("guildID", guestGuildID.String()),
@@ -147,7 +147,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			pipelineCleanup()
 			m.sessions.RemoveGuest(guestGuildID)
 			m.clearAppliers(guestGuildID)
-			guestGm.SessionStopped()
+			guestGm.SessionStopped(string(guestMode))
 			span.End()
 			slog.InfoContext(ctx, "guest session ended", slog.String("guildID", guestGuildID.String()))
 		}()
@@ -276,7 +276,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// Initial pause state (per-cascade + listener check) is seeded by the
 	// router's Recompute inside start(); no separate sync pass needed.
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
-	gm.SessionStarted(len(setup.Joined))
+	gm.SessionStarted(len(setup.Joined), string(mode))
 	logMsg := "voice raid started"
 	if mode.IsDirectPassthrough() {
 		logMsg = "voice raid started (direct passthrough)"

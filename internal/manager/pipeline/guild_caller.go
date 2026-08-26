@@ -141,7 +141,7 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 		// attaches or leaves.
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
 		StartChannelMixers(ctx, p.GM, destinations, channelMixers, relayFeed)
-		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup)
+		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup, string(p.Mode))
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)
 	}

@@ -14,6 +14,7 @@ type SessionMetrics struct {
 	starts           metric.Int64Counter
 	stops            metric.Int64Counter
 	speakers         metric.Int64Gauge
+	mode             metric.Int64Gauge
 	dropped          metric.Int64Counter
 	routeTransitions metric.Int64Counter
 }
@@ -39,6 +40,11 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	if s.mode, err = meter.Int64Gauge("gdc.session.mode",
+		metric.WithDescription("1 while a guild's active voice raid session is using the labelled mode, 0 once that session ends. Labels: guild_id, mode."),
+	); err != nil {
+		return
+	}
 	if s.dropped, err = meter.Int64Counter("gdc.fanout.frames.dropped.total",
 		metric.WithDescription("Opus frames dropped due to full channels in the fanout/relay pipeline."),
 	); err != nil {
@@ -53,21 +59,31 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 }
 
 // SessionStarted records the start of a voice raid: increments active counter,
-// start total, and sets the speaker gauge for guildID.
-func (s *SessionMetrics) SessionStarted(ctx context.Context, guildID snowflake.ID, speakerCount int) {
+// start total, sets the speaker gauge for guildID, and flags mode as the
+// session's active mode.
+func (s *SessionMetrics) SessionStarted(ctx context.Context, guildID snowflake.ID, speakerCount int, mode string) {
 	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
 	s.active.Add(ctx, 1, attrs)
 	s.starts.Add(ctx, 1, attrs)
 	s.speakers.Record(ctx, int64(speakerCount), attrs)
+	s.mode.Record(ctx, 1, metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("mode", mode),
+	))
 }
 
 // SessionStopped records the end of a voice raid: resets speaker gauge to 0,
-// decrements active counter, and increments stop total.
-func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.ID) {
+// clears the mode gauge for mode (the mode the ending session was started
+// with), decrements active counter, and increments stop total.
+func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.ID, mode string) {
 	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
 	s.speakers.Record(ctx, 0, attrs)
 	s.active.Add(ctx, -1, attrs)
 	s.stops.Add(ctx, 1, attrs)
+	s.mode.Record(ctx, 0, metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("mode", mode),
+	))
 }
 
 // RouteTransition records one source-mode transition (off/copy/mix) for

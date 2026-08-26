@@ -18,9 +18,9 @@ import (
 // EndSession runs the common host session teardown: invokes ownerCleanup, records
 // the stop metric, ends the tracing span, and logs the session end.
 // Intended to be called as a deferred statement inside session goroutines.
-func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetrics) {
+func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetrics, mode string) {
 	ownerCleanup()
-	gm.SessionStopped()
+	gm.SessionStopped(mode)
 	trace.SpanFromContext(ctx).End()
 	slog.InfoContext(ctx, "voice raid ended", slog.String("guildID", gm.GuildID().String()))
 }
@@ -71,13 +71,13 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 // produced frame directly to all guest guilds. EndSession runs after Run
 // returns, by which time tick (and therefore the sink) is no longer invoked,
 // so cleanup is ordered after the last broadcast.
-func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func()) {
+func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func(), mode string) {
 	guildID := gm.GuildID()
 	relayMixer.SetSink(func(pkt []byte) {
 		relaySession.BroadcastFromGuild(guildID, pkt)
 	})
 	go func() {
-		defer EndSession(ctx, ownerCleanup, gm)
+		defer EndSession(ctx, ownerCleanup, gm, mode)
 		relayMixer.Run(ctx)
 	}()
 }

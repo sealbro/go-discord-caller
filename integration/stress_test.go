@@ -4,12 +4,38 @@ package integration
 
 import (
 	"context"
+	"os"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sealbro/go-discord-caller/internal/guild"
 )
+
+// stressDuration returns how long a stress test should run. STRESS_DURATION
+// overrides the test's default (any Go duration string, e.g. "90m", "2h"), so a
+// listen-by-ear session can be stretched or cut short without editing code.
+//
+// Remember to raise `go test -timeout` to match — the Makefile targets do this
+// automatically.
+func stressDuration(t *testing.T, def time.Duration) time.Duration {
+	t.Helper()
+
+	raw := os.Getenv("STRESS_DURATION")
+	if raw == "" {
+		return def
+	}
+
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		t.Fatalf("STRESS_DURATION=%q: %v", raw, err)
+	}
+	if d <= 0 {
+		t.Fatalf("STRESS_DURATION=%q: must be positive", raw)
+	}
+
+	return d
+}
 
 // TestStress_AllBotsPlayAudio connects all three harness bots to voice channels and plays
 // audio files for a fixed duration so the output can be verified by ear. The bot code
@@ -22,12 +48,13 @@ import (
 //
 // Run explicitly:
 //
-//	go test --tags=stress -run TestStress_AllBotsPlayAudio -v -timeout 7m ./integration/
+//	make test-stress-audio                      # default 50m
+//	make test-stress-audio STRESS_DURATION=2h   # listen for two hours
 func TestStress_AllBotsPlayAudio(t *testing.T) {
 	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
-	const runDuration = 50 * time.Minute
+	runDuration := stressDuration(t, 50*time.Minute)
 
 	ctx, cancel := context.WithTimeout(t.Context(), runDuration+30*time.Second)
 	defer cancel()
@@ -49,8 +76,8 @@ func TestStress_AllBotsPlayAudio(t *testing.T) {
 	t.Log("TestStress_AllBotsPlayAudio complete")
 }
 
-// TestStress_OneManyStarTopologyLong runs the star-topology scenario for 5 minutes
-// and checks for audio quality regressions that manifest as robotic or choppy voice.
+// TestStress_OneManyStarTopologyLong runs the star-topology scenario for a
+// configurable duration (default 5 minutes) and checks for audio quality regressions that manifest as robotic or choppy voice.
 //
 // Every second the test samples the owner-channel frame counter. At the end of each
 // 30-second window it checks:
@@ -59,13 +86,15 @@ func TestStress_AllBotsPlayAudio(t *testing.T) {
 //
 // Run explicitly:
 //
-//	go test --tags=integration -run TestE8_OneManyStarTopologyLong -v -timeout 7m ./integration/
+//	make test-stress-star                        # default 5m
+//	make test-stress-star STRESS_DURATION=30m    # 30-minute stability run
 func TestStress_OneManyStarTopologyLong(t *testing.T) {
 	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
+	runDuration := stressDuration(t, 5*time.Minute)
+
 	const (
-		runDuration     = 5 * time.Minute
 		windowDuration  = 30 * time.Second
 		sampleInterval  = 1 * time.Second
 		minWindowFrames = int64(1200) // 80 % of ~1500 expected (50 fps × 30 s)
@@ -86,7 +115,7 @@ func TestStress_OneManyStarTopologyLong(t *testing.T) {
 
 	// Wait for steady-state audio before the measurement window begins.
 	AssertFramesReceived(t, h.Listener, h.OwnerID, 100, 10*time.Second)
-	t.Log("E8: steady state reached, starting 5-minute quality observation")
+	t.Logf("E8: steady state reached, starting %s quality observation", runDuration)
 
 	// Collect per-second frame deltas in a background goroutine.
 	type sample struct{ delta int64 }
@@ -156,11 +185,11 @@ func TestStress_OneManyStarTopologyLong(t *testing.T) {
 	}
 
 	total := h.Listener.Receiver.FramesReceived(h.OwnerID)
-	t.Logf("E8 passed: %d total frames over 5 minutes in OneManyStarTopology", total)
+	t.Logf("E8 passed: %d total frames over %s in OneManyStarTopology", total, runDuration)
 }
 
-// TestStress_GuildCallerMixMinusLong runs the mix-minus scenario for 5 minutes
-// and checks for audio quality regressions that manifest as robotic or choppy voice.
+// TestStress_GuildCallerMixMinusLong runs the mix-minus scenario for a
+// configurable duration (default 5 minutes) and checks for audio quality regressions that manifest as robotic or choppy voice.
 //
 // Every second the test samples the speaker1-channel frame counter. At the end of each
 // 30-second window it checks:
@@ -169,13 +198,15 @@ func TestStress_OneManyStarTopologyLong(t *testing.T) {
 //
 // Run explicitly:
 //
-//	go test --tags=stress -run TestStress_GuildCallerMixMinusLong -v -timeout 7m ./integration/
+//	make test-stress-mixminus                        # default 5m
+//	make test-stress-mixminus STRESS_DURATION=30m    # 30-minute stability run
 func TestStress_GuildCallerMixMinusLong(t *testing.T) {
 	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
+	runDuration := stressDuration(t, 5*time.Minute)
+
 	const (
-		runDuration     = 5 * time.Minute
 		windowDuration  = 30 * time.Second
 		sampleInterval  = 1 * time.Second
 		minWindowFrames = int64(1200) // 80 % of ~1500 expected (50 fps × 30 s)
@@ -197,7 +228,7 @@ func TestStress_GuildCallerMixMinusLong(t *testing.T) {
 
 	// Wait for steady-state audio before the measurement window begins.
 	AssertSSRCSeen(t, h.Listener, speakerIDs[0], 10*time.Second)
-	t.Log("GuildCallerMixMinusLong: steady state reached, starting 5-minute quality observation")
+	t.Logf("GuildCallerMixMinusLong: steady state reached, starting %s quality observation", runDuration)
 
 	// Collect per-second frame deltas in a background goroutine.
 	type sample struct{ delta int64 }
@@ -267,5 +298,5 @@ func TestStress_GuildCallerMixMinusLong(t *testing.T) {
 	}
 
 	total := h.Listener.Receiver.FramesReceived(speakerIDs[0])
-	t.Logf("GuildCallerMixMinusLong passed: %d total frames over 5 minutes in GuildCallerMixMinus", total)
+	t.Logf("GuildCallerMixMinusLong passed: %d total frames over %s in GuildCallerMixMinus", total, runDuration)
 }

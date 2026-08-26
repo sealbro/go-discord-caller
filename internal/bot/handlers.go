@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
@@ -53,13 +54,18 @@ func onReady(m ManagerService) func(*events.Ready) {
 // voice channels emit no new join events).
 func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildAvailable) {
 	return func(e *events.GuildAvailable) {
+		membersByID := make(map[snowflake.ID]discord.Member, len(e.Guild.Members))
+		for _, member := range e.Guild.Members {
+			membersByID[member.User.ID] = member
+		}
+
 		// Seed VoiceCallers from voice states present in the GUILD_CREATE payload.
 		counts := make(map[snowflake.ID]int64) // channelID → caller count
 		for _, vs := range e.Guild.VoiceStates {
 			if vs.ChannelID == nil {
 				continue
 			}
-			member, ok := e.Client().Caches.Member(e.GuildID, vs.UserID)
+			member, ok := membersByID[vs.UserID]
 			if !ok || member.User.Bot {
 				continue
 			}

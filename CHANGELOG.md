@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.5] - 2026-08-22
+## [0.9.6] - 2026-08-26
+
+### Added
+- **Turkish language support**: the bot's slash commands, setup UI, and status messages can now be displayed in Turkish. Thanks to first-time contributor @hasanunlukilinc for this! ([#54](https://github.com/sealbro/go-discord-caller/pull/54))
+- **Raid mode dashboard tracking**: monitoring now shows which audio mode (One Caller / Many Callers / One↔Many) each active voice raid is running, per server.
+
+### Changed
+- **Clearer voice diagnostics logs**: log lines from the voice layer are now tagged with the bot they came from, so an issue with one bot's voice connection can be told apart from another's instead of looking identical in the logs.
+
+
 
 ### Fixed
 - **Listeners going silent a few seconds into a raid**: with two or more people talking, a pause longer than five seconds cut the audio for good. It now resumes on its own.

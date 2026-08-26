@@ -14,6 +14,7 @@ var discordLocaleToBundle = map[discord.Locale]string{
 	discord.LocaleFrench:       "fr",
 	discord.LocalePortugueseBR: "pt",
 	discord.LocalePolish:       "pl",
+	discord.LocaleTurkish:      "tr",
 }
 
 // bundleLocaleFromDiscord returns the bundle locale code for the given Discord
@@ -31,7 +32,7 @@ func bundleLocaleFromDiscord(d discord.Locale) string {
 // SupportedBundleLocales returns the set of bundle locale codes that the
 // /setup dropdown should expose. Order matches the dropdown rendering.
 func SupportedBundleLocales() []string {
-	return []string{"en", "es", "de", "fr", "pt", "pl", "ru"}
+	return []string{"en", "es", "de", "fr", "pt", "pl", "ru", "tr"}
 }
 
 // DisplayName returns a human-readable native-language name for a bundle locale.
@@ -54,6 +55,8 @@ func DisplayName(bundleLocale string) string {
 		return "🇵🇱 Polski"
 	case "ru":
 		return "🇷🇺 Русский"
+	case "tr":
+		return "🇹🇷 Turkish"
 	default:
 		return bundleLocale
 	}

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Clearer voice diagnostics logs**: log lines from the voice layer are now tagged with the bot they came from, so an issue with one bot's voice connection can be told apart from another's instead of looking identical in the logs.
 
-
+## [0.9.5] - 2026-08-22
 
 ### Fixed
 - **Listeners going silent a few seconds into a raid**: with two or more people talking, a pause longer than five seconds cut the audio for good. It now resumes on its own.

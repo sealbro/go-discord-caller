@@ -696,6 +696,58 @@ func TestOnVoiceJoin_HumanUpdatesPauseAndNotifies(t *testing.T) {
 	}
 }
 
+func TestOnGuildAvailable_MemberCacheMissThenLeave_NetsToZero(t *testing.T) {
+	t.Parallel()
+	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true }}
+	metrics, collect := newRecordingBotMetrics(t)
+
+	guildID := snowflake.ID(50)
+	userID := snowflake.ID(123)
+	chID := snowflake.ID(1001)
+
+	client := newTestClient()
+
+	onGuildAvailable(f, metrics)(&events.GuildAvailable{
+		GenericGuild: &events.GenericGuild{
+			GenericEvent: events.NewGenericEvent(client, 0, 0),
+			GuildID:      guildID,
+		},
+		Guild: discord.GatewayGuild{
+			RestGuild: discord.RestGuild{Guild: discord.Guild{ID: guildID}},
+			VoiceStates: []discord.VoiceState{
+				{GuildID: guildID, UserID: userID, ChannelID: &chID},
+			},
+			Members: []discord.Member{
+				{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}},
+			},
+		},
+	})
+
+	if got := collect(); got[chID.String()] != 1 {
+		t.Fatalf("seed should count the caller already in the channel from Guild.Members; got %v", got)
+	}
+
+	// The user leaves later; the leave event carries a full Member with
+	// RoleIDs regardless of what the cache had, so this always fires.
+	onVoiceLeave(f, metrics)(&events.GuildVoiceLeave{
+		GenericGuildVoiceState: &events.GenericGuildVoiceState{
+			GenericEvent: events.NewGenericEvent(client, 0, 0),
+			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: nil},
+			Member:       discord.Member{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}},
+		},
+		OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &chID},
+	})
+
+	got := collect()
+	var total int64
+	for _, v := range got {
+		total += v
+	}
+	if total != 0 {
+		t.Errorf("seed-then-leave must net to zero; got %d (per-channel %v) — a member-cache miss during onGuildAvailable let this caller leave uncounted, driving gdc.voice.callers negative", total, got)
+	}
+}
+
 func TestOnVoiceJoin_BotIsSkipped(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{

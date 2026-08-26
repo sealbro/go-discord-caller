@@ -56,7 +56,7 @@ func DisplayName(bundleLocale string) string {
 	case "ru":
 		return "🇷🇺 Русский"
 	case "tr":
-		return "🇹🇷 Turkish"
+		return "🇹🇷 Türkçe"
 	default:
 		return bundleLocale
 	}

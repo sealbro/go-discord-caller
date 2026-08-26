@@ -65,6 +65,8 @@ func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) 
 
 // newPoolClient builds a disgo client for a speaker bot token.
 func newPoolClient(token string) (*bot.Client, error) {
+	botUserID, _ := guild.BotUserID(token)
+
 	return disgo.New(token,
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
@@ -72,7 +74,7 @@ func newPoolClient(token string) (*bot.Client, error) {
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			SafeUDPConnOpt(),
-			voice.WithLogger(telemetry.VoiceLogger()),
+			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	)
 }

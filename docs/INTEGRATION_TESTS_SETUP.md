@@ -197,17 +197,37 @@ go test --tags=integration --timeout=30s -v -run TestE1_OneCaller ./integration/
 `integration/stress_test.go` carries `//go:build stress`, **not** `integration`,
 so the normal suite never picks it up. These tests run for tens of minutes (the
 audible "play all bots" harness runs ~50 min) and are meant for manual, by-ear
-verification — run them explicitly with `--tags=stress`:
+verification — run them explicitly via the `make` targets:
 
 ```bash
-go test --tags=stress -run TestStress_AllBotsPlayAudio -v -timeout 60m ./integration/...
+make test-stress-audio      # all 3 bots play audio, listen in Discord (default 50m)
+make test-stress-star       # OneManyGuildCaller star topology  (default 5m)
+make test-stress-mixminus   # GuildCaller mix-minus             (default 5m)
+make test-stress            # all three, sequentially
 ```
 
-| Test | What it does | Needs |
-|------|--------------|-------|
-| `TestStress_AllBotsPlayAudio` | Connects all three harness bots to channels and plays audio for ~50 min for by-ear checks. Does **not** start the manager/raid — run the bot manually first. | source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
-| `TestStress_OneManyStarTopologyLong` | Sustained `OneManyGuildCaller` star-topology relay over a long window. | source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
-| `TestStress_GuildCallerMixMinusLong` | Sustained `GuildCaller` mix-minus throughput; asserts no per-second gap > 2 s. | source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
+`STRESS_DURATION` overrides the built-in duration with any Go duration string and
+raises `go test -timeout` to match (+10 min headroom), so a soak run is never cut
+short by the test binary:
+
+```bash
+make test-stress-audio STRESS_DURATION=2h    # -> go test -timeout 2h10m
+make test-stress-star  STRESS_DURATION=30m
+```
+
+Equivalent raw invocation, if you prefer not to use `make`:
+
+```bash
+STRESS_DURATION=2h go test --tags=stress -run TestStress_AllBotsPlayAudio -v -count=1 -timeout 2h10m ./integration/
+```
+
+Stop early with `Ctrl-C` — the deferred cleanups disconnect the bots.
+
+| Test | `make` target | Default | What it does | Needs |
+|------|---------------|---------|--------------|-------|
+| `TestStress_AllBotsPlayAudio` | `test-stress-audio` | 50m | Connects all three harness bots to channels and plays audio for by-ear checks. Does **not** start the manager/raid — run `go run ./cmd/bot` first. | source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
+| `TestStress_OneManyStarTopologyLong` | `test-stress-star` | 5m | Sustained `OneManyGuildCaller` star-topology relay; asserts per-30s-window frame counts. | source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
+| `TestStress_GuildCallerMixMinusLong` | `test-stress-mixminus` | 5m | Sustained `GuildCaller` mix-minus throughput; asserts no per-second gap > 2 s. | source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
 
 ### 5.2 Coverage
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/disgoorg/snowflake/v2"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
@@ -41,7 +42,8 @@ func (h levelHandler) WithGroup(name string) slog.Handler {
 
 const ServiceName = "go-discord-caller"
 
-// VoiceLogger returns the logger handed to disgo's voice manager.
+// VoiceLogger returns the logger handed to disgo's voice manager, tagged with
+// the bot whose voice connections it covers.
 //
 // This used to be slog.DiscardHandler, which silently dropped every diagnostic
 // from the voice layer — gateway closes, reconnect attempts, UDP open failures,
@@ -53,11 +55,22 @@ const ServiceName = "go-discord-caller"
 // Gated at Warn: disgo's voice Debug output is per-event and includes a line
 // for every VoiceStateUpdate, which would swamp the OTLP log pipeline. Warn and
 // above is exactly the set worth exporting.
-func VoiceLogger() *slog.Logger {
-	return slog.New(levelHandler{
+//
+// botUserID is mandatory in practice: every line disgo emits from the voice
+// layer is otherwise identical across the owner bot and all speaker bots, so a
+// burst of "failed to encrypt packet: missing key ratchet" (one connection gone
+// silent) cannot be attributed to a bot at all. Pass 0 only when the ID is
+// genuinely unknown — the attribute is then omitted rather than logged as "0".
+func VoiceLogger(botUserID snowflake.ID) *slog.Logger {
+	logger := slog.New(levelHandler{
 		level:   slog.LevelWarn,
 		Handler: slog.Default().Handler(),
 	}).With(slog.String("component", "voice"))
+
+	if botUserID == 0 {
+		return logger
+	}
+	return logger.With(slog.String("botUserID", botUserID.String()))
 }
 
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.

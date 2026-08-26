@@ -297,12 +297,14 @@ func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, comman
 // Base config covers DAVE E2EE voice and FlagsAll cache. Callers supply
 // their own intents and any extra options (e.g. event listeners, extra intents).
 func NewOwnerClient(token string, opts ...bot.ConfigOpt) (*bot.Client, error) {
+	botUserID, _ := guild.BotUserID(token)
+
 	base := []bot.ConfigOpt{
 		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			pool.SafeUDPConnOpt(),
-			voice.WithLogger(telemetry.VoiceLogger()),
+			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	}
 	return disgo.New(token, append(base, opts...)...)

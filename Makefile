@@ -10,10 +10,28 @@ STRESS_TIMEOUT := $(if $(STRESS_DURATION),$(STRESS_DURATION)10m,60m)
 STRESS_FLAGS := --tags=stress -v -count=1 -timeout $(STRESS_TIMEOUT) ./integration/
 
 .PHONY: test test-unit test-integration coverage clean-cache \
-	test-stress test-stress-audio test-stress-star test-stress-mixminus
+	test-stress test-stress-audio test-stress-star test-stress-mixminus \
+	release
 
 clean-cache:
 	go clean -testcache
+
+RELEASE_VERSION := $(shell grep -m1 -oE '^\#\# \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+
+release:
+	@if [ -z "$(RELEASE_VERSION)" ]; then \
+		echo "Could not find a version heading in CHANGELOG.md"; exit 1; \
+	fi
+	@if git rev-parse "$(RELEASE_VERSION)" >/dev/null 2>&1; then \
+		echo "Tag $(RELEASE_VERSION) already exists"; exit 1; \
+	fi
+	@read -p "Do you want to make this $(RELEASE_VERSION) release? [y/N] " ans; \
+	case "$$ans" in \
+		[yY]) ;; \
+		*) echo "Aborted"; exit 1;; \
+	esac
+	git tag $(RELEASE_VERSION)
+	git push origin $(RELEASE_VERSION)
 
 test-unit:
 	go test --race -covermode=atomic -coverprofile=unit.out \

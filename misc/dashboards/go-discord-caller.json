@@ -3655,7 +3655,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)",
+                        "expr": "label_replace(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1) * on(guild_id) group_left(session_mode_src) label_replace(gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} == 1, \"session_mode_src\", \"$1\", \"mode\", \"(.*)\"), \"session_label\", \"Active ($1)\", \"session_mode_src\", \"(.*)\")",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Active Session",
@@ -3664,25 +3664,6 @@
                       "version": "v0"
                     },
                     "refId": "D"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} == 1",
-                        "format": "table",
-                        "instant": true,
-                        "legendFormat": "__auto",
-                        "range": false
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "E"
                   }
                 },
                 {
@@ -3718,7 +3699,6 @@
                   "id": "organize",
                   "options": {
                     "excludeByName": {
-                      "Time 1": true,
                       "Time 2": true,
                       "Time 3": true,
                       "Time 4": true,
@@ -3729,40 +3709,38 @@
                       "origin_prometheus 3": true,
                       "origin_prometheus 4": true,
                       "origin_prometheus 5": true,
-                      "origin_prometheus 6": true,
                       "__name__ 1": true,
                       "__name__ 2": true,
                       "__name__ 3": true,
                       "__name__ 4": true,
                       "__name__ 5": true,
-                      "__name__ 6": true,
                       "job 1": true,
                       "job 2": true,
                       "job 3": true,
                       "job 4": true,
                       "job 5": true,
-                      "job 6": true,
                       "Value #A": true,
-                      "Value #E": true
+                      "Value #D": true,
+                      "session_mode_src": true
                     },
                     "indexByName": {
-                      "guild_id": 0,
-                      "guild_name": 1,
-                      "origin_prometheus": 2,
-                      "Value #B": 3,
-                      "Value #C": 4,
-                      "Value #F": 5,
-                      "Value #D": 6,
-                      "mode": 7
+                      "guild_name": 0,
+                      "origin_prometheus": 1,
+                      "Value #B": 2,
+                      "Value #C": 3,
+                      "Value #F": 4,
+                      "session_label": 5,
+                      "Time 1": 6,
+                      "guild_id": 7
                     },
                     "renameByName": {
                       "Value #B": "Speakers",
                       "Value #C": "Bots Active",
-                      "Value #D": "Active Session",
+                      "session_label": "Active Session",
                       "Value #F": "Callers",
                       "guild_id": "Guild ID",
                       "guild_name": "Guild",
-                      "mode": "Mode",
+                      "Time 1": "Time",
                       "origin_prometheus": "Source"
                     }
                   }
@@ -3770,7 +3748,7 @@
               ]
             }
           },
-          "description": "Per-guild overview: bots connected, speakers bound to the active session, whether a raid session is currently active, and the raid mode it is using.",
+          "description": "Per-guild overview: bots connected, speakers bound to the active session, and whether a raid session is currently active (with its raid mode shown inline, e.g. \"Active (guild_caller)\").",
           "id": 32,
           "links": [],
           "title": "Guild Overview",
@@ -3820,39 +3798,27 @@
                         "id": "mappings",
                         "value": [
                           {
-                            "type": "value",
+                            "type": "regex",
                             "options": {
-                              "0": {
+                              "pattern": "^Active",
+                              "result": {
+                                "color": "dark-green",
+                                "index": 0
+                              }
+                            }
+                          },
+                          {
+                            "type": "special",
+                            "options": {
+                              "match": "null",
+                              "result": {
                                 "text": "Inactive",
                                 "color": "dark-red",
-                                "index": 0
-                              },
-                              "1": {
-                                "text": "Active",
-                                "color": "dark-green",
                                 "index": 1
                               }
                             }
                           }
                         ]
-                      }
-                    ]
-                  },
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "Mode"
-                    },
-                    "properties": [
-                      {
-                        "id": "custom.cellOptions",
-                        "value": {
-                          "type": "color-text"
-                        }
-                      },
-                      {
-                        "id": "noValue",
-                        "value": "—"
                       }
                     ]
                   },

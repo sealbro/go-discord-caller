@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New dashboard panels**: track active guilds and voice callers.
 
 ### Changed
-- **More reliable member tracking on guild connect**: reads members from the connection payload instead of the cache.
+- **More accurate voice caller counts on guild connect**: reads from the connection payload instead of the member cache, which could still be empty right after connecting.
 
 ### Fixed
 - **Turkish slash commands not registering**: fixed oversized command descriptions and aligned several Turkish translations closer to the English original.

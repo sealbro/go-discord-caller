@@ -15,6 +15,15 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// countSpeakers reports the total speaker count for telemetry: joined pool
+// speaker bots plus the owner bot, if it also joined and is relaying audio.
+func countSpeakers(joined int, ownerJoined bool) int {
+	if ownerJoined {
+		return joined + 1
+	}
+	return joined
+}
+
 // JoinSession connects this guild as a guest to an existing relay session.
 // guestMode is the caller-mode chosen by the guest (RaidModeAllyListener or
 // RaidModeAllyCaller). When the host does not allow guest capture the mode
@@ -120,14 +129,15 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	start()
 
-	guestGm.SessionStarted(len(setup.Joined), string(guestMode))
-	span.SetAttributes(attribute.Int("speaker.count", len(setup.Joined)))
+	speakerCount := countSpeakers(len(setup.Joined), ownerCleanup != nil)
+	guestGm.SessionStarted(speakerCount, string(guestMode))
+	span.SetAttributes(attribute.Int("speaker.count", speakerCount))
 	slog.InfoContext(ctx, "guest joined relay session",
 		slog.String("guildID", guestGuildID.String()),
 		slog.String("hostMode", string(allySession.HostMode)),
 		slog.String("guestMode", string(guestMode)),
 		slog.String("code", code),
-		slog.Int("activeSpeakers", len(setup.Joined)),
+		slog.Int("activeSpeakers", speakerCount),
 		slog.Bool("ownerRelaying", ownerCleanup != nil),
 	)
 	go func() {
@@ -235,9 +245,12 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	m.watchVoiceReady(guildID, m.ownerBotID, conn)
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
+	// Owner bot always joins the host channel (join failures abort above), so
+	// it counts as a speaker alongside the pool bots in setup.Joined.
+	speakerCount := countSpeakers(len(setup.Joined), true)
 	span.SetAttributes(
 		attribute.String("relay.code", allyCode),
-		attribute.Int("speaker.count", len(setup.Joined)),
+		attribute.Int("speaker.count", speakerCount),
 	)
 	// errCleanup undoes everything that committed after allySession was created.
 	errCleanup := func() {
@@ -276,7 +289,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// Initial pause state (per-cascade + listener check) is seeded by the
 	// router's Recompute inside start(); no separate sync pass needed.
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
-	gm.SessionStarted(len(setup.Joined), string(mode))
+	gm.SessionStarted(speakerCount, string(mode))
 	logMsg := "voice raid started"
 	if mode.IsDirectPassthrough() {
 		logMsg = "voice raid started (direct passthrough)"
@@ -287,7 +300,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		slog.String("guildID", guildID.String()),
 		slog.String("mode", string(mode)),
 		slog.String("code", allyCode),
-		slog.Int("activeSpeakers", len(setup.Joined)),
+		slog.Int("activeSpeakers", speakerCount),
 	)
 	start()
 	return allyCode, nil

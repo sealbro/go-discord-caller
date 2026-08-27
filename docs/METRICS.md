@@ -82,7 +82,7 @@ the opus pipeline via `FrameDropper`.
 | `gdc.voice.sessions.active`         | UpDownCounter | `gdc_voice_sessions_active`         | `guild_id` | Currently active voice raid sessions. |
 | `gdc.voice.session.start.total`     | Counter       | `gdc_voice_session_start_total`     | `guild_id` | Voice raid starts. |
 | `gdc.voice.session.stop.total`      | Counter       | `gdc_voice_session_stop_total`      | `guild_id` | Voice raid stops. |
-| `gdc.session.speakers`              | Gauge         | `gdc_session_speakers`              | `guild_id` | Speaker bots that joined the active raid; reset to `0` on stop. |
+| `gdc.session.speakers`              | Gauge         | `gdc_session_speakers`              | `guild_id` | Speakers (pool speaker bots plus the owner bot, if it joined) in the active raid; reset to `0` on stop. |
 | `gdc.fanout.frames.dropped.total`   | Counter       | `gdc_fanout_frames_dropped_total`   | `guild_id`, `path` | Opus frames dropped on full channels. `path`: `mixer` / `direct` / `channel_mixer` / `relay_bridge` / `provider` / `receiver`. |
 | `gdc.session.route_transitions.total` | Counter     | `gdc_session_route_transitions_total` | `guild_id`, `from`, `to` | Auto-router source-mode transitions. `from`/`to`: `off` / `copy` / `mix`. |
 

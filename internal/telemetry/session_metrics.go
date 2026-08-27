@@ -36,7 +36,7 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if s.speakers, err = meter.Int64Gauge("gdc.session.speakers",
-		metric.WithDescription("Number of speaker bots that joined the active voice raid session."),
+		metric.WithDescription("Number of speakers (pool speaker bots plus the owner bot, if it joined) in the active voice raid session."),
 	); err != nil {
 		return
 	}

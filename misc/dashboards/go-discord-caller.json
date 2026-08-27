@@ -3655,7 +3655,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "label_replace(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1) * on(guild_id) group_left(session_mode_src) label_replace(gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} == 1, \"session_mode_src\", \"$1\", \"mode\", \"(.*)\"), \"session_label\", \"Active ($1)\", \"session_mode_src\", \"(.*)\")",
+                        "expr": "label_replace(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1) * on(guild_id, origin_prometheus) group_left(session_mode_src) label_replace(gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} == 1, \"session_mode_src\", \"$1\", \"mode\", \"(.*)\"), \"session_label\", \"Active ($1)\", \"session_mode_src\", \"(.*)\")",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Active Session",

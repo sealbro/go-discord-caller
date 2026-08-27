@@ -52,6 +52,47 @@ func TestBundleParity(t *testing.T) {
 	}
 }
 
+// TestCommandDescriptionLengths asserts every "cmd.*.description" string (and
+// option descriptions) fits Discord's 1-100 char limit for
+// description_localizations. A too-long localized description makes Discord
+// reject the entire application command sync with 50035 Invalid Form Body,
+// breaking slash commands for every guild (issue #58).
+func TestCommandDescriptionLengths(t *testing.T) {
+	entries, err := fs.ReadDir(localesFS, "locales")
+	if err != nil {
+		t.Fatalf("read locales dir: %v", err)
+	}
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
+			continue
+		}
+		t.Run(e.Name(), func(t *testing.T) {
+			data, err := localesFS.ReadFile(path.Join("locales", e.Name()))
+			if err != nil {
+				t.Fatalf("read %s: %v", e.Name(), err)
+			}
+			var raw map[string]any
+			if err := yaml.Unmarshal(data, &raw); err != nil {
+				t.Fatalf("unmarshal %s: %v", e.Name(), err)
+			}
+			for k, v := range raw {
+				if !strings.HasPrefix(k, "cmd.") || !strings.HasSuffix(k, ".description") {
+					continue
+				}
+				s, ok := v.(string)
+				if !ok {
+					continue
+				}
+				n := len([]rune(s))
+				if n < 1 || n > 100 {
+					t.Errorf("%s: %q is %d chars, want 1-100", k, s, n)
+				}
+			}
+		})
+	}
+}
+
 // TestNewBundleLoads ensures NewBundle parses every embedded locale file.
 func TestNewBundleLoads(t *testing.T) {
 	b, err := NewBundle()

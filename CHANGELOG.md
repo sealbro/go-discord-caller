@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.7] - 2026-08-27
+
+### Added
+- **New dashboard panels**: track active guilds and voice callers.
+
+### Changed
+- **More reliable member tracking on guild connect**: reads members from the connection payload instead of the cache.
+
+### Fixed
+- **Turkish slash commands not registering**: fixed oversized command descriptions and aligned several Turkish translations closer to the English original.
+
 ## [0.9.6] - 2026-08-26
 
 ### Added

@@ -345,3 +345,63 @@ func TestDeafenReadinessOK(t *testing.T) {
 		})
 	}
 }
+
+// TestDeafControllerCloseWaitsForInFlightDeafen covers the teardown race raised
+// in review of PR #63.
+//
+// A deafen whose timer fires moments before teardown has not recorded itself
+// yet, so a Close that snapshotted immediately would see deaf=false, skip the
+// bot, and let the PATCH land afterwards — leaving the member server-deafened
+// with nothing left to repair it. For the owner bot that is permanent: it is
+// not covered by the per-speaker Undeafen in BuildSpeakerCleanup, so it would
+// capture silence in every later raid.
+func TestDeafControllerCloseWaitsForInFlightDeafen(t *testing.T) {
+	rec := &deafRecorder{block: make(chan struct{})}
+	c := newTestController(rec)
+	c.Register(testBot, false)
+
+	c.Observe(map[snowflake.ID]bool{testBot: false}) // arm the deafen
+	waitFor(t, "deafen apply to start", func() bool { return rec.attempts() == 1 })
+
+	closed := make(chan struct{})
+	go func() {
+		c.Close(context.Background())
+		close(closed)
+	}()
+
+	// Give Close time to reach the point where it decides what to undo, while
+	// the deafen is still in flight. Without this the apply would usually
+	// record itself first and the race would not be exercised at all.
+	time.Sleep(settleAfter)
+	select {
+	case <-closed:
+		t.Fatal("Close returned while a deafen was still in flight; it did not wait")
+	default:
+	}
+
+	close(rec.block) // let the in-flight deafen land
+
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close did not return")
+	}
+
+	waitFor(t, "both changes to be issued", func() bool { return rec.attempts() >= 2 })
+
+	var deafened, undeafened bool
+	for _, ev := range rec.snapshot() {
+		switch ev {
+		case deafEvent{testBot, true}:
+			deafened = true
+		case deafEvent{testBot, false}:
+			undeafened = true
+		}
+	}
+	if !deafened {
+		t.Fatal("the in-flight deafen never landed; test did not reproduce the race")
+	}
+	if !undeafened {
+		t.Error("Close left the member deafened: it snapshotted before the in-flight apply recorded itself")
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 )
 
 // Server-deafening speaker bots in non-capture raid modes.
@@ -151,6 +152,12 @@ type deafController struct {
 	// in tests to keep them fast.
 	delay time.Duration
 
+	// applying tracks in-flight apply goroutines so Close can wait for them
+	// before deciding what to undo. Without it, a deafen that fired just
+	// before teardown lands *after* Close has snapshotted, stranding the flag
+	// on a member for good.
+	applying sync.WaitGroup
+
 	mu      sync.Mutex
 	members map[snowflake.ID]*deafMember
 	closed  bool
@@ -267,7 +274,9 @@ func (c *deafController) deafenNow(botID snowflake.ID) {
 // Recording it optimistically would make Close try to undo a deafen that never
 // happened, and would let a failed deafen masquerade as applied.
 func (c *deafController) apply(botID snowflake.ID, deaf bool) {
+	c.applying.Add(1)
 	go func() {
+		defer c.applying.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), deafApplyTimeout)
 		defer cancel()
 		err := c.setDeaf(ctx, c.guildID, botID, deaf)
@@ -348,12 +357,35 @@ func (c *deafController) Close(ctx context.Context) {
 		return
 	}
 	c.closed = true
-	var restore []snowflake.ID
-	for botID, mem := range c.members {
+	for _, mem := range c.members {
 		if mem.timer != nil {
 			mem.timer.Stop()
 			mem.timer = nil
 		}
+	}
+	c.mu.Unlock()
+
+	// Wait for applies already in flight before deciding what to undo. A
+	// deafen whose timer fired moments before teardown has not yet recorded
+	// itself, so snapshotting now would skip it and the PATCH would land after
+	// Close returned — leaving the member deafened with nothing left to repair
+	// it. Bounded by ctx: if an apply is wedged, undo what is known rather
+	// than block teardown indefinitely.
+	done := make(chan struct{})
+	go func() {
+		c.applying.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		slog.WarnContext(ctx, "timed out waiting for in-flight deafen changes; a flag may be left set",
+			slog.String("guildID", c.guildID.String()))
+	}
+
+	c.mu.Lock()
+	var restore []snowflake.ID
+	for botID, mem := range c.members {
 		if mem.deaf {
 			restore = append(restore, botID)
 		}
@@ -375,6 +407,19 @@ func (c *deafController) isDisabled() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.disabled
+}
+
+// deafControllerOf recovers the concrete controller from the Setup's DeafSink.
+//
+// pipeline.DeafSink deliberately exposes only what pipelines need (Register /
+// Observe / Close); reconcileSpeakerDeaf additionally reports permission
+// failures through noteError, which is manager-internal. manager is the only
+// implementer of DeafSink, so this assertion always succeeds — and every
+// controller method is nil-safe, so a future second implementer degrades to
+// "no dynamic deafening" rather than panicking.
+func deafControllerOf(sink pipeline.DeafSink) *deafController {
+	c, _ := sink.(*deafController)
+	return c
 }
 
 // DeafenReadiness reports whether the owner bot can server-deafen the guild's

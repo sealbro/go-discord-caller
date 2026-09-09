@@ -83,10 +83,16 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerHandle = handle
 			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, handle, allowUser.Check))
 			m.watchVoiceReady(guestGuildID, m.ownerBotID, conn)
-			// The guest owner bot starts hearing and lets the controller decide.
-			// In listener modes it is provider-only and never a router source,
-			// so it is deafened shortly after the session settles.
-			setup.Deaf.Register(m.ownerBotID, false)
+			// Reconcile the owner exactly as joinSpeakers does for speakers.
+			// Listener modes build no router (GuestListenerPipeline), so the
+			// controller is never told to deafen this bot — it must be handled
+			// statically here or it would keep decrypting relay audio it
+			// discards. The reconcile also repairs a flag stranded by an
+			// earlier session, which nothing else would ever clear for the
+			// owner bot.
+			ownerCaptures := guestMode.WithCapture()
+			ownerUndeafen := m.reconcileSpeakerDeaf(ctx, guestGuildID, m.ownerBotID, ownerCaptures, deafControllerOf(setup.Deaf))
+			setup.Deaf.Register(m.ownerBotID, !ownerCaptures && ownerUndeafen != nil)
 		}
 	}
 	guestCleanupOwner := func() {
@@ -248,7 +254,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Check))
 	m.watchVoiceReady(guildID, m.ownerBotID, conn)
 	// The host owner bot always captures, so it starts hearing; the controller
-	// deafens it if its channel ever empties of role-bearing callers.
+	// deafens it if its channel ever empties of role-bearing callers. Reconcile
+	// rather than assume: a flag stranded by an earlier session would otherwise
+	// persist forever here, since nothing else clears the owner's, and the
+	// controller would believe it is already hearing and never correct it.
+	m.reconcileSpeakerDeaf(ctx, guildID, m.ownerBotID, true, deafControllerOf(setup.Deaf))
 	setup.Deaf.Register(m.ownerBotID, false)
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)

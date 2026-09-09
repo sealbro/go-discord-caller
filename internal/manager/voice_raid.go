@@ -83,6 +83,10 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerHandle = handle
 			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, handle, allowUser.Check))
 			m.watchVoiceReady(guestGuildID, m.ownerBotID, conn)
+			// The guest owner bot starts hearing and lets the controller decide.
+			// In listener modes it is provider-only and never a router source,
+			// so it is deafened shortly after the session settles.
+			setup.Deaf.Register(m.ownerBotID, false)
 		}
 	}
 	guestCleanupOwner := func() {
@@ -243,6 +247,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Check))
 	m.watchVoiceReady(guildID, m.ownerBotID, conn)
+	// The host owner bot always captures, so it starts hearing; the controller
+	// deafens it if its channel ever empties of role-bearing callers.
+	setup.Deaf.Register(m.ownerBotID, false)
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
 	// Owner bot always joins the host channel (join failures abort above), so

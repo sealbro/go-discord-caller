@@ -50,6 +50,20 @@ type SpeakerResult struct {
 	Undeafen func(context.Context)
 }
 
+// DeafSink owns the server-deaf flag of the bots in one session. Implemented
+// by manager.deafController; kept as an interface here so pipeline stays free
+// of the manager package.
+type DeafSink interface {
+	// Register enrols a bot with the deaf state it already has.
+	Register(botID snowflake.ID, deaf bool)
+	// Observe receives the router's source → "is capturing" map after every
+	// recomputation and drives each registered bot toward hearing exactly
+	// while it is a live capture source.
+	Observe(capturing map[snowflake.ID]bool)
+	// Close stops pending changes and undeafens whatever it left deafened.
+	Close(ctx context.Context)
+}
+
 // Setup captures the common setup result for both host and guest flows.
 // Returned by manager.Service.setupSpeakers; passed verbatim into HostFor /
 // GuestFor pipeline builders via Params/GuestParams.
@@ -58,6 +72,19 @@ type Setup struct {
 	Speakers       []guild.Speaker
 	SpeakerCleanup func()
 	Outs           []chan<- []byte
+	// Deaf owns dynamic server-deaf state for the session; nil when the guild
+	// cannot deafen (no permission) or the mode has no router to drive it.
+	Deaf DeafSink
+}
+
+// CaptureObserver returns the router capture-observer callback for this setup,
+// or nil when nothing is driving deaf state. Nil-safe on the receiver so
+// pipelines can chain it unconditionally.
+func (s *Setup) CaptureObserver() func(capturing map[snowflake.ID]bool) {
+	if s == nil || s.Deaf == nil {
+		return nil
+	}
+	return s.Deaf.Observe
 }
 
 // SourceEntry is one audio capture source feeding the router graph. Handle

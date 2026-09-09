@@ -5,14 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-09-09
+
+> **Existing servers: grant Deafen Members.** Discord does not grant new permissions retroactively, so the new audio optimisation stays off until you act. Without it each speaker bot decrypts and discards ~50 voice packets per second for every person talking in its channel. Two ways to fix it:
+>
+> 1. **Add the permission manually** — tick **Deafen Members** on the owner bot's role in **Server Settings → Roles**.
+> 2. **Re-invite the bot** — use the updated link in the README, which already includes it.
+>
+> Either way, also drag the owner bot's role above the speaker bots' roles; Discord needs both. `/start` reminds you meanwhile.
 
 ### Changed
-- **Lower CPU and network use for speaker bots that only play audio**: in raid modes where speaker bots never capture (One Caller, and guests that only listen), the bot now server-deafens them for the duration of the raid. Discord otherwise keeps sending each speaker every voice packet spoken in its channel, all of which the bot decrypts twice and immediately throws away — roughly 50 packets a second for every person talking, per speaker bot. Deafened bots still play audio normally.
+- **Speaker bots stop receiving audio they would discard**: a bot now hears Discord only while someone with the caller role is in its channel, cutting CPU and network use.
+- **Owner bot invite requests Deafen Members**: required for the above, and flagged in the `/start` reply while a server is missing it.
+- **Clearer speaker gauge**: the active-session speaker count now states that it includes the owner bot alongside pool speakers.
 
-- **Speaker bots stop listening while nobody is talking to them**: a bot now hears Discord only while someone with the caller role is actually in its channel. When the last caller leaves or loses the role it stops receiving voice packets a few seconds later, and it starts hearing again the instant a caller returns, so nobody's first words are lost. Brief comings and goings cause no change at all.
-
-  This needs the **Deafen Members** permission and the owner bot's role placed above the speaker bots' roles. The invite link in the README now includes the permission; servers that added the bot earlier keep working exactly as before, with the optimisation skipped.
+### Fixed
+- **Runaway error logs from a dropped speaker connection**: an audio sender left running after its voice connection closed could log an error every 20 ms indefinitely and spike CPU.
 
 ## [0.9.7] - 2026-08-27
 

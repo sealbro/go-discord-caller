@@ -189,7 +189,7 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
 
 > The ready-to-use invite URL is also printed to the logs automatically when the bot starts (`owner bot invite URL`).
 
-> **Deafen Members** is part of that permission set. The owner bot server-deafens speaker bots during raid modes where they only play audio and never capture it, which stops Discord sending them voice packets they would decrypt and discard. Discord also requires the owner bot's role to sit **above** the speaker bots' roles for this — drag it up in **Server Settings → Roles** if the speakers were installed later. Neither is required to run the bot: without them the deafen is skipped with a warning and everything else works as before.
+> ⚠️ **Grant Deafen Members permission — it is the bot's biggest CPU saving.**
 
 > Speaker bots do **not** need to be added to the server manually — use the `/setup` command after the bot is running to invite them one by one.
 

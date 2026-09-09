@@ -201,6 +201,9 @@ func (b *Bot) Run(ctx context.Context) error {
 		// Graceful shutdown: stop all raids, close all speaker gateways, then the owner gateway.
 		shutdownCtx := context.Background()
 		b.manager.Shutdown(shutdownCtx)
+		// Backstop for any audio sender whose conn never went through
+		// GuildVoice.Leave — disgo's Conn.Close leaves them running.
+		pool.CloseAllAudioSenders()
 		b.store.Close()
 		b.client.Close(shutdownCtx)
 	}()
@@ -304,6 +307,7 @@ func NewOwnerClient(token string, opts ...bot.ConfigOpt) (*bot.Client, error) {
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			pool.SafeUDPConnOpt(),
+			pool.SafeAudioSenderOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	}

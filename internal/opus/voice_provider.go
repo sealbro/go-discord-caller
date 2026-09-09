@@ -118,8 +118,13 @@ func (v *VoiceProvider) Close() {
 }
 
 // EmptyVoiceProvider is a no-op OpusFrameProvider that never sends audio.
-// ProvideOpusFrame blocks until Close is called, at which point it returns an error
-// so the audio sender stops cleanly.
+// ProvideOpusFrame blocks until Close is called, at which point it returns an
+// error on that and every subsequent call.
+//
+// Closing the provider does NOT stop disgo's audio sender: its loop logs a
+// provider error and keeps ticking every 20 ms, so a sender that outlives
+// teardown turns into a 50 lines/second ERROR loop. Stopping the sender is
+// pool.AudioSenderRegistry's job, driven from pool.GuildVoice.Leave.
 type EmptyVoiceProvider struct {
 	voice.OpusFrameProvider
 	done chan struct{}

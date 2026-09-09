@@ -43,25 +43,32 @@ func (c *countingProvider) ProvideOpusFrame() ([]byte, error) {
 
 func (c *countingProvider) Close() { c.inner.Close() }
 
-// TestClosedProviderDoesNotSpinAudioSender reproduces the production incident of
-// 2026-09-07, where one speaker bot logged
+// TestDisgoSpinsOnClosedProvider is a tripwire on disgo v0.19.3, not a test of
+// our own behaviour.
+//
+// It documents the upstream half of the 2026-09-07 incident, where one speaker
+// bot logged
 //
 //	"error while reading opus frame" / "empty voice provider closed"
 //
 // at a steady 50 lines per second (one per 20 ms Opus frame) for 2h50m —
 // ~510k ERROR lines, and the largest CPU peak on the host.
 //
-// Mechanism: disgo's defaultAudioSender.send logs a provider error and returns
-// WITHOUT breaking its loop (audio_sender.go:104), and connImpl.Close does not
-// close the audio sender — it only closes the gateway, the UDP conn, and
-// removes the conn. So when teardown closes the provider (VoiceConnSetup.Apply's
+// Mechanism: defaultAudioSender.send logs a provider error and returns WITHOUT
+// breaking its loop (audio_sender.go:104), and connImpl.Close does not close
+// the audio sender — it only closes the gateway, the UDP conn, and removes the
+// conn. So when teardown closes the provider (manager.VoiceConnSetup.Apply's
 // cleanup) while the sender goroutine is still alive, every subsequent 20 ms
 // tick calls ProvideOpusFrame, gets an instant error, and logs it. Forever.
 //
-// The invariant this asserts: once a provider is closed, it must not keep
-// feeding the sender an error on every tick. A closed provider is a torn-down
-// provider; it has no work left to report.
-func TestClosedProviderDoesNotSpinAudioSender(t *testing.T) {
+// A closed provider therefore CANNOT stop the sender by itself; only cancelling
+// the sender can. That is what pool.AudioSenderRegistry does, driven from
+// pool.GuildVoice.Leave — see TestAudioSenderRegistryStopsSpinningSender for
+// the regression test covering the fix.
+//
+// When this test fails, disgo has stopped spinning on provider errors and the
+// registry workaround can be deleted.
+func TestDisgoSpinsOnClosedProvider(t *testing.T) {
 	t.Parallel()
 
 	p := &countingProvider{inner: NewEmptyVoiceProvider()}
@@ -86,13 +93,12 @@ func TestClosedProviderDoesNotSpinAudioSender(t *testing.T) {
 	time.Sleep(window)
 	after := p.calls.Load() - baseline
 
-	// At the 20 ms frame cadence an unbounded loop yields ~25 calls per 500 ms.
-	// Allow a couple for the in-flight tick that raced Close.
-	const tolerance = 3
-	if after > tolerance {
-		t.Fatalf("closed provider was polled %d times in %v (%.0f calls/sec), "+
-			"producing %d ERROR log lines — the audio sender is spinning on a "+
-			"closed provider and logging on every tick; want at most %d calls",
-			after, window, float64(after)/window.Seconds(), h.errors.Load(), tolerance)
+	// At the 20 ms frame cadence the loop yields ~25 calls per 500 ms.
+	if after < 5 {
+		t.Fatalf("disgo polled a closed provider only %d times in %v (%d ERROR lines) — "+
+			"it no longer spins on provider errors, so pool.AudioSenderRegistry, "+
+			"SafeAudioSenderOpt, and the CloseAudioSender call in GuildVoice.Leave "+
+			"are obsolete and should be removed",
+			after, window, h.errors.Load())
 	}
 }

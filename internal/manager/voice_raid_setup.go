@@ -32,7 +32,8 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 		return nil, ErrNoBoundSpeakers
 	}
 
-	joined := m.joinSpeakers(ctx, guildID, candidates, mode.WithCapture(), allowUser)
+	deaf := newDeafController(m, guildID)
+	joined := m.joinSpeakers(ctx, guildID, candidates, mode.WithCapture(), allowUser, deaf)
 	if len(joined) == 0 {
 		return nil, ErrNoSpeakers
 	}
@@ -44,11 +45,21 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 		joinedSpeakers = append(joinedSpeakers, r.Speaker)
 	}
 
+	// Undeafening must precede the voice leaves BuildSpeakerCleanup performs —
+	// Discord rejects a member voice-state PATCH once the member is out of
+	// voice — so the controller is closed first.
+	speakerCleanup := pipeline.BuildSpeakerCleanup(guildID, joined)
 	return &pipeline.Setup{
-		Joined:         joined,
-		Speakers:       joinedSpeakers,
-		SpeakerCleanup: pipeline.BuildSpeakerCleanup(guildID, joined),
-		Outs:           outs,
+		Joined:   joined,
+		Speakers: joinedSpeakers,
+		SpeakerCleanup: func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), pipeline.VoiceLeaveTimeout)
+			deaf.Close(closeCtx)
+			cancel()
+			speakerCleanup()
+		},
+		Outs: outs,
+		Deaf: deaf,
 	}, nil
 }
 
@@ -72,7 +83,7 @@ func boundSpeakers(st store.Store, guildID snowflake.ID, speakers []guild.Speake
 // joinSpeakers joins the given candidate speakers in parallel; callers filter
 // with boundSpeakers first.
 // When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool) []pipeline.SpeakerResult {
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool, deaf *deafController) []pipeline.SpeakerResult {
 	resultCh := make(chan pipeline.SpeakerResult, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
@@ -107,8 +118,15 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 				gv.Leave(ctx, guildID)
 				return
 			}
+			undeafen := m.reconcileSpeakerDeaf(ctx, guildID, sp.ID, withCapture, deaf)
+			// The controller takes over from here: the router tells it when
+			// this speaker stops being a live capture source. A speaker that
+			// captures starts undeafened; one that does not starts deafened
+			// (or would have, had the guild granted the permission — a failed
+			// deafen returns a nil undo, and register mirrors that).
+			deaf.Register(sp.ID, !withCapture && undeafen != nil)
 			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, handle, allowUser))
-			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup}
+			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup, Undeafen: undeafen}
 		}(sp)
 	}
 	wg.Wait()

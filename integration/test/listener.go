@@ -239,3 +239,80 @@ func (l *Listener) RemoveMemberRole(guildID, userID, roleID snowflake.ID) error 
 func (l *Listener) Close(ctx context.Context) {
 	l.client.Close(ctx)
 }
+
+// MemberServerDeaf reports the server-deaf flag on a guild member, read fresh
+// over REST rather than from cache. Used by the non-capture deafen tests to
+// observe what the manager did to a speaker bot.
+func (l *Listener) MemberServerDeaf(guildID, userID snowflake.ID) (bool, error) {
+	member, err := l.client.Rest.GetMember(guildID, userID)
+	if err != nil {
+		return false, err
+	}
+	return member.Deaf, nil
+}
+
+// SetServerDeaf server-deafens (or undeafens) a guild member over REST. The
+// listener bot is the test-admin bot, so it holds DEAFEN_MEMBERS. Used to
+// strand a deaf flag on a speaker the way an unclean teardown would.
+func (l *Listener) SetServerDeaf(guildID, userID snowflake.ID, deaf bool) error {
+	_, err := l.client.Rest.UpdateMember(guildID, userID, discord.MemberUpdate{Deaf: &deaf})
+	return err
+}
+
+// CanDeafen reports whether actorID can server-deafen targetID in guildID:
+// DEAFEN_MEMBERS (or Administrator) somewhere in its roles, AND a highest role
+// positioned above the target's. Discord answers 50013 when either is missing,
+// so tests use this to tell "the feature is off in this guild" apart from
+// "the code stopped deafening".
+func (l *Listener) CanDeafen(guildID, actorID, targetID snowflake.ID) (bool, string, error) {
+	roles, err := l.client.Rest.GetRoles(guildID)
+	if err != nil {
+		return false, "", fmt.Errorf("get guild roles: %w", err)
+	}
+	byID := make(map[snowflake.ID]discord.Role, len(roles))
+	for _, r := range roles {
+		byID[r.ID] = r
+	}
+
+	inspect := func(userID snowflake.ID) (allowed bool, top int, err error) {
+		member, err := l.client.Rest.GetMember(guildID, userID)
+		if err != nil {
+			return false, 0, fmt.Errorf("get member %s: %w", userID, err)
+		}
+		// @everyone carries the guild ID as its role ID and applies to everyone.
+		if r, ok := byID[guildID]; ok {
+			allowed = r.Permissions.Has(discord.PermissionDeafenMembers) ||
+				r.Permissions.Has(discord.PermissionAdministrator)
+		}
+		for _, rid := range member.RoleIDs {
+			r, ok := byID[rid]
+			if !ok {
+				continue
+			}
+			if r.Permissions.Has(discord.PermissionDeafenMembers) ||
+				r.Permissions.Has(discord.PermissionAdministrator) {
+				allowed = true
+			}
+			top = max(top, r.Position)
+		}
+		return allowed, top, nil
+	}
+
+	actorAllowed, actorTop, err := inspect(actorID)
+	if err != nil {
+		return false, "", err
+	}
+	_, targetTop, err := inspect(targetID)
+	if err != nil {
+		return false, "", err
+	}
+
+	switch {
+	case !actorAllowed:
+		return false, fmt.Sprintf("owner bot %s lacks DEAFEN_MEMBERS in guild %s", actorID, guildID), nil
+	case actorTop <= targetTop:
+		return false, fmt.Sprintf("owner bot's highest role (pos %d) is not above speaker %s (pos %d)",
+			actorTop, targetID, targetTop), nil
+	}
+	return true, "", nil
+}

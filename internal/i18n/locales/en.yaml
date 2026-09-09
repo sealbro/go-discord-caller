@@ -37,6 +37,7 @@ raid.stop_failed: "❌ Failed to stop voice raid: {{.Err}}"
 raid.joined: "🔴 **Joined relay session** `{{.Code}}` as {{.Mode}}. Speakers are connecting to their bound channels."
 raid.started: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels."
 raid.started_with_code: "🔴 **Voice raid started.** All enabled speakers have joined their bound channels. Relay code: `{{.Code}}`"
+raid.deafen_unavailable: "⚠️ Tip: grant the bot the **Deafen Members** permission and move its role above the speaker bots to reduce load and lower the risk of audio glitches."
 raid.stopped: "⚫ **Voice raid stopped.** All speakers have left their channels."
 
 # ── Permissions warning ───────────────────────────────────────────────────────

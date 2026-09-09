@@ -28,6 +28,8 @@ import (
 type fakeManager struct {
 	mu sync.Mutex
 
+	deafenReadiness manager.DeafenReadiness
+
 	isBotFn         func(discord.User) bool
 	hasCallerRoleFn func(snowflake.ID, []snowflake.ID) bool
 	hasActiveFn     func(snowflake.ID) bool
@@ -109,6 +111,9 @@ func (f *fakeManager) StartVoiceRaid(context.Context, snowflake.ID, context.Canc
 	return "", nil
 }
 func (f *fakeManager) StopVoiceRaid(context.Context, snowflake.ID) error { return nil }
+func (f *fakeManager) CheckDeafenReadiness(snowflake.ID) manager.DeafenReadiness {
+	return f.deafenReadiness
+}
 func (f *fakeManager) JoinSession(context.Context, snowflake.ID, context.CancelFunc, guild.RaidMode, ally.Code) (guild.RaidMode, error) {
 	return "", nil
 }

@@ -275,6 +275,15 @@ type Router struct {
 	// so external observability (OTel counter) can track transition rates.
 	// Optional — nil is treated as a no-op so unit tests can omit it.
 	recordTransition func(from, to RouteMode)
+	// observeCapture is invoked after every applied recomputation with the
+	// complete source → "is capturing" map (mode != RouteOff). Consumers use
+	// it to drive state that must follow caller presence but is not part of
+	// the audio graph — currently the server-deaf flag on capturing bots.
+	//
+	// The full map is emitted every time, not just the changes, so a consumer
+	// that missed an update (or was rebuilt after a voice reconnect) converges
+	// on the next recompute instead of drifting. Called without mu held.
+	observeCapture func(capturing map[snowflake.ID]bool)
 }
 
 // New constructs a router from the topology graph. Takes ownership of the
@@ -304,6 +313,33 @@ func New(guildID, roleID snowflake.ID, enumerator VoiceProbe, sources []*SourceS
 func (r *Router) WithTransitionRecorder(fn func(from, to RouteMode)) *Router {
 	r.recordTransition = fn
 	return r
+}
+
+// WithCaptureObserver wires a consumer of per-source capture state. Called
+// after New, before the router is published; nil-safe.
+func (r *Router) WithCaptureObserver(fn func(capturing map[snowflake.ID]bool)) *Router {
+	r.observeCapture = fn
+	return r
+}
+
+// notifyCapture reports which sources are live (mode != RouteOff) after a
+// recomputation. RouteOff means computeRoutes found no role-bearing caller in
+// that source's channel, and the cascade only ever promotes Copy→Mix — it
+// never revives an Off source — so RouteOff is an exact reading of "nobody
+// here is worth capturing".
+func (r *Router) notifyCapture(sourceModes map[snowflake.ID]RouteMode) {
+	r.mu.Lock()
+	fn := r.observeCapture
+	closed := r.closed
+	r.mu.Unlock()
+	if fn == nil || closed {
+		return
+	}
+	capturing := make(map[snowflake.ID]bool, len(sourceModes))
+	for id, mode := range sourceModes {
+		capturing[id] = mode != RouteOff
+	}
+	fn(capturing)
 }
 
 // synthIDForLocked returns (and lazily allocates) the synthetic mixer-input ID
@@ -425,6 +461,7 @@ func (r *Router) Recompute() {
 
 	sourceModes, destMix := computeRoutes(routeSources, routeDests, callerCounts, relayFed)
 	r.applyModes(sourceModes, destMix, usersPerChannel, listenersPerChannel)
+	r.notifyCapture(sourceModes)
 }
 
 // applyModes is the second half of Recompute. For each source it decides

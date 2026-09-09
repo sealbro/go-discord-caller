@@ -87,4 +87,4 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/sealbro/go-discord-caller
     - icon: fontawesome/brands/discord
-      link: https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565762894144
+      link: https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565771282752

@@ -36,6 +36,7 @@ raid.stop_failed: "❌ Ses baskını durdurulamadı: {{.Err}}"
 raid.joined: "🔴 **Aktarım oturumuna katılındı:** `{{.Code}}`, mod: {{.Mode}}. Hoparlörler bağlı oldukları kanallara bağlanıyor."
 raid.started: "🔴 **Ses baskını başladı.** Etkinleştirilmiş tüm hoparlörler bağlı oldukları kanallara katıldı."
 raid.started_with_code: "🔴 **Ses baskını başladı.** Etkinleştirilmiş tüm hoparlörler bağlı oldukları kanallara katıldı. Aktarım kodu: `{{.Code}}`"
+raid.deafen_unavailable: "⚠️ İpucu: bota **Üyelerin Sesini Kapat** iznini verin ve rolünü hoparlör botlarının üzerine taşıyın; böylece yük azalır ve ses kesilmesi riski düşer."
 raid.stopped: "⚫ **Ses baskını durduruldu.** Tüm hoparlörler kanallarından ayrıldı."
 
 # ── İzin uyarısı ──────────────────────────────────────────────────────────────

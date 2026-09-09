@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-09-09
+
+> **Existing servers: grant Deafen Members.** Discord does not grant new permissions retroactively, so the new audio optimisation stays off until you act. Without it each speaker bot decrypts and discards ~50 voice packets per second for every person talking in its channel. Two ways to fix it:
+>
+> 1. **Add the permission manually** — tick **Deafen Members** on the owner bot's role in **Server Settings → Roles**.
+> 2. **Re-invite the bot** — use the updated link in the README, which already includes it.
+>
+> Either way, also drag the owner bot's role above the speaker bots' roles; Discord needs both. `/start` reminds you meanwhile.
+
+### Changed
+- **Speaker bots stop receiving audio they would discard**: a bot now hears Discord only while someone with the caller role is in its channel, cutting CPU and network use.
+- **Owner bot invite requests Deafen Members**: required for the above, and flagged in the `/start` reply while a server is missing it.
+- **Clearer speaker gauge**: the active-session speaker count now states that it includes the owner bot alongside pool speakers.
+
+### Fixed
+- **Runaway error logs from a dropped speaker connection**: an audio sender left running after its voice connection closed could log an error every 20 ms indefinitely and spike CPU.
+
 ## [0.9.7] - 2026-08-27
 
 ### Added

@@ -32,7 +32,7 @@ jobs:
       name: Set env
       run: |
         echo "IMAGE_NAME=go-discord-caller" >> $GITHUB_ENV
-        echo "GO_VERSION=$(grep '^go' go.mod | awk '{print $2}')" >> $GITHUB_ENV
+        echo "GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' | cut -d. -f1,2)" >> $GITHUB_ENV
         echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
     -
       name: Build and push

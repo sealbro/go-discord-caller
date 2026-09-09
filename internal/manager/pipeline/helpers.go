@@ -260,6 +260,12 @@ func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 					if r.Cleanup != nil {
 						r.Cleanup()
 					}
+					// Before Leave: a member voice-state PATCH is rejected once
+					// the member is out of voice, so undeafening after the leave
+					// would strand the flag on the member record.
+					if r.Undeafen != nil {
+						r.Undeafen(ctx)
+					}
 					r.GV.Leave(ctx, guildID)
 				}(r)
 			}

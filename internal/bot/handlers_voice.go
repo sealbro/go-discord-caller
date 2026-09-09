@@ -117,6 +117,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		} else {
 			msg = loc.T("raid.started")
 		}
+		// The raid works either way, so this is appended to a success message
+		// rather than blocking the start: it is an optimisation the guild is
+		// leaving on the table, not an error.
+		if readiness := h.manager.CheckDeafenReadiness(guildID); !readiness.OK() {
+			msg += "\n\n" + loc.T("raid.deafen_unavailable")
+		}
 		slog.InfoContext(cmdCtx, "voice raid started", slog.String("relayCode", relayCode))
 		h.followUp(e, msg)
 	}()

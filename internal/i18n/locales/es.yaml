@@ -36,6 +36,7 @@ raid.stop_failed: "❌ Error al detener el voice raid: {{.Err}}"
 raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. Los speakers se están conectando a sus canales."
 raid.started: "🔴 **Voice raid iniciado.** Todos los speakers activos se han unido a sus canales."
 raid.started_with_code: "🔴 **Voice raid iniciado.** Todos los speakers activos se han unido a sus canales. Código de relay: `{{.Code}}`"
+raid.deafen_unavailable: "⚠️ Consejo: concede al bot el permiso **Ensordecer miembros** y coloca su rol por encima de los bots altavoz para reducir la carga y el riesgo de cortes de audio."
 raid.stopped: "⚫ **Voice raid detenido.** Todos los speakers han abandonado sus canales."
 
 # ── Permissions warning ───────────────────────────────────────────────────────

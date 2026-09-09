@@ -32,6 +32,10 @@ import (
 // SessionManager handles voice raid session lifecycle.
 type SessionManager interface {
 	StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error)
+	// CheckDeafenReadiness reports whether the owner bot can server-deafen the
+	// guild's speakers. Surfaced in the /start reply so a fixable guild
+	// misconfiguration reaches the operator rather than only the logs.
+	CheckDeafenReadiness(guildID snowflake.ID) manager.DeafenReadiness
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
 	HasActiveSession(guildID snowflake.ID) bool

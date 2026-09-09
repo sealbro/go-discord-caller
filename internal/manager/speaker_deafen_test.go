@@ -321,3 +321,27 @@ func TestDeafControllerNoDuplicateInFlight(t *testing.T) {
 		t.Errorf("issued %d changes for one transition, want 1", n)
 	}
 }
+
+// TestDeafenReadinessOK pins the predicate the /start reply branches on. The
+// hierarchy half matters as much as the permission half: Discord answers 50013
+// for either, so a guild that granted DEAFEN_MEMBERS but left the owner bot
+// below its speakers still gets nothing, and must still be told.
+func TestDeafenReadinessOK(t *testing.T) {
+	cases := []struct {
+		name string
+		in   DeafenReadiness
+		want bool
+	}{
+		{"all good", DeafenReadiness{}, true},
+		{"no permission", DeafenReadiness{MissingPermission: true}, false},
+		{"outranked by a speaker", DeafenReadiness{OutrankedBy: []snowflake.ID{1}}, false},
+		{"both problems", DeafenReadiness{MissingPermission: true, OutrankedBy: []snowflake.ID{1}}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.in.OK(); got != tc.want {
+				t.Errorf("OK() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

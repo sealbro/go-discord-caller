@@ -376,3 +376,80 @@ func (c *deafController) isDisabled() bool {
 	defer c.mu.Unlock()
 	return c.disabled
 }
+
+// DeafenReadiness reports whether the owner bot can server-deafen the guild's
+// speaker bots, and if not, why. Both fields are false/empty when everything is
+// in order.
+type DeafenReadiness struct {
+	// MissingPermission is true when the owner bot lacks DEAFEN_MEMBERS.
+	MissingPermission bool
+	// OutrankedBy names the speaker bots whose highest role sits at or above
+	// the owner bot's. Discord refuses a moderation action against those even
+	// when the permission is granted.
+	OutrankedBy []snowflake.ID
+}
+
+// OK reports whether deafening will work.
+func (d DeafenReadiness) OK() bool {
+	return !d.MissingPermission && len(d.OutrankedBy) == 0
+}
+
+// CheckDeafenReadiness evaluates, from cache only, whether this guild will get
+// the server-deafen optimisation. Called at raid start so the operator learns
+// about a fixable guild misconfiguration in the /start reply, rather than only
+// from a log line they will never read.
+//
+// Answering from cache keeps /start free of extra REST round trips; a cache
+// miss reports "fine" rather than crying wolf, since the runtime path degrades
+// safely either way (see reconcileSpeakerDeaf).
+func (m *Service) CheckDeafenReadiness(guildID snowflake.ID) DeafenReadiness {
+	var out DeafenReadiness
+
+	owner, ok := m.ownerClient.Caches.Member(guildID, m.ownerBotID)
+	if !ok {
+		return out
+	}
+	perms := m.ownerClient.Caches.MemberPermissions(owner)
+	if !perms.Has(discord.PermissionAdministrator) && !perms.Has(discord.PermissionDeafenMembers) {
+		out.MissingPermission = true
+	}
+
+	ownerTop, ok := m.topRolePosition(guildID, owner)
+	if !ok {
+		return out
+	}
+	speakers, err := m.snapshotSpeakers(guildID)
+	if err != nil {
+		return out
+	}
+	for _, sp := range speakers {
+		if !sp.Enabled {
+			continue
+		}
+		member, ok := m.ownerClient.Caches.Member(guildID, sp.ID)
+		if !ok {
+			continue
+		}
+		// Discord requires the actor's highest role to be strictly above the
+		// target's; equal positions are refused too.
+		if top, ok := m.topRolePosition(guildID, member); ok && top >= ownerTop {
+			out.OutrankedBy = append(out.OutrankedBy, sp.ID)
+		}
+	}
+	return out
+}
+
+// topRolePosition returns the highest role position held by member. The
+// @everyone role is position 0 and is implicit, so a member with no other roles
+// correctly reports 0.
+func (m *Service) topRolePosition(guildID snowflake.ID, member discord.Member) (int, bool) {
+	top := 0
+	for _, roleID := range member.RoleIDs {
+		role, ok := m.ownerClient.Caches.Role(guildID, roleID)
+		if !ok {
+			return 0, false
+		}
+		top = max(top, role.Position)
+	}
+	return top, true
+}

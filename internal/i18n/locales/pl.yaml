@@ -36,6 +36,7 @@ raid.stop_failed: "❌ Nie udało się zatrzymać voice raidu: {{.Err}}"
 raid.joined: "🔴 **Dołączono do sesji relay** `{{.Code}}` jako {{.Mode}}. Speakerzy łączą się ze swoimi kanałami."
 raid.started: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów."
 raid.started_with_code: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów. Kod relay: `{{.Code}}`"
+raid.deafen_unavailable: "⚠️ Wskazówka: nadaj botowi uprawnienie **Wyciszaj słuch członków** i przenieś jego rolę nad boty głośnikowe, aby zmniejszyć obciążenie i ryzyko zakłóceń dźwięku."
 raid.stopped: "⚫ **Voice raid zatrzymany.** Wszyscy speakerzy opuścili swoje kanały."
 
 # ── Permissions warning ───────────────────────────────────────────────────────

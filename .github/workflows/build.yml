@@ -26,7 +26,7 @@ jobs:
     -
       name: Set env
       run: |
-        echo "GO_VERSION=$(grep '^go' go.mod | awk '{print $2}')" >> $GITHUB_ENV
+        echo "GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' | cut -d. -f1,2)" >> $GITHUB_ENV
     -
       name: Build
       uses: docker/build-push-action@v7

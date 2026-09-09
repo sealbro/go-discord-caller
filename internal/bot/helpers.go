@@ -59,10 +59,25 @@ const botPermissions discord.Permissions = discord.PermissionAddReactions |
 	discord.PermissionSendVoiceMessages |
 	1<<48 // reserved/unnamed bit present in original install URL
 
+// ownerPermissions is what the owner bot asks for: everything a speaker needs,
+// plus DEAFEN_MEMBERS.
+//
+// The owner bot server-deafens speaker bots for the duration of a non-capture
+// raid, which is the only thing that stops Discord forwarding them RTP they
+// would decrypt and throw away (see manager.ensureSpeakerDeaf). Speaker bots
+// are the targets of that action, never the actors, so they do not get the
+// permission themselves.
+//
+// Deafening also needs the owner bot's role to sit above every speaker bot's
+// role — a permission Discord grants but hierarchy still vetoes. Guilds that
+// installed the owner bot before this was added keep working; the deafen is
+// skipped with a warning.
+const ownerPermissions = botPermissions | discord.PermissionDeafenMembers
+
 func installOwnerURL(clientID snowflake.ID) string {
 	return fmt.Sprintf(
 		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%d",
-		clientID, botPermissions,
+		clientID, ownerPermissions,
 	)
 }
 

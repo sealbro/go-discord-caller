@@ -7,7 +7,7 @@ If this project is useful to you, please consider giving it a ⭐ on GitHub — 
 [![GitHub stars](https://img.shields.io/github/stars/sealbro/go-discord-caller?style=social)](https://github.com/sealbro/go-discord-caller)
 [![GitHub release](https://badgen.net/github/release/sealbro/go-discord-caller?icon=github&label=go-discord-caller)](https://github.com/sealbro/go-discord-caller/)
 [![Docker pulls](https://badgen.net/docker/pulls/sealbro/go-discord-caller?icon=docker&label=go-discord-caller)](https://hub.docker.com/r/sealbro/go-discord-caller/)
-[![Try the bot](https://img.shields.io/badge/Try%20the%20bot-Invite%20to%20Discord-5865F2?logo=discord&logoColor=white)](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565762894144)
+[![Try the bot](https://img.shields.io/badge/Try%20the%20bot-Invite%20to%20Discord-5865F2?logo=discord&logoColor=white)](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565771282752)
 
 ## Try it out
 
@@ -184,10 +184,12 @@ Start the service (see [Running locally](#running-locally) or [Docker](#docker))
 To invite the **owner bot** to your server, open the **Installation** section, copy the Install Link and append the required scope and permissions:
 
 ```
-https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions=391565762894144
+https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions=391565771282752
 ```
 
 > The ready-to-use invite URL is also printed to the logs automatically when the bot starts (`owner bot invite URL`).
+
+> **Deafen Members** is part of that permission set. The owner bot server-deafens speaker bots during raid modes where they only play audio and never capture it, which stops Discord sending them voice packets they would decrypt and discard. Discord also requires the owner bot's role to sit **above** the speaker bots' roles for this — drag it up in **Server Settings → Roles** if the speakers were installed later. Neither is required to run the bot: without them the deafen is skipped with a warning and everything else works as before.
 
 > Speaker bots do **not** need to be added to the server manually — use the `/setup` command after the bot is running to invite them one by one.
 

@@ -107,8 +107,9 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 				gv.Leave(ctx, guildID)
 				return
 			}
+			undeafen := m.reconcileSpeakerDeaf(ctx, guildID, sp.ID, withCapture)
 			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, handle, allowUser))
-			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup}
+			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup, Undeafen: undeafen}
 		}(sp)
 	}
 	wg.Wait()

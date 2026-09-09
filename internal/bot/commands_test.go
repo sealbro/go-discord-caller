@@ -18,12 +18,29 @@ func TestBotPermissions(t *testing.T) {
 	}
 }
 
+// TestOwnerPermissions pins the owner bot's bitmask, which is botPermissions
+// plus DEAFEN_MEMBERS. Both README install URLs hard-code this number, so a
+// change here that is not mirrored there hands users an invite that silently
+// disables the non-capture server-deafen.
+func TestOwnerPermissions(t *testing.T) {
+	const want discord.Permissions = 391565771282752
+	if ownerPermissions != want {
+		t.Errorf("ownerPermissions = %d, want %d; update the README install URLs if this changed intentionally", ownerPermissions, want)
+	}
+	if !ownerPermissions.Has(discord.PermissionDeafenMembers) {
+		t.Error("ownerPermissions is missing DEAFEN_MEMBERS; non-capture speakers will never be deafened")
+	}
+	if botPermissions.Has(discord.PermissionDeafenMembers) {
+		t.Error("speaker bots do not deafen anyone and must not request DEAFEN_MEMBERS")
+	}
+}
+
 func TestInstallOwnerURL(t *testing.T) {
 	id := snowflake.ID(123456789)
 	got := installOwnerURL(id)
 	want := fmt.Sprintf(
 		"https://discord.com/oauth2/authorize?client_id=%s&scope=bot&permissions=%d",
-		id, botPermissions,
+		id, ownerPermissions,
 	)
 	if got != want {
 		t.Errorf("installOwnerURL() = %q, want %q", got, want)

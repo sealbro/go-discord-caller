@@ -99,7 +99,7 @@ pre-baked `OpusRecorder` (`Metrics.ForGuild`) — zero-alloc per frame.
 | `gdc.opus.provide.duration`    | `gdc_opus_provide_duration_milliseconds`    | 0.5, 1, 2, 5, 12, 20    | `internal/opus/voice_provider.go` | `ProvideOpusFrame` drain+return time (excludes frame-wait). |
 | `gdc.opus.allow_user.duration` | `gdc_opus_allow_user_duration_milliseconds` | 1, 2, 5, 12, 20         | `internal/manager/allow_user.go`  | `allowUser` filter time per evaluated frame. |
 | `gdc.mixer.tick.duration`      | `gdc_mixer_tick_duration_milliseconds`      | 0.5, 1, 2, 5, 10, 20    | `internal/opus/mixer.go`          | Mixer tick processing time. |
-| `gdc.mixer.pipeline.latency`   | `gdc_mixer_pipeline_latency_milliseconds`   | 10, 30, 50, 70, 100, 200, 500 | `internal/opus/mixer.go`    | End-to-end latency from fanout decode to mixer output. See `docs/LATENCY.md`. |
+| `gdc.mixer.pipeline.latency`   | `gdc_mixer_pipeline_latency_milliseconds`   | 10, 15, 20, 25, 30, 35, 40, 50, 60, 80, 120 | `internal/opus/mixer.go`    | Latency from Discord receive to the mixer tick that consumes the frame. Floor ~20 ms (tick period), ceiling 60 ms (`audioSourceCap`). See `docs/LATENCY.md`. |
 
 ---
 

@@ -45,10 +45,17 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	// Boundaries are clustered between 15 and 60 ms because that is where the
+	// distribution actually lives: the floor is ~20 ms (a frame waits for the
+	// next mixer tick) and the ceiling is 60 ms (audioSourceCap = 3 frames).
+	// The previous 10/30/50/70/100/200/500 layout put two thirds of all
+	// observations inside the single 10-30 ms bucket, so every quantile below
+	// p95 was linear interpolation across the whole interesting range, while
+	// the 100/200/500 buckets held under 0.01 % between them.
 	if o.pipelineLatency, err = meter.Float64Histogram("gdc.mixer.pipeline.latency",
-		metric.WithDescription("End-to-end latency from fanout decode to mixer output"),
+		metric.WithDescription("Latency from Discord receive to the mixer tick that consumes the frame"),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(10, 30, 50, 70, 100, 200, 500),
+		metric.WithExplicitBucketBoundaries(10, 15, 20, 25, 30, 35, 40, 50, 60, 80, 120),
 	); err != nil {
 		return
 	}

@@ -424,16 +424,26 @@ func (m *Mixer) recyclePCMBuffers() {
 // recordPipelineLatency emits the gdc.mixer.pipeline.latency observation for
 // the oldest input frame in this tick (worst-case path through the pipeline).
 func (m *Mixer) recordPipelineLatency() {
-	now := time.Now()
-	oldest := m.framesBuf[0].CreatedAt
-	for _, f := range m.framesBuf[1:] {
-		if !f.CreatedAt.IsZero() && f.CreatedAt.Before(oldest) {
+	oldest := oldestCreatedAt(m.framesBuf)
+	if oldest.IsZero() {
+		return
+	}
+	m.metrics.RecordPipelineLatency(float64(time.Since(oldest).Microseconds()) / 1000)
+}
+
+// oldestCreatedAt returns the earliest non-zero CreatedAt among frames, or the
+// zero Time when no frame carries a timestamp.
+func oldestCreatedAt(frames []Frame) time.Time {
+	var oldest time.Time
+	for _, f := range frames {
+		if f.CreatedAt.IsZero() {
+			continue
+		}
+		if oldest.IsZero() || f.CreatedAt.Before(oldest) {
 			oldest = f.CreatedAt
 		}
 	}
-	if !oldest.IsZero() {
-		m.metrics.RecordPipelineLatency(float64(now.Sub(oldest).Microseconds()) / 1000)
-	}
+	return oldest
 }
 
 // mixAndEncode accumulates the PCM from every frame in m.framesBuf, clamps to

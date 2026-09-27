@@ -12,6 +12,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 // AllowFilter is a per-session, event-updated cache of per-user allow decisions.
@@ -148,7 +149,10 @@ func (m *Service) prefetchChannelMembers(ctx context.Context, conn voice.Conn, b
 	if len(userIDs) == 0 {
 		return
 	}
-	members, err := m.ownerClient.MemberChunkingManager.RequestMembers(ctx, guildID, userIDs...)
+	reqCtx, endPhase := startPhase(ctx, "voice.members.prefetch",
+		botAttr(botUserID), attribute.Int("user.count", len(userIDs)))
+	members, err := m.ownerClient.MemberChunkingManager.RequestMembers(reqCtx, guildID, userIDs...)
+	endPhase(err)
 	if err != nil {
 		slog.WarnContext(ctx, "prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
 		return

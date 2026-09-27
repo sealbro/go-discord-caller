@@ -13,6 +13,8 @@ import (
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Server-deafening speaker bots in non-capture raid modes.
@@ -66,9 +68,16 @@ import (
 // assuming anything — being wrong in the "already undeafened" direction would
 // silently break capture.
 func (m *Service) ensureSpeakerDeaf(ctx context.Context, guildID, speakerID snowflake.ID, want bool) error {
+	span := trace.SpanFromContext(ctx)
 	if vs, ok := m.ownerClient.Caches.VoiceState(guildID, speakerID); ok && vs.GuildDeaf == want {
+		span.SetAttributes(attribute.Bool("deaf.cached", true))
 		return nil
 	}
+	// Every PATCH of a guild member shares one disgo REST bucket per guild, and
+	// the bucket mutex is held across the request — so N speakers' calls run one
+	// after another, a round trip each. That serialization is what this
+	// attribute exists to expose.
+	span.SetAttributes(attribute.Bool("deaf.cached", false))
 	if _, err := m.ownerClient.Rest.UpdateMember(guildID, speakerID,
 		discord.MemberUpdate{Deaf: &want}, rest.WithCtx(ctx)); err != nil {
 		return fmt.Errorf("set server deaf=%t for speaker %s: %w", want, speakerID, err)

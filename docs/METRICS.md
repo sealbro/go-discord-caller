@@ -131,3 +131,41 @@ gdc_pool_bots_connected / gdc_pool_bots_total
 # active voice raids
 sum(gdc_voice_sessions_active)
 ```
+
+---
+
+## Traces: session startup phases
+
+`/start` takes seconds before any audio flows (measured in production: ~0.8–1.9 s
+with 2 speakers, ~3 s with 5, ~3.2–4.1 s with 10), and the work is a chain of
+Discord round trips. `voice.session` / `voice.session.guest` spans last as long
+as the raid, so the startup cost has its own child span with one child per round
+trip. `startPhase` (`internal/manager/trace.go`) opens them.
+
+```
+voice.session                        (whole raid)
+└── voice.session.setup              (/start → first frame flowing)
+    ├── voice.speakers.setup         speaker.candidates, speaker.joined, capture
+    │   └── voice.bot.attach         bot.id, bot.kind=speaker (one per speaker, concurrent)
+    │       ├── voice.conn.open      voice handshake through SessionDescription
+    │       ├── voice.members.prefetch   user.count (capture modes only)
+    │       ├── voice.conn.apply     provider/receiver wiring + SetSpeaking op
+    │       └── voice.deaf.reconcile deaf.want, deaf.cached
+    ├── voice.bot.attach             bot.kind=owner (runs after every speaker)
+    │   └── … same four children
+    └── voice.pipeline.build         local graph construction, expected ~0
+```
+
+What to read off a trace:
+
+- `voice.bot.attach{bot.kind=owner}` starting only after the last speaker's
+  attach ends is the serialized owner handshake.
+- `voice.deaf.reconcile` spans with `deaf.cached=false` stacking one after
+  another are the per-guild REST bucket serializing member PATCHes — disgo holds
+  the bucket mutex across each request.
+- `voice.conn.open` is the irreducible part: op4 → voice server update → WSS+TLS
+  → identify/ready → UDP discovery → session description.
+
+Everything is sampled (default `ParentBased(AlwaysSample)`). The parent
+`voice.session` span only exports when the raid ends, so a trace looks
+incomplete while a raid is live — the startup children are already there.

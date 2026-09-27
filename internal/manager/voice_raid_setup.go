@@ -13,6 +13,8 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -20,7 +22,14 @@ import (
 // setupSpeakers snapshots and joins all enabled, bound speakers for a guild.
 // Returns an error if the guild has no status, already has an active session,
 // or no speakers could join.
-func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool) (*pipeline.Setup, error) {
+// gm carries the session context for the metric recorders the speakers' audio
+// pipeline keeps; ctx is only the parent of the startup phase spans and is not
+// retained past this call.
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool, gm telemetry.GuildMetrics) (setup *pipeline.Setup, err error) {
+	phaseCtx, endPhase := startPhase(ctx, "voice.speakers.setup",
+		attribute.Bool("capture", mode.WithCapture()))
+	defer func() { endPhase(err) }()
+
 	speakers, err := m.speakersAfterSeeding(guildID)
 	if err != nil {
 		return nil, err
@@ -32,9 +41,11 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	if len(candidates) == 0 {
 		return nil, ErrNoBoundSpeakers
 	}
+	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.candidates", len(candidates)))
 
 	deaf := newDeafController(m, guildID)
-	joined := m.joinSpeakers(ctx, guildID, candidates, mode.WithCapture(), allowUser, deaf)
+	joined := m.joinSpeakers(phaseCtx, guildID, candidates, mode.WithCapture(), allowUser, deaf, gm)
+	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.joined", len(joined)))
 	if len(joined) == 0 {
 		return nil, ErrNoSpeakers
 	}
@@ -84,7 +95,7 @@ func boundSpeakers(st store.Store, guildID snowflake.ID, speakers []guild.Speake
 // joinSpeakers joins the given candidate speakers in parallel; callers filter
 // with boundSpeakers first.
 // When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool, deaf *deafController) []pipeline.SpeakerResult {
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool, deaf *deafController, gm telemetry.GuildMetrics) []pipeline.SpeakerResult {
 	resultCh := make(chan pipeline.SpeakerResult, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
@@ -96,8 +107,13 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 				slog.WarnContext(ctx, "speaker not in pool", slog.String("speakerID", sp.ID.String()))
 				return
 			}
-			conn, err := gv.Join(ctx, guildID)
+			attachCtx, endAttach := startPhase(ctx, "voice.bot.attach",
+				botAttr(sp.ID), attribute.String("bot.kind", "speaker"))
+			openCtx, endOpen := startPhase(attachCtx, "voice.conn.open", botAttr(sp.ID))
+			conn, err := gv.Join(openCtx, guildID)
+			endOpen(err)
 			if err != nil {
+				endAttach(err)
 				slog.WarnContext(ctx, "speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				// Drop the half-open conn. Join failures are usually Open
 				// timeouts, and disgo leaves the conn registered in its voice
@@ -110,16 +126,22 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 				return
 			}
 			if withCapture {
-				m.prefetchChannelMembers(ctx, conn, sp.ID, guildID)
+				m.prefetchChannelMembers(attachCtx, conn, sp.ID, guildID)
 			}
 			chOut := make(chan []byte, opus.AudioChanBuf)
-			handle, cleanup, err := m.consumeSpeaker(ctx, guildID, sp.ID, conn, chOut, withCapture, allowUser)
+			applyCtx, endApply := startPhase(attachCtx, "voice.conn.apply", botAttr(sp.ID))
+			handle, cleanup, err := m.consumeSpeaker(applyCtx, guildID, sp.ID, conn, chOut, withCapture, allowUser, gm)
+			endApply(err)
 			if err != nil {
+				endAttach(err)
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
 				gv.Leave(ctx, guildID)
 				return
 			}
-			undeafen := m.reconcileSpeakerDeaf(ctx, guildID, sp.ID, withCapture, deaf)
+			deafCtx, endDeaf := startPhase(attachCtx, "voice.deaf.reconcile",
+				botAttr(sp.ID), attribute.Bool("deaf.want", !withCapture))
+			undeafen := m.reconcileSpeakerDeaf(deafCtx, guildID, sp.ID, withCapture, deaf)
+			endDeaf(nil)
 			// The controller takes over from here: the router tells it when
 			// this speaker stops being a live capture source. A speaker that
 			// captures starts undeafened; one that does not starts deafened
@@ -128,6 +150,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 			deaf.Register(sp.ID, !withCapture && undeafen != nil)
 			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, handle, allowUser))
 			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup, Undeafen: undeafen}
+			endAttach(nil)
 		}(sp)
 	}
 	wg.Wait()
@@ -166,8 +189,7 @@ func (m *Service) commitSession(session *guild.Session) error {
 // receiver decodes incoming frames inline via the returned FanoutHandle, which
 // the topology wiring code must Install with mixer/raw targets.
 // The caller is responsible for calling the returned cleanup function.
-func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool) (*opus.FanoutHandle, func(), error) {
-	gm := m.metrics.ForGuild(ctx, guildID)
+func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowflake.ID, conn voice.Conn, chOut <-chan []byte, withCapture bool, allowUser func(snowflake.ID) bool, gm telemetry.GuildMetrics) (*opus.FanoutHandle, func(), error) {
 	session := NewVoiceConnSetup(speakerID)
 	session.WithVoiceProvider(gm.Provider())
 

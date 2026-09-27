@@ -20,6 +20,22 @@ func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
 	}
 }
 
+// EnsureGuildReady seeds a guild and warms its caches when the detached startup
+// seeding has not reached it yet. Callers that inspect guild state must run this
+// first: the permission and deafen pre-checks read the channel and member caches
+// and report "nothing wrong" on a miss, so against an unseeded guild they pass
+// silently instead of catching a misconfigured speaker.
+func (m *Service) EnsureGuildReady(guildID snowflake.ID) {
+	m.mu.RLock()
+	_, seeded := m.statuses[guildID]
+	m.mu.RUnlock()
+	if seeded {
+		return
+	}
+	m.seedGuildSpeakers(guildID, m.ownerBotID)
+	m.warmGuildCache(guildID)
+}
+
 // HasAvailableToken reports whether the pool has at least one speaker bot
 // that has not yet been added to the given guild.
 func (m *Service) HasAvailableToken(guildID snowflake.ID) bool {

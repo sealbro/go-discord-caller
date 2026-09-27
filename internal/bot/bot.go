@@ -41,6 +41,7 @@ type SessionManager interface {
 	HasActiveSession(guildID snowflake.ID) bool
 	AutoRoute(guildID, channelID snowflake.ID)
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
+	EnsureGuildReady(guildID snowflake.ID)
 	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 	OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID)
 	NotifyMemberUpdate(guildID snowflake.ID, member discord.Member)

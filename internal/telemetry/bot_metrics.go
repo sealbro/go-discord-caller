@@ -36,8 +36,8 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
-	if b.cmdStarted, err = meter.Int64Counter("gdc.command.started",
-		metric.WithDescription("Slash command invocations entering the handler. Exceeds gdc.command.total by the number of handlers that have not returned."),
+	if b.cmdStarted, err = meter.Int64Counter("gdc.command.started.total",
+		metric.WithDescription("Slash command invocations entering the handler; exceeds gdc.command.total by the number still running."),
 	); err != nil {
 		return
 	}
@@ -101,14 +101,9 @@ func (b *BotMetrics) VoiceCallerAdd(ctx context.Context, delta int64, guildID, c
 	)
 }
 
-// RecordCommandStart records a slash command entering its handler.
-//
-// RecordCommand only fires once the handler returns, so a handler that blocks
-// forever is indistinguishable from a command nobody ran — the shape of the
-// 2026-09-22 outage, where every /start and /stop wedged for a day and left no
-// metric and no log behind. Counting entries separately makes the gap
-// observable: a sustained gdc.command.started - gdc.command.total means
-// handlers went in and never came out.
+// RecordCommandStart records a slash command entering its handler. RecordCommand
+// fires only once the handler returns, so without this a handler that blocks
+// forever looks identical to a command nobody ran.
 func (b *BotMetrics) RecordCommandStart(ctx context.Context, command, guildID string) {
 	b.cmdStarted.Add(ctx, 1, commandAttrs(command, guildID))
 }

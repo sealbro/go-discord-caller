@@ -120,6 +120,7 @@ func (f *fakeManager) JoinSession(context.Context, snowflake.ID, context.CancelF
 func (f *fakeManager) CheckGuildChannelAccess(snowflake.ID) []manager.ChannelAccessWarning {
 	return nil
 }
+func (f *fakeManager) EnsureGuildReady(snowflake.ID)                       {}
 func (f *fakeManager) BindRole(snowflake.ID, store.RoleType, snowflake.ID) {}
 func (f *fakeManager) UnbindRole(snowflake.ID, store.RoleType)             {}
 func (f *fakeManager) BindChannel(snowflake.ID, snowflake.ID, snowflake.ID) {

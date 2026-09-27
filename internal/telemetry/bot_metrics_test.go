@@ -51,9 +51,9 @@ func TestRecordCommandStart_MakesWedgedHandlerVisible(t *testing.T) {
 	ctx := context.Background()
 	b.RecordCommandStart(ctx, "start", "100") // handler entered, then blocks
 
-	started, ok := collectSum(t, reader, "gdc.command.started")
+	started, ok := collectSum(t, reader, "gdc.command.started.total")
 	if !ok {
-		t.Fatal("gdc.command.started must be emitted on handler entry")
+		t.Fatal("gdc.command.started.total must be emitted on handler entry")
 	}
 	if started != 1 {
 		t.Errorf("want 1 started, got %d", started)
@@ -66,7 +66,7 @@ func TestRecordCommandStart_MakesWedgedHandlerVisible(t *testing.T) {
 	// handlers that went in and never came out.
 	b.RecordCommand(ctx, "start", "100", 0.5)
 
-	started, _ = collectSum(t, reader, "gdc.command.started")
+	started, _ = collectSum(t, reader, "gdc.command.started.total")
 	completed, ok := collectSum(t, reader, "gdc.command.total")
 	if !ok {
 		t.Fatal("gdc.command.total must be emitted on completion")

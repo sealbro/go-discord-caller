@@ -186,14 +186,10 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 	return handle, cleanup, nil
 }
 
-// speakersAfterSeeding snapshots the guild's speakers, seeding the guild on
-// demand when startup seeding has not reached it yet.
-//
-// onReady seeds every guild from a detached goroutine that takes seconds per
-// guild, but a guild's slash commands are already registered on Discord from
-// the previous run, so nothing stops a /start from landing first. Failing it
-// with ErrNoGuildStatus asks the operator to "seed the guild first", which is
-// not something they can do.
+// speakersAfterSeeding snapshots the guild's speakers, seeding it on demand
+// when the detached startup seeding has not reached it yet — a guild's slash
+// commands are already registered on Discord from the previous run, so a
+// /start can land first.
 func (m *Service) speakersAfterSeeding(guildID snowflake.ID) ([]guild.Speaker, error) {
 	speakers, err := m.snapshotSpeakers(guildID)
 	if !errors.Is(err, ErrNoGuildStatus) {

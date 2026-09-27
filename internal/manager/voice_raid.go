@@ -31,7 +31,7 @@ func countSpeakers(joined int, ownerJoined bool) int {
 //
 // Returns the effective RaidMode (which may differ from the requested mode).
 // The session ends automatically when the host ends or ctx is cancelled.
-func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (guild.RaidMode, error) {
+func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (effectiveMode guild.RaidMode, err error) {
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session.guest",
 		trace.WithAttributes(
 			attribute.String("guild.id", guestGuildID.String()),
@@ -39,6 +39,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			attribute.String("guest.mode", string(guestMode)),
 		),
 	)
+	// Mirrors the host path: the guest session span lives as long as the raid,
+	// so its startup cost gets a span of its own. See StartVoiceRaid.
+	setupCtx, endSetup := startPhase(ctx, "voice.session.setup")
+	defer func() { endSetup(err) }()
+
 	allySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
 		endSpanErr(span, err)
@@ -49,13 +54,13 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		guestMode = guild.RaidModeAllyListener
 	}
 	allowUser := m.buildAllowUserFilter(guestGuildID)
-	setup, err := m.setupSpeakers(ctx, guestGuildID, guestMode, allowUser.Check)
+	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
+	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm)
 	if err != nil {
 		m.sessions.RemoveGuest(guestGuildID)
 		endSpanErr(span, err)
 		return guestMode, err
 	}
-	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 
 	// Join the owner bot into its bound channel.
 	// In AllyCaller mode the owner also captures incoming audio (WithVoiceReceiver)
@@ -65,17 +70,28 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	var ownerCleanup func()
 	var ownerChOut chan []byte
 	var ownerHandle *opus.FanoutHandle
-	if conn, err := ownerVoice.Join(ctx, guestGuildID); err != nil {
-		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", err))
-	} else if conn != nil {
+	ownerCtx, endOwner := startPhase(setupCtx, "voice.bot.attach",
+		botAttr(m.ownerBotID), attribute.String("bot.kind", "owner"))
+	openCtx, endOpen := startPhase(ownerCtx, "voice.conn.open", botAttr(m.ownerBotID))
+	conn, joinErr := ownerVoice.Join(openCtx, guestGuildID)
+	endOpen(joinErr)
+	if joinErr != nil {
+		endOwner(joinErr)
+		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", joinErr))
+	} else if conn == nil {
+		endOwner(nil)
+	} else {
 		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider(guestGm.Provider())
 		if guestMode.WithCapture() {
-			m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guestGuildID)
+			m.prefetchChannelMembers(ownerCtx, conn, m.ownerBotID, guestGuildID)
 			ownerSetup.WithVoiceReceiver(allowUser.Check, guestGm.Receiver())
 		}
 		ownerChOut = make(chan []byte, opus.AudioChanBuf)
-		handle, cleanup, err := ownerSetup.Apply(ctx, conn, ownerChOut)
+		applyCtx, endApply := startPhase(ownerCtx, "voice.conn.apply", botAttr(m.ownerBotID))
+		handle, cleanup, err := ownerSetup.Apply(applyCtx, conn, ownerChOut)
+		endApply(err)
 		if err != nil {
+			endOwner(err)
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
 			ownerChOut = nil
 		} else {
@@ -91,7 +107,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			// earlier session, which nothing else would ever clear for the
 			// owner bot.
 			ownerCaptures := guestMode.WithCapture()
-			ownerUndeafen := m.reconcileSpeakerDeaf(ctx, guestGuildID, m.ownerBotID, ownerCaptures, deafControllerOf(setup.Deaf))
+			deafCtx, endDeaf := startPhase(ownerCtx, "voice.deaf.reconcile",
+				botAttr(m.ownerBotID), attribute.Bool("deaf.want", !ownerCaptures))
+			ownerUndeafen := m.reconcileSpeakerDeaf(deafCtx, guestGuildID, m.ownerBotID, ownerCaptures, deafControllerOf(setup.Deaf))
+			endDeaf(nil)
+			endOwner(nil)
 			setup.Deaf.Register(m.ownerBotID, !ownerCaptures && ownerUndeafen != nil)
 		}
 	}
@@ -119,7 +139,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		AllowFilter:    allowUser,
 		VoiceProbe:     &cacheVoiceProbe{svc: m, guildID: guestGuildID},
 	}
+	// Build gets the session context, not the phase context: the goroutines it
+	// starts outlive every span here.
+	_, endBuild := startPhase(setupCtx, "voice.pipeline.build")
 	session, start, pipelineCleanup, err := pipeline.GuestFor(guestMode).Build(ctx, params)
+	endBuild(err)
 	if err != nil {
 		setup.SpeakerCleanup()
 		guestCleanupOwner()
@@ -220,22 +244,36 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 // StartVoiceRaid makes all enabled, bound speakers join their voice channels.
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
-func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (ally.Code, error) {
+func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (code ally.Code, err error) {
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session",
 		trace.WithAttributes(
 			attribute.String("guild.id", guildID.String()),
 			attribute.String("raid.mode", string(mode)),
 		),
 	)
+	// The session span lives as long as the raid, so the startup cost — the
+	// seconds between the command and the first audible frame — needs a span of
+	// its own. Its children break that down per Discord round trip.
+	setupCtx, endSetup := startPhase(ctx, "voice.session.setup")
+	defer func() { endSetup(err) }()
+
+	gm := m.metrics.ForGuild(ctx, guildID)
 	allowUser := m.buildAllowUserFilter(guildID)
-	setup, err := m.setupSpeakers(ctx, guildID, mode, allowUser.Check)
+	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm)
 	if err != nil {
 		endSpanErr(span, err)
 		return "", err
 	}
+	// Everything below runs only once every speaker is in, so the owner's phases
+	// sit end-to-end after the speakers' in the trace rather than beside them.
+	ownerCtx, endOwner := startPhase(setupCtx, "voice.bot.attach",
+		botAttr(m.ownerBotID), attribute.String("bot.kind", "owner"))
 	ov := m.ownerVoice(guildID)
-	conn, err := ov.Join(ctx, guildID)
+	openCtx, endOpen := startPhase(ownerCtx, "voice.conn.open", botAttr(m.ownerBotID))
+	conn, err := ov.Join(openCtx, guildID)
+	endOpen(err)
 	if err != nil {
+		endOwner(err)
 		setup.SpeakerCleanup()
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: join owner channel: %w", err)
@@ -243,11 +281,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if conn == nil {
 		setup.SpeakerCleanup()
 		err = fmt.Errorf("start raid: owner voice connection nil")
+		endOwner(err)
 		endSpanErr(span, err)
 		return "", err
 	}
-	m.prefetchChannelMembers(ctx, conn, m.ownerBotID, guildID)
-	gm := m.metrics.ForGuild(ctx, guildID)
+	m.prefetchChannelMembers(ownerCtx, conn, m.ownerBotID, guildID)
 	ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceReceiver(allowUser.Check, gm.Receiver())
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
@@ -256,8 +294,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		chOwnerOut = make(chan []byte, opus.AudioChanBuf)
 		ownerSetup.WithVoiceProvider(gm.Provider())
 	}
-	ownerHandle, ownerCleanup, err := ownerSetup.Apply(ctx, conn, chOwnerOut)
+	applyCtx, endApply := startPhase(ownerCtx, "voice.conn.apply", botAttr(m.ownerBotID))
+	ownerHandle, ownerCleanup, err := ownerSetup.Apply(applyCtx, conn, chOwnerOut)
+	endApply(err)
 	if err != nil {
+		endOwner(err)
 		setup.SpeakerCleanup()
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
@@ -269,7 +310,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// rather than assume: a flag stranded by an earlier session would otherwise
 	// persist forever here, since nothing else clears the owner's, and the
 	// controller would believe it is already hearing and never correct it.
-	m.reconcileSpeakerDeaf(ctx, guildID, m.ownerBotID, true, deafControllerOf(setup.Deaf))
+	deafCtx, endDeaf := startPhase(ownerCtx, "voice.deaf.reconcile",
+		botAttr(m.ownerBotID), attribute.Bool("deaf.want", false))
+	m.reconcileSpeakerDeaf(deafCtx, guildID, m.ownerBotID, true, deafControllerOf(setup.Deaf))
+	endDeaf(nil)
+	endOwner(nil)
 	setup.Deaf.Register(m.ownerBotID, false)
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession := m.sessions.Create(allyCode, guildID, mode)
@@ -303,7 +348,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		AllowFilter:  allowUser,
 		VoiceProbe:   &cacheVoiceProbe{svc: m, guildID: guildID},
 	}
+	// Build gets the session context, not the phase context: the mixer and
+	// router goroutines it starts outlive every span here.
+	_, endBuild := startPhase(setupCtx, "voice.pipeline.build")
 	session, start, err := pipeline.HostFor(mode).Build(ctx, p)
+	endBuild(err)
 	if err != nil {
 		errCleanup()
 		endSpanErr(span, err)

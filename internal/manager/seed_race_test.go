@@ -9,6 +9,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // emptyPool is a PoolService with no speaker bots, so seedGuildSpeakers reaches
@@ -44,7 +45,7 @@ func TestSetupSpeakers_SeedsGuildNotYetReachedByStartupSeeding(t *testing.T) {
 		reconnect:  newReconnectState(),
 	}
 
-	_, err := m.setupSpeakers(context.Background(), testGuildID, guild.RaidModeOneCaller, nil)
+	_, err := m.setupSpeakers(context.Background(), testGuildID, guild.RaidModeOneCaller, nil, telemetry.GuildMetrics{})
 
 	if errors.Is(err, ErrNoGuildStatus) {
 		t.Fatalf("unseeded guild must be seeded on demand, got %v", err)

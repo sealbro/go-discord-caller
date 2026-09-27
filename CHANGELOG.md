@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-09-27
+
+### Added
+- **Startup tracing for voice sessions**: traces now break down the seconds between `/start` and the first audio frame into each Discord round trip.
+- **Command start counter**: a new metric counts slash commands entering their handler, so handlers that never return show up as a gap against the completion counter.
+
+### Changed
+- **Finer pipeline latency buckets**: the mixer latency histogram now has buckets matched to the real 20–60 ms range.
+- **Dependency updates**: gRPC, grpc-gateway, and genproto bumped to latest.
+
+### Fixed
+- **Runaway error logs after an idle session ends**: an auto-stopped session left its owner audio sender running against a closed provider, logging 50 errors a second for the life of the process.
+- **Misconfigured speakers going unreported on the first `/start`**: the permission checks ran before the server was registered and passed silently after a restart.
+
 ## [0.10.0] - 2026-09-09
 
 > **Existing servers: grant Deafen Members.** Discord does not grant new permissions retroactively, so the new audio optimisation stays off until you act. Without it each speaker bot decrypts and discards ~50 voice packets per second for every person talking in its channel. Two ways to fix it:

@@ -124,10 +124,23 @@ func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc contex
 		guildID:     session.GuildID,
 		channels:    channels,
 		probe:       &cacheVoiceProbe{svc: m, guildID: session.GuildID},
-		cancelFunc:  cancelFunc,
+		stop:        func() { m.stopIdleSession(session, cancelFunc) },
 		idleTimeout: m.sessionIdleTimeout,
 	}
 	go w.Run(ctx)
+}
+
+// stopIdleSession runs the same teardown as /stop so the owner's voice conn is
+// released, and only for the session that went idle. cancelFunc is the fallback
+// when that session is already gone: its goroutine still needs the context closed.
+func (m *Service) stopIdleSession(session *guild.Session, cancelFunc context.CancelFunc) {
+	ctx, cancel := context.WithTimeout(context.Background(), idleStopTimeout)
+	defer cancel()
+	if err := m.stopSession(ctx, session.GuildID, session); err != nil {
+		slog.WarnContext(ctx, "session idle: stop skipped, cancelling session context",
+			slog.String("guildID", session.GuildID.String()), slog.Any("err", err))
+		cancelFunc()
+	}
 }
 
 // sessionChannels returns the deduplicated set of voice channels to watch for a

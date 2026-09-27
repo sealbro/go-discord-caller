@@ -14,6 +14,10 @@ import (
 // granularity, so a 1-minute poll keeps the cost negligible.
 const sessionPresenceInterval = time.Minute
 
+// idleStopTimeout bounds the auto-stop teardown. The session context is torn
+// down inside it, so the stop cannot borrow the session's own context.
+const idleStopTimeout = 30 * time.Second
+
 // sessionPresenceWatcher stops a voice raid session once every watched voice
 // channel has been empty of non-bot users continuously for idleTimeout.
 //
@@ -22,10 +26,13 @@ const sessionPresenceInterval = time.Minute
 // nobody is connected to any of the session's channels, the session is unused
 // and gets stopped regardless of whether anyone was speaking.
 type sessionPresenceWatcher struct {
-	guildID     snowflake.ID
-	channels    []snowflake.ID
-	probe       *cacheVoiceProbe
-	cancelFunc  context.CancelFunc
+	guildID  snowflake.ID
+	channels []snowflake.ID
+	probe    *cacheVoiceProbe
+	// stop must run the full teardown, not just a context cancel: only
+	// GuildVoice.Leave cancels the registered audio sender, and one left
+	// behind polls its closed provider 50×/s for the life of the process.
+	stop        func()
 	idleTimeout time.Duration
 }
 
@@ -36,8 +43,8 @@ func (w *sessionPresenceWatcher) occupied() bool {
 
 // Run polls every sessionPresenceInterval until ctx is cancelled or until every
 // watched channel has been empty continuously for w.idleTimeout — in which case
-// it calls cancelFunc (stopping the session) and returns. No-op when idleTimeout
-// <= 0 or no channels are provided.
+// it stops the session and returns. No-op when idleTimeout <= 0 or no channels
+// are provided.
 func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 	if w.idleTimeout <= 0 || len(w.channels) == 0 {
 		return
@@ -65,7 +72,7 @@ func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 					slog.String("guildID", w.guildID.String()),
 					slog.Duration("idleTimeout", w.idleTimeout),
 				)
-				w.cancelFunc()
+				w.stop()
 				return
 			}
 		}

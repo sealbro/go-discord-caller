@@ -182,6 +182,13 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 
 // StopVoiceRaid makes all active speakers leave their voice channels.
 func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error {
+	return m.stopSession(ctx, guildID, nil)
+}
+
+// stopSession tears down the guild's active session. When want is non-nil only
+// that exact session is stopped, so a caller holding a reference that went stale
+// while it waited cannot tear down the raid that replaced it.
+func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *guild.Session) error {
 	// Extract and clear the session under write lock; do I/O outside.
 	m.mu.Lock()
 	status := m.statuses[guildID]
@@ -190,6 +197,10 @@ func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 		return ErrNoActiveSession
 	}
 	session := status.Session
+	if want != nil && session != want {
+		m.mu.Unlock()
+		return ErrNoActiveSession
+	}
 	status.Session = nil
 	m.clearActiveRouter(guildID)
 	m.mu.Unlock()

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -20,7 +21,7 @@ import (
 // Returns an error if the guild has no status, already has an active session,
 // or no speakers could join.
 func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool) (*pipeline.Setup, error) {
-	speakers, err := m.snapshotSpeakers(guildID)
+	speakers, err := m.speakersAfterSeeding(guildID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +184,23 @@ func (m *Service) consumeSpeaker(ctx context.Context, guildID, speakerID snowfla
 	m.watchVoiceReady(guildID, speakerID, conn)
 
 	return handle, cleanup, nil
+}
+
+// speakersAfterSeeding snapshots the guild's speakers, seeding the guild on
+// demand when startup seeding has not reached it yet.
+//
+// onReady seeds every guild from a detached goroutine that takes seconds per
+// guild, but a guild's slash commands are already registered on Discord from
+// the previous run, so nothing stops a /start from landing first. Failing it
+// with ErrNoGuildStatus asks the operator to "seed the guild first", which is
+// not something they can do.
+func (m *Service) speakersAfterSeeding(guildID snowflake.ID) ([]guild.Speaker, error) {
+	speakers, err := m.snapshotSpeakers(guildID)
+	if !errors.Is(err, ErrNoGuildStatus) {
+		return speakers, err
+	}
+	m.seedGuildSpeakers(guildID, m.ownerBotID)
+	return m.snapshotSpeakers(guildID)
 }
 
 // snapshotSpeakers returns a deep copy of the guild's speakers as a slice.

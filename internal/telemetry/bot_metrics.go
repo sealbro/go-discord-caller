@@ -14,6 +14,7 @@ type BotMetrics struct {
 	guildInfo    metric.Int64ObservableGauge
 	botOnline    metric.Int64ObservableGauge
 	voiceCallers metric.Int64UpDownCounter
+	cmdStarted   metric.Int64Counter
 	cmdCount     metric.Int64Counter
 	cmdDuration  metric.Float64Histogram
 }
@@ -35,8 +36,13 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	if b.cmdStarted, err = meter.Int64Counter("gdc.command.started.total",
+		metric.WithDescription("Slash command invocations entering the handler; exceeds gdc.command.total by the number still running."),
+	); err != nil {
+		return
+	}
 	if b.cmdCount, err = meter.Int64Counter("gdc.command.total",
-		metric.WithDescription("Slash command invocations"),
+		metric.WithDescription("Slash command invocations that completed"),
 	); err != nil {
 		return
 	}
@@ -95,12 +101,23 @@ func (b *BotMetrics) VoiceCallerAdd(ctx context.Context, delta int64, guildID, c
 	)
 }
 
-// RecordCommand records slash command count and duration for a command/guild pair.
+// RecordCommandStart records a slash command entering its handler. RecordCommand
+// fires only once the handler returns, so without this a handler that blocks
+// forever looks identical to a command nobody ran.
+func (b *BotMetrics) RecordCommandStart(ctx context.Context, command, guildID string) {
+	b.cmdStarted.Add(ctx, 1, commandAttrs(command, guildID))
+}
+
+// RecordCommand records slash command completion and duration for a command/guild pair.
 func (b *BotMetrics) RecordCommand(ctx context.Context, command, guildID string, durationSeconds float64) {
-	attrs := metric.WithAttributes(
+	attrs := commandAttrs(command, guildID)
+	b.cmdCount.Add(ctx, 1, attrs)
+	b.cmdDuration.Record(ctx, durationSeconds, attrs)
+}
+
+func commandAttrs(command, guildID string) metric.MeasurementOption {
+	return metric.WithAttributes(
 		attribute.String("command", command),
 		attribute.String("guild.id", guildID),
 	)
-	b.cmdCount.Add(ctx, 1, attrs)
-	b.cmdDuration.Record(ctx, durationSeconds, attrs)
 }

@@ -44,10 +44,11 @@ All instruments carry the resource attribute `service.name="go-discord-caller"`.
 | `gdc.discord.guild`  | ObservableGauge | `gdc_discord_guild`  | `guild_id`, `guild_name` | Info gauge (always `1`) for known guilds. Emitted from `internal/manager/service.go`. |
 | `gdc.bot.online`     | ObservableGauge | `gdc_bot_online`     | `user_id`, `guild_id`    | `1` while a bot is a registered member of the guild; absent otherwise. From `internal/manager/service.go`. |
 | `gdc.voice.callers`  | UpDownCounter   | `gdc_voice_callers`  | `guild_id`, `channel_id` | Users with the caller role currently in a voice channel. From `internal/bot/handlers.go`. |
-| `gdc.command.total`  | Counter         | `gdc_command_total`  | `command`, `guild_id` ⚠️ | Slash command invocations. From `internal/bot/middleware.go`. |
+| `gdc.command.started.total` | Counter | `gdc_command_started_total` | `command`, `guild_id` ⚠️ | Slash command invocations **entering** the handler. Recorded before the handler runs, so a handler that never returns is still counted. From `internal/bot/middleware.go`. |
+| `gdc.command.total`  | Counter         | `gdc_command_total`  | `command`, `guild_id` ⚠️ | Slash command invocations that **completed**. A sustained `gdc_command_started_total - gdc_command_total` means handlers went in and never came out. From `internal/bot/middleware.go`. |
 | `gdc.command.duration` | Histogram (`s`) | `gdc_command_duration_seconds` (`_bucket`/`_sum`/`_count`) | `command`, `guild_id` ⚠️ | Slash command execution duration. From `internal/bot/middleware.go`. |
 
-> ⚠️ The two `gdc.command.*` instruments label the guild as `guild.id` (dotted)
+> ⚠️ The three `gdc.command.*` instruments label the guild as `guild.id` (dotted)
 > in code — see `RecordCommand`. The OTLP→Prometheus translation rewrites this
 > to `guild_id`, so dashboards still query `guild_id`, but the attribute is
 > inconsistent with the `guild_id` used by every other instrument. Worth

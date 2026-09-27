@@ -59,6 +59,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		cmdCtx := e.Ctx
 		ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 		go func() {
+			h.manager.EnsureGuildReady(guildID)
 			if warnings := h.manager.CheckGuildChannelAccess(guildID); len(warnings) > 0 {
 				cancelFunc()
 				h.followUp(e, loc.T("raid.join_blocked_permissions")+formatAccessWarnings(loc, warnings))
@@ -94,6 +95,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 	cmdCtx := e.Ctx
 	ctx, cancelFunc := context.WithCancel(trace.ContextWithSpan(context.Background(), trace.SpanFromContext(cmdCtx)))
 	go func() {
+		h.manager.EnsureGuildReady(guildID)
 		if warnings := h.manager.CheckGuildChannelAccess(guildID); len(warnings) > 0 {
 			cancelFunc()
 			h.followUp(e, loc.T("raid.start_blocked_permissions")+formatAccessWarnings(loc, warnings))

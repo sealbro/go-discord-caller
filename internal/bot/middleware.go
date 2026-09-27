@@ -32,6 +32,10 @@ func (h *CommandHandlers) withGuild(fn guildCommandHandler) func(discord.SlashCo
 				attribute.String("user.id", e.User().ID.String()),
 			),
 		)
+		// Recorded before fn runs: a handler that never returns records no
+		// completion, so without this the invocation leaves no trace at all.
+		h.metrics.RecordCommandStart(ctx, data.CommandName(), guildID.String())
+
 		start := time.Now()
 		e.Ctx = ctx
 		err := fn(guildID, loc, data, e)

@@ -7,7 +7,8 @@
   {% set keywords = page.meta.keywords if page and page.meta and page.meta.keywords else config.extra.keywords %}
 
   {% if keywords %}<meta name="keywords" content="{{ keywords }}">{% endif %}
-  {% if config.extra.google_site_verification %}<meta name="google-site-verification" content="{{ config.extra.google_site_verification }}">{% endif %}
+  {% for token in config.extra.google_site_verification.values() %}<meta name="google-site-verification" content="{{ token }}">
+  {% endfor %}
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ title }}">

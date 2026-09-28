@@ -75,7 +75,9 @@ nav:
   - Metrics: https://github.com/sealbro/go-discord-caller/blob/main/docs/METRICS.md
 
 extra:
-  google_site_verification: "LC0mRZXVM3g4S6fw5eF3phmaxlQ0sPlEdB6VtqpcuH4"
+  google_site_verification:
+    "sealbro.github.io": "LC0mRZXVM3g4S6fw5eF3phmaxlQ0sPlEdB6VtqpcuH4"
+    "go-discord-caller.sealbro.dev": "O8JKZQS0TK7FL-OLwHAnoGjGDlEGR4Jwbxdp5jf9LvQ"
   keywords: >-
     discord shot caller bot, discord voice relay bot, discord voice command system,
     gaming guild voice bot, cross-server voice relay, multi-squad voice coordination,

@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
+
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // TestConfig holds optional test overrides.
@@ -32,6 +34,9 @@ type Config struct {
 	OtelEndpoint string
 	// LogLevel is the minimum log level (default: info); controlled by LOG_LEVEL env var
 	LogLevel slog.Level
+	// VoiceLogLevel is the minimum level for disgo's voice-layer logs, controlled
+	// by VOICE_LOG_LEVEL. Defaults to off — see telemetry.VoiceLogger for why.
+	VoiceLogLevel slog.Level
 	// SessionIdleTimeout is how long every voice channel in a raid may stay empty
 	// of non-bot users (nobody connected) before the session auto-stops.
 	// Default: 10m. Set SESSION_IDLE_TIMEOUT=0 to disable.
@@ -78,6 +83,7 @@ func Load() (*Config, error) {
 		StorePath:          storePath(),
 		OtelEndpoint:       os.Getenv("OTEL_ENDPOINT"),
 		LogLevel:           parseLogLevel(os.Getenv("LOG_LEVEL")),
+		VoiceLogLevel:      parseVoiceLogLevel(os.Getenv("VOICE_LOG_LEVEL")),
 		SessionIdleTimeout: parseSessionIdleTimeout(os.Getenv("SESSION_IDLE_TIMEOUT")),
 		Test: TestConfig{
 			AllowBots: os.Getenv("TEST_ALLOW_BOTS") == "true",
@@ -145,6 +151,25 @@ func storePath() string {
 		return p
 	}
 	return "store.yaml"
+}
+
+// parseVoiceLogLevel parses VOICE_LOG_LEVEL (debug, info, warn, error, or off)
+// into a level for disgo's voice logger. Empty, "off" and invalid input all
+// disable it; the per-packet bursts it emits cost far more than they are worth
+// unless someone is actively debugging audio.
+func parseVoiceLogLevel(s string) slog.Level {
+	trimmed := strings.TrimSpace(s)
+	if trimmed == "" || strings.EqualFold(trimmed, "off") || strings.EqualFold(trimmed, "none") {
+		return telemetry.LevelVoiceOff
+	}
+	var l slog.Level
+	if err := l.UnmarshalText([]byte(strings.ToUpper(trimmed))); err != nil {
+		slog.Warn("invalid VOICE_LOG_LEVEL; voice logs stay disabled",
+			slog.String("value", s),
+		)
+		return telemetry.LevelVoiceOff
+	}
+	return l
 }
 
 // parseLogLevel parses a log level string (debug, info, warn, error) into slog.Level.

@@ -14,6 +14,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	internalbot "github.com/sealbro/go-discord-caller/internal/bot"
 	"github.com/sealbro/go-discord-caller/internal/config"
+	"github.com/sealbro/go-discord-caller/internal/dave"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/pool"
@@ -39,8 +40,10 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	h := &Harness{Cfg: cfg}
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
+	daveStats := dave.NewStats()
+
 	var err error
-	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken,
+	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken, daveStats,
 		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -60,7 +63,7 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build metrics: %w", err)
 	}
-	h.Pool = pool.NewService(&metrics.Pool)
+	h.Pool = pool.NewService(&metrics.Pool, daveStats)
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
 	h.Pool.ConnectPool(poolCtx, cfg.SpeakerTokens)
 	poolCancel()

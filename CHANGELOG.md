@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-09-28
+
+### Added
+- **Per-caller decrypt metric**: a new counter breaks encrypted-voice decrypt outcomes down by the caller whose audio failed, separating one bad sender from a general loss rate.
+- **`VOICE_LOG_LEVEL` setting**: controls the voice layer's own logs separately from the app log level.
+
+### Changed
+- **Voice-layer logs off by default**: the noisy per-packet voice logs no longer appear unless `VOICE_LOG_LEVEL` is raised.
+- **Docs site moved to a custom domain**.
+
 ## [0.10.1] - 2026-09-27
 
 ### Added

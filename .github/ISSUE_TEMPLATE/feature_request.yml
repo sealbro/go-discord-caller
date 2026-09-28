@@ -1,0 +1,56 @@
+name: Feature request
+description: Propose a concrete change to the bot.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If you are not yet sure what the change should be, start a
+        [Discussion](https://github.com/sealbro/go-discord-caller/discussions)
+        instead — this form is for a proposal that is already specific enough to
+        act on.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before requesting
+      options:
+        - label: I searched existing issues and Discussions for the same idea.
+          required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: The situation you hit, not the solution. What are you doing today instead?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should the bot do?
+      description: The change as you picture it — a new command or option, different behaviour in an existing mode, a new setting.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Slash commands / setup UI
+        - Audio relay and mixing
+        - Inter-guild relay
+        - Metrics, logs and monitoring
+        - Deployment and configuration
+        - Translations
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I would be willing to open a pull request for this.

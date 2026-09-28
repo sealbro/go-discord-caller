@@ -264,3 +264,15 @@ The multi-stage build installs `libdave`, compiles the binary with CGO, then cop
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full release history.
+
+## Contributing
+
+Bug reports, translations and patches are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+Start there before building locally: the project needs CGO and `libdave`, so Docker is the easier dev path.
+
+Questions and ideas belong in [Discussions](https://github.com/sealbro/go-discord-caller/discussions);
+bugs go through the [issue templates](https://github.com/sealbro/go-discord-caller/issues/new/choose).
+
+## Security
+
+Found a vulnerability? Report it privately — see [SECURITY.md](SECURITY.md). Please don't open a public issue for it.

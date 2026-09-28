@@ -1,0 +1,110 @@
+name: Bug report
+description: Something is broken — audio drops, a command fails, the bot crashes.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this 🙏
+
+        Most unfixable reports are missing the version, the raid mode, or the logs.
+        The fields below are the ones that decide whether this can be reproduced.
+
+        **Never paste a bot token.** Tokens are full account credentials — scrub
+        them from logs and env dumps before posting. Regenerate the token if one
+        does slip out.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before reporting
+      options:
+        - label: I searched existing issues (open and closed) and Discussions.
+          required: true
+        - label: I reproduced this on the latest release, or I say below which version I am on and why I cannot upgrade.
+          required: true
+        - label: No bot tokens appear anywhere in what I am pasting.
+          required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag, Docker image tag, or commit SHA.
+      placeholder: "0.10.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running it?
+      options:
+        - Docker image from Docker Hub
+        - Docker image built from source
+        - Locally with go run / go build
+        - The hosted evaluation bot from the README
+        - Other (describe below)
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Raid mode
+      description: The mode passed to /start, as shown in the command's choices.
+      options:
+        - One Caller
+        - Many Callers
+        - One↔Many Callers (host)
+        - One↔Many Callers (guest — joined by relay code)
+        - Not mode-specific / happens before /start
+    validations:
+      required: true
+  - type: input
+    id: scale
+    attributes:
+      label: Servers, speakers and callers
+      description: How many speaker bots were bound, how many people were talking, and whether more than one Discord server was involved.
+      placeholder: "1 server, 3 speaker bots, 2 people talking"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you observed, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: |
+        Be specific about timing — a lot of audio bugs only appear after a pause in
+        speech, after someone joins or leaves, or several minutes into a session.
+      placeholder: |
+        1. /start mode:One Caller with 2 speaker bots bound
+        2. Talk for ~30 s — audio reaches both speakers
+        3. Stay silent for ~10 s, then talk again
+        4. Only one speaker gets audio
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Bot logs from around the failure — `LOG_LEVEL=debug` gives much more.
+        Trim to the relevant window rather than attaching hours of output, and
+        scrub tokens.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: dave
+    attributes:
+      label: DAVE implementation
+      description: The DAVE_IMPL value, if you changed it from the default.
+      placeholder: "libdave (default)"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Network setup (NAT, firewall, UDP timeouts), whether it used to work on an older version, workarounds you found.

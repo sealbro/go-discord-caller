@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"log/slog"
+	"math"
 	"os"
 	"time"
 
@@ -42,19 +43,41 @@ func (h levelHandler) WithGroup(name string) slog.Handler {
 
 const ServiceName = "go-discord-caller"
 
+// LevelVoiceOff disables the voice logger entirely. It sits above every slog
+// level, so no record from disgo's voice layer is ever enabled.
+const LevelVoiceOff = slog.Level(math.MaxInt32)
+
+// voiceLogLevel gates every logger VoiceLogger hands out. It is a LevelVar so
+// the process-wide setting can be applied at startup while voice loggers are
+// built lazily per bot, and read concurrently from voice goroutines.
+var voiceLogLevel = func() *slog.LevelVar {
+	v := new(slog.LevelVar)
+	v.Set(LevelVoiceOff)
+	return v
+}()
+
+// SetVoiceLogLevel applies the VOICE_LOG_LEVEL setting. Call it once, before
+// any client is built. The choice is process-wide: disgo emits the same lines
+// from the owner bot and every speaker bot, so a per-bot level would only make
+// a voice outage harder to read.
+func SetVoiceLogLevel(l slog.Level) { voiceLogLevel.Set(l) }
+
 // VoiceLogger returns the logger handed to disgo's voice manager, tagged with
 // the bot whose voice connections it covers.
 //
-// This used to be slog.DiscardHandler, which silently dropped every diagnostic
-// from the voice layer — gateway closes, reconnect attempts, UDP open failures,
-// encryption-mode errors. Voice connections break far more often than the
-// application layer can observe (a re-identify leaves no application-visible
-// trace at all; see Service.watchVoiceReady), so those lines are the only
-// direct evidence when audio goes silent.
+// Disabled by default (LevelVoiceOff), because disgo logs voice failures
+// per packet, not per connection: one connection that cannot decrypt emits
+// "failed to DAVE decrypt packet" 50 times a second for as long as the raid
+// lasts, which is tens of thousands of lines an hour on the OTLP pipeline for
+// a single fact. The same applies to "failed to encrypt packet: missing key
+// ratchet" on the send side. Metrics carry the signal those bursts stand in
+// for; the log lines only carry the volume.
 //
-// Gated at Warn: disgo's voice Debug output is per-event and includes a line
-// for every VoiceStateUpdate, which would swamp the OTLP log pipeline. Warn and
-// above is exactly the set worth exporting.
+// Set VOICE_LOG_LEVEL=warn to turn them back on while debugging audio. That
+// also restores the once-per-event diagnostics — gateway closes, reconnect
+// attempts, UDP open failures — which a re-identify leaves no other trace of
+// (see Service.watchVoiceReady). Below warn, disgo logs a line for every
+// VoiceStateUpdate, so debug and info are for local runs only.
 //
 // botUserID is mandatory in practice: every line disgo emits from the voice
 // layer is otherwise identical across the owner bot and all speaker bots, so a
@@ -63,7 +86,7 @@ const ServiceName = "go-discord-caller"
 // genuinely unknown — the attribute is then omitted rather than logged as "0".
 func VoiceLogger(botUserID snowflake.ID) *slog.Logger {
 	logger := slog.New(levelHandler{
-		level:   slog.LevelWarn,
+		level:   voiceLogLevel,
 		Handler: slog.Default().Handler(),
 	}).With(slog.String("component", "voice"))
 

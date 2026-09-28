@@ -12,13 +12,18 @@ import (
 // captureVoiceLogger swaps the default slog handler for a buffer and returns a
 // VoiceLogger writing into it, so the attributes that reach the OTLP pipeline
 // can be asserted directly.
-func captureVoiceLogger(t *testing.T, botUserID snowflake.ID) (*slog.Logger, *bytes.Buffer) {
+func captureVoiceLogger(t *testing.T, botUserID snowflake.ID, level slog.Level) (*slog.Logger, *bytes.Buffer) {
 	t.Helper()
 
 	var buf bytes.Buffer
 	prev := slog.Default()
+	prevLevel := voiceLogLevel.Level()
 	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	SetVoiceLogLevel(level)
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		SetVoiceLogLevel(prevLevel)
+	})
 
 	return VoiceLogger(botUserID), &buf
 }
@@ -27,7 +32,7 @@ func captureVoiceLogger(t *testing.T, botUserID snowflake.ID) (*slog.Logger, *by
 // owner bot and all speaker bots, which made a "missing key ratchet" burst
 // impossible to attribute to a connection.
 func TestVoiceLoggerTagsBotUserID(t *testing.T) {
-	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038))
+	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038), slog.LevelWarn)
 
 	logger.Warn("failed to send audio")
 
@@ -41,7 +46,7 @@ func TestVoiceLoggerTagsBotUserID(t *testing.T) {
 }
 
 func TestVoiceLoggerOmitsUnknownBotUserID(t *testing.T) {
-	logger, buf := captureVoiceLogger(t, 0)
+	logger, buf := captureVoiceLogger(t, 0, slog.LevelWarn)
 
 	logger.Warn("failed to send audio")
 
@@ -54,13 +59,27 @@ func TestVoiceLoggerOmitsUnknownBotUserID(t *testing.T) {
 	}
 }
 
-// The Warn gate keeps disgo's per-VoiceStateUpdate Debug output off the pipeline.
+// Below warn, disgo logs a line per VoiceStateUpdate.
 func TestVoiceLoggerDropsBelowWarn(t *testing.T) {
-	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038))
+	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038), slog.LevelWarn)
 
 	logger.Info("voice state update")
 
 	if buf.Len() != 0 {
 		t.Errorf("expected Info to be gated out, got %q", buf.String())
+	}
+}
+
+// disgo logs voice failures per packet, so a single undecryptable connection
+// puts tens of thousands of identical lines an hour on the OTLP pipeline.
+// Nothing should reach it unless VOICE_LOG_LEVEL was set.
+func TestVoiceLoggerSilentByDefault(t *testing.T) {
+	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038), LevelVoiceOff)
+
+	logger.Error("error while reading packet")
+	logger.Warn("failed to send audio")
+
+	if buf.Len() != 0 {
+		t.Errorf("voice logs must be off by default, got %q", buf.String())
 	}
 }

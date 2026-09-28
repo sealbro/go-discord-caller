@@ -29,6 +29,8 @@ func main() {
 	}
 	defer shutdownTelemetry()
 
+	telemetry.SetVoiceLogLevel(cfg.VoiceLogLevel)
+
 	st, err := store.NewYAMLStore(cfg.StorePath)
 	if err != nil {
 		log.Fatalf("failed to open store %q: %v", cfg.StorePath, err)

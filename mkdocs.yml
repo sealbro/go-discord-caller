@@ -5,9 +5,7 @@ site_description: >-
   speaker bots across one or many Discord servers, with mix-minus mixing and DAVE
   end-to-end encryption.
 site_author: sealbro
-# IMPORTANT: change this to your custom domain once configured (e.g. https://caller.sealway.dev/)
-# It powers canonical URLs, the sitemap.xml, and Open Graph tags — required for good indexing.
-site_url: https://sealbro.github.io/go-discord-caller/
+site_url: https://go-discord-caller.sealbro.dev/
 
 repo_name: sealbro/go-discord-caller
 repo_url: https://github.com/sealbro/go-discord-caller

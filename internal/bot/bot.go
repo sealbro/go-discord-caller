@@ -20,6 +20,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/config"
+	"github.com/sealbro/go-discord-caller/internal/dave"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
 	"github.com/sealbro/go-discord-caller/internal/manager"
@@ -108,6 +109,8 @@ type Bot struct {
 	speakerTokens []string
 	guildReadyCh  chan []snowflake.ID
 	bundle        *i18n.Bundle
+	daveStats     *dave.Stats
+	daveMetrics   *telemetry.DaveMetrics
 }
 
 // New creates and configures a new Bot instance. It performs no network I/O —
@@ -121,8 +124,12 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	// Buffered channel (cap 1) receives guild IDs from the Ready event for command sync.
 	guildReadyCh := make(chan []snowflake.ID, 1)
 
+	// Shared by the owner client and the speaker pool. Created here because the
+	// clients are built before the meter exists; StartMetrics attaches it later.
+	daveStats := dave.NewStats()
+
 	// Manager (owner) bot client — production adds GuildMessages intent and the command router.
-	client, err := NewOwnerClient(cfg.OwnerBotToken,
+	client, err := NewOwnerClient(cfg.OwnerBotToken, daveStats,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -158,7 +165,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 		return nil, fmt.Errorf("failed to init metrics: %w", err)
 	}
 
-	poolSvc := pool.NewService(&metrics.Pool)
+	poolSvc := pool.NewService(&metrics.Pool, daveStats)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
 	managerSvc.SetSessionIdleTimeout(cfg.SessionIdleTimeout)
 
@@ -174,6 +181,8 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 
 	b := &Bot{
 		client:        client,
+		daveStats:     daveStats,
+		daveMetrics:   &metrics.Dave,
 		manager:       managerSvc,
 		store:         st,
 		poolSvc:       poolSvc,
@@ -197,6 +206,7 @@ func (b *Bot) Run(ctx context.Context) error {
 	}
 	b.poolSvc.StartWatchdog(ctx, 30*time.Second)
 	b.poolSvc.StartMetrics()
+	b.daveStats.StartMetrics(b.daveMetrics)
 	b.manager.StartMetrics()
 
 	if err := b.client.OpenGateway(ctx); err != nil {
@@ -304,13 +314,15 @@ func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, comman
 // NewOwnerClient builds a disgo client for the owner (manager) bot.
 // Base config covers DAVE E2EE voice and FlagsAll cache. Callers supply
 // their own intents and any extra options (e.g. event listeners, extra intents).
-func NewOwnerClient(token string, opts ...bot.ConfigOpt) (*bot.Client, error) {
+// daveStats counts decrypt outcomes per sending user; pass the same one given
+// to the speaker pool so owner and speakers report into a single series.
+func NewOwnerClient(token string, daveStats *dave.Stats, opts ...bot.ConfigOpt) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
 	base := []bot.ConfigOpt{
 		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats)),
 			pool.SafeUDPConnOpt(),
 			pool.SafeAudioSenderOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),

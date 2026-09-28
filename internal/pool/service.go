@@ -13,6 +13,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/dave"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/metric"
@@ -35,6 +36,7 @@ type Service struct {
 	poolClients map[snowflake.ID]*bot.Client
 	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
 	metrics     *telemetry.PoolMetrics
+	daveStats   *dave.Stats
 }
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
@@ -45,11 +47,12 @@ type extraBot struct {
 }
 
 // NewService creates a new speaker Service.
-func NewService(metrics *telemetry.PoolMetrics) *Service {
+func NewService(metrics *telemetry.PoolMetrics, daveStats *dave.Stats) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
 		extraBots:   make(map[snowflake.ID]extraBot),
 		metrics:     metrics,
+		daveStats:   daveStats,
 	}
 }
 
@@ -64,7 +67,7 @@ func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) 
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string) (*bot.Client, error) {
+func newPoolClient(token string, daveStats *dave.Stats) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
 	return disgo.New(token,
@@ -72,7 +75,7 @@ func newPoolClient(token string) (*bot.Client, error) {
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
+			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats)),
 			SafeUDPConnOpt(),
 			SafeAudioSenderOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
@@ -105,7 +108,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			client, err := newPoolClient(token)
+			client, err := newPoolClient(token, s.daveStats)
 			if err != nil {
 				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
@@ -219,7 +222,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	s.metrics.ReconnectAttempt(ctx, botUserID)
 
-	newClient, err := newPoolClient(token)
+	newClient, err := newPoolClient(token, s.daveStats)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),

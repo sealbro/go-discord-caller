@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or help with setup
+    url: https://github.com/sealbro/go-discord-caller/discussions
+    about: Ask in Discussions — setup help, "is this possible", anything not yet a confirmed bug.
+  - name: Idea or feature discussion
+    url: https://github.com/sealbro/go-discord-caller/discussions
+    about: Float an idea here first if you are not sure it belongs in the bot.
+  - name: Security vulnerability
+    url: https://github.com/sealbro/go-discord-caller/security/advisories/new
+    about: Report privately. Never open a public issue for a security problem.
+  - name: Documentation
+    url: https://go-discord-caller.sealbro.dev/
+    about: Setup guide, voice flow, latency and metrics docs.

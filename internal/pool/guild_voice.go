@@ -62,8 +62,10 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 	if err := conn.Open(openCtx, v.channelID, false, false); err != nil {
 		// A half-open conn stays registered, and CreateConn would hand the
 		// same one to the next session, where Open returns instantly off its
-		// stale token without being connected.
-		leaveCtx, leaveCancel := context.WithTimeout(ctx, v.leaveTimeout())
+		// stale token without being connected. Detached from ctx because a
+		// cancelled one drops the leave op inside disgo's rate limiter,
+		// leaving the bot in the channel.
+		leaveCtx, leaveCancel := context.WithTimeout(context.WithoutCancel(ctx), v.leaveTimeout())
 		v.Leave(leaveCtx, guildID)
 		leaveCancel()
 		return nil, fmt.Errorf("join channel %s: %w", v.channelID, err)

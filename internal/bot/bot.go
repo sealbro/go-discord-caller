@@ -329,6 +329,7 @@ func NewOwnerClient(token string, daveStats *dave.Stats, opts ...bot.ConfigOpt) 
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats)),
 			pool.SafeUDPConnOpt(),
 			pool.SafeAudioSenderOpt(),
+			pool.SafeGatewayOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	}

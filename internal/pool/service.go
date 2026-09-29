@@ -81,6 +81,7 @@ func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, dave
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats)),
 			SafeUDPConnOpt(),
 			SafeAudioSenderOpt(),
+			SafeGatewayOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	)

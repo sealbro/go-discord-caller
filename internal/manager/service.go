@@ -44,6 +44,7 @@ type Service struct {
 	sessions           *ally.Manager
 	metrics            *telemetry.Metrics
 	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
+	starting           startGuard     // one raid start per guild at a time
 	sessionIdleTimeout time.Duration  // 0 disables; set via SetSessionIdleTimeout
 }
 

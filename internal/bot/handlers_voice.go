@@ -74,6 +74,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.no_bound_speakers"))
 					return
 				}
+				// A raid that came up between the command's pre-check and here,
+				// including one this very command raced with.
+				if errors.Is(err, manager.ErrSessionExists) {
+					h.followUp(e, loc.T("raid.already_active"))
+					return
+				}
 				h.followUp(e, loc.T("raid.join_failed", "Code", code, "Err", err.Error()))
 				return
 			}
@@ -110,6 +116,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				h.followUp(e, loc.T("raid.no_bound_speakers"))
 				return
 			}
+			if errors.Is(err, manager.ErrSessionExists) {
+				h.followUp(e, loc.T("raid.already_active"))
+				return
+			}
 			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error()))
 			return
 		}
@@ -136,10 +146,9 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 // Uses a deferred response so the user gets real feedback on success/failure.
 // Authorization handled by withManager middleware.
 func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, loc *i18n.Localizer, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	if status := h.manager.GetStatus(guildID); !status.HasActiveSession() {
-		return e.CreateMessage(ephemeral(loc.T("raid.none_active")))
-	}
-
+	// Deliberately no pre-check for an active session: during the seconds a
+	// raid spends starting there is none to find, and the manager aborts that
+	// start rather than leaving the operator to ask again once it is up.
 	if err := e.DeferCreateMessage(true); err != nil {
 		return err
 	}
@@ -147,6 +156,10 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, loc *i18n.Lo
 	cmdCtx := e.Ctx
 	go func() {
 		if err := h.manager.StopVoiceRaid(cmdCtx, guildID); err != nil {
+			if errors.Is(err, manager.ErrNoActiveSession) {
+				h.followUp(e, loc.T("raid.none_active"))
+				return
+			}
 			slog.WarnContext(cmdCtx, "failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
 			h.followUp(e, loc.T("raid.stop_failed", "Err", err.Error()))
 			return

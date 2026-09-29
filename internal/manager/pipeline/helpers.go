@@ -54,12 +54,29 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 		mx := chanMixers[dest.ChannelID]
 		destOuts := dest.Outs
 		mx.SetSink(func(pkt []byte) {
-			for _, out := range destOuts {
+			if len(destOuts) == 0 {
+				opus.PutEncodedFrame(pkt)
+				return
+			}
+			// Every destination drains its own VoiceProvider, and a provider
+			// returns each frame it has sent to the pool — so two speakers in
+			// one channel must not be handed the same buffer. The last one
+			// takes pkt itself, which keeps the single-speaker path copy-free.
+			for _, out := range destOuts[:len(destOuts)-1] {
+				buf := opus.CopyOpusFrame(pkt)
 				select {
-				case out <- pkt:
+				case out <- buf:
 				default:
+					opus.PutEncodedFrame(buf)
 					drop()
 				}
+			}
+			last := destOuts[len(destOuts)-1]
+			select {
+			case last <- pkt:
+			default:
+				opus.PutEncodedFrame(pkt)
+				drop()
 			}
 		})
 		go mx.Run(ctx)
@@ -143,11 +160,13 @@ func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *
 		scratch := make([]int16, opus.MixerPCMBuf)
 		for pkt := range relayOpusIn {
 			if len(pkt) == 0 {
+				opus.PutEncodedFrame(pkt)
 				continue
 			}
 			n, err := dec.Decode(pkt, scratch)
 			if err != nil {
 				slog.Debug("relay bridge: decode failed", slog.Any("err", err))
+				opus.PutEncodedFrame(pkt)
 				continue
 			}
 			now := time.Now()
@@ -157,6 +176,8 @@ func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *
 				opusCopy := opus.CopyOpusFrame(pkt)
 				rs.src.Feed(opus.Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now})
 			}
+			// Each source took its own copy, so the inbound buffer goes back.
+			opus.PutEncodedFrame(pkt)
 		}
 	}()
 

@@ -24,10 +24,19 @@ type fakeSession struct {
 	godave.Session
 	err error
 
+	// ready mirrors golibdave's Ready: false while the session is in
+	// passthrough mode, true once an E2EE epoch is active.
+	ready bool
+	// onAddUser runs at the start of AddUser, before the decryptor exists, to
+	// stand in for a frame arriving during libdave's CGO setup work.
+	onAddUser func()
+
 	mu       sync.Mutex
 	decrypts int
 	known    map[godave.UserID]struct{}
 }
+
+func (f *fakeSession) Ready() bool { return f.ready }
 
 func (f *fakeSession) Decrypt(userID godave.UserID, frame []byte, out []byte) (int, error) {
 	f.mu.Lock()
@@ -46,6 +55,9 @@ func (f *fakeSession) Decrypt(userID godave.UserID, frame []byte, out []byte) (i
 }
 
 func (f *fakeSession) AddUser(userID godave.UserID) {
+	if f.onAddUser != nil {
+		f.onAddUser()
+	}
 	f.mu.Lock()
 	f.known[userID] = struct{}{}
 	f.mu.Unlock()
@@ -311,5 +323,92 @@ func TestRecordIsConcurrencySafe(t *testing.T) {
 
 	if got := find(t, collect(t, stats), "user-a", "success"); got != 800 {
 		t.Errorf("success count = %d, want 800", got)
+	}
+}
+
+// While the DAVE group is live, a frame from a user the wrapper has no
+// decryptor for is ciphertext. Copying it through hands the receiver, mixer and
+// relay a garbage Opus packet; disgo produces user "0" whenever an RTP packet
+// arrives before its SPEAKING op, which is routine on join.
+func TestUnknownUserFrameIsDroppedWhileEncrypted(t *testing.T) {
+	stats := NewStats()
+	session, backend := newTestSession(t, stats, "bot-1", nil)
+	backend.ready = true
+
+	frame := []byte("ciphertext!")
+	out := make([]byte, 0, 512)
+
+	n, err := session.Decrypt(godave.UserID(UnknownUserID), frame, out)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("n = %d, want 0 — ciphertext must not be forwarded as audio", n)
+	}
+	if got := string(out[:cap(out)][:len(frame)]); got == string(frame) {
+		t.Errorf("ciphertext was copied into the output buffer: %q", got)
+	}
+	if backend.decryptCalls() != 0 {
+		t.Errorf("backend Decrypt was called %d times; the broken branch must not be reached", backend.decryptCalls())
+	}
+
+	points := collect(t, stats)
+	if got := find(t, points, UnknownUserID, outcomeDropped); got != 1 {
+		t.Errorf("dropped count = %d, want 1", got)
+	}
+	if got := find(t, points, UnknownUserID, outcomePassthrough); got != -1 {
+		t.Errorf("an encrypted drop must not be counted as passthrough, got %d", got)
+	}
+}
+
+// A frame can arrive while AddUser is still installing the backend's decryptor
+// — libdave does CGO key-ratchet work there, and frames arrive 50/s per speaker
+// on disgo's UDP goroutine. Until the backend can decrypt, the wrapper must
+// keep handling the frame itself rather than delegate into golibdave's broken
+// passthrough branch.
+func TestFrameArrivingDuringAddUserDoesNotReachTheBackend(t *testing.T) {
+	stats := NewStats()
+	session, backend := newTestSession(t, stats, "bot-1", nil)
+	backend.onAddUser = func() {
+		if _, err := session.Decrypt("user-a", []byte("frame"), make([]byte, 0, 512)); err != nil {
+			t.Errorf("unexpected error inside the AddUser window: %v", err)
+		}
+	}
+
+	session.AddUser("user-a")
+
+	if backend.decryptCalls() != 0 {
+		t.Errorf("backend Decrypt was called %d times during the AddUser window; it has no decryptor yet", backend.decryptCalls())
+	}
+	if got := find(t, collect(t, stats), "user-a", outcomeSuccess); got != -1 {
+		t.Errorf("a frame the backend could not decrypt was counted as success (%d)", got)
+	}
+}
+
+// One bot holds one DAVE session per voice connection — the owner bot has one
+// per guest guild plus the host — and they all share one process-wide Stats. A
+// user leaving one of those channels must not retire the counters another live
+// session is still incrementing, or the export drops to zero and restarts,
+// which Prometheus reads as a counter reset.
+func TestUserLeavingOneSessionKeepsCountersOfAnother(t *testing.T) {
+	stats := NewStats()
+	host, _ := knownSession(t, stats, "bot-1", nil, "user-a")
+	guest, _ := knownSession(t, stats, "bot-1", nil, "user-a")
+
+	if _, err := host.Decrypt("user-a", nil, make([]byte, 64)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	guest.RemoveUser("user-a")
+
+	reader, _ := newReader(t, stats)
+	_ = points(t, reader) // the collection that would export final values
+	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != 1 {
+		t.Errorf("count = %d, want 1 kept while the host session is still live", got)
+	}
+
+	host.RemoveUser("user-a")
+	_ = points(t, reader)
+	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != -1 {
+		t.Errorf("series should be evicted once the last session drops the user, still got %d", got)
 	}
 }

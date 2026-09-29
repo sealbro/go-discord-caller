@@ -47,10 +47,23 @@ type countingSession struct {
 // golibdave v0.3.0 answers an unknown user with passthrough, but its copy has
 // its arguments swapped (golibdave.go:104, `copy(frame, decryptedFrame)`), so
 // it returns a plausible length having written nothing: the caller reads back
-// the untouched output buffer, i.e. a frame of silence, with no error. Doing
-// the copy here keeps those frames intact and never reaches that branch.
+// the untouched output buffer, i.e. a frame of silence, with no error. Handling
+// the case here never reaches that branch.
+//
+// What the right answer is depends on whether the group is encrypted. While the
+// session is in passthrough mode the frame is plain Opus and copying it through
+// is correct. Once an epoch is active it is ciphertext, and disgo hands us
+// UnknownUserID for any SSRC it has no SPEAKING op for yet — routine on join —
+// so forwarding it would feed the mixer and relay garbage audio. Dropping
+// returns a zero-length frame rather than an error, which disgo would turn into
+// a log line per packet.
 func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedFrame []byte) (int, error) {
 	if !s.knows(userID) {
+		if s.Session.Ready() {
+			s.stats.RecordDropped(s.botUserID, string(userID))
+			return 0, nil
+		}
+
 		s.stats.RecordPassthrough(s.botUserID, string(userID))
 		// cap, not len: disgo sizes this buffer with slices.Grow, which raises
 		// capacity and leaves length at its original 512.
@@ -62,21 +75,27 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 	return n, err
 }
 
+// AddUser and RemoveUser keep the mirror on the conservative side of the
+// backend: a user is in known only while the backend certainly has a decryptor
+// for them. AddUser therefore records the user after the backend call — libdave
+// sets up the key ratchet in there, and a frame arriving meanwhile must take
+// this wrapper's path rather than the backend's broken one — and RemoveUser
+// drops them before it. The cost either way is a frame handled here that the
+// backend could have decrypted; the alternative is a frame delegated to a
+// backend that cannot, counted as a success and silently replaced with silence.
 func (s *countingSession) AddUser(userID godave.UserID) {
-	s.mu.Lock()
-	s.known[userID] = struct{}{}
-	s.mu.Unlock()
-
-	s.stats.Keep(s.botUserID, string(userID))
 	s.Session.AddUser(userID)
+
+	if s.remember(userID) {
+		s.stats.Keep(s.botUserID, string(userID))
+	}
 }
 
 func (s *countingSession) RemoveUser(userID godave.UserID) {
-	s.mu.Lock()
-	delete(s.known, userID)
-	s.mu.Unlock()
+	if s.forget(userID) {
+		s.stats.Retire(s.botUserID, string(userID))
+	}
 
-	s.stats.Retire(s.botUserID, string(userID))
 	s.Session.RemoveUser(userID)
 }
 
@@ -85,4 +104,29 @@ func (s *countingSession) knows(userID godave.UserID) bool {
 	_, ok := s.known[userID]
 	s.mu.RUnlock()
 	return ok
+}
+
+// remember records userID and reports whether it was new, so the stats
+// refcount moves once per session even if the gateway repeats the add.
+func (s *countingSession) remember(userID godave.UserID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.known[userID]; ok {
+		return false
+	}
+	s.known[userID] = struct{}{}
+	return true
+}
+
+// forget drops userID and reports whether this session was still holding it.
+func (s *countingSession) forget(userID godave.UserID) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.known[userID]; !ok {
+		return false
+	}
+	delete(s.known, userID)
+	return true
 }

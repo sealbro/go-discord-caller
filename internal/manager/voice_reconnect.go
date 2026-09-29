@@ -78,19 +78,19 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 		return // session ended while we were closing
 	}
 
-	reconnCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	reconnCtx, cancel := context.WithTimeout(ctx, reconnectBudget)
 	defer cancel()
 	conn, err := gv.Join(reconnCtx, guildID)
 	if err != nil {
 		// Single retry after a short backoff to handle transient failures
 		// (Discord rate limits, brief network interruptions). The reconnect
 		// guard stays held so a concurrent leave event does not race us.
-		slog.WarnContext(ctx, "reconnect: first join attempt failed, retrying in 2s",
+		slog.WarnContext(ctx, "reconnect: first join attempt failed, retrying after a backoff",
 			slog.String("guildID", guildID.String()),
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
-		t := time.NewTimer(2 * time.Second)
+		t := time.NewTimer(reconnectBackoff)
 		select {
 		case <-reconnCtx.Done():
 			t.Stop()

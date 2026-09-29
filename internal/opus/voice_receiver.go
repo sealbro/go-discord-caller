@@ -211,7 +211,9 @@ func NewVoiceReceiver(botID snowflake.ID, allowUser func(snowflake.ID) bool, met
 }
 
 func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Packet) error {
-	if packet == nil {
+	// A packet the DAVE layer dropped arrives with an empty payload, and a real
+	// silence frame is three bytes — zero length is never audio.
+	if packet == nil || len(packet.Opus) == 0 {
 		return nil
 	}
 

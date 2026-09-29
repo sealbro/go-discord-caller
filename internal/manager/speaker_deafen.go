@@ -179,11 +179,35 @@ type deafController struct {
 
 type deafMember struct {
 	deaf bool // last state Discord confirmed for this member
+	// want is the state the router last asked for. It is recorded on every
+	// Observe, including ones that arrive mid-PATCH, because recomputes are
+	// event-driven: a desired state dropped while a change was in flight would
+	// not be revisited until some unrelated voice event fired, leaving a
+	// capture bot deafened with a caller in its channel for the rest of the
+	// raid. reconcileLocked re-reads it when the PATCH completes.
+	want bool
 	// inFlight is set while a change is being applied. Without it, an Observe
 	// arriving between "timer fired" and "Discord accepted" would see deaf
 	// still false, arm a second timer, and issue a duplicate PATCH.
 	inFlight bool
-	timer    *time.Timer // pending delayed deafen; nil when none scheduled
+	timer    *time.Timer // pending delayed change; nil when none scheduled
+	// failures counts consecutive rejected changes. A change Discord keeps
+	// refusing for a reason the permission latch does not cover — an unknown
+	// member, a bot no longer connected to voice — would otherwise be retried
+	// every delay for the whole session.
+	failures int
+}
+
+// deafRetryLimit caps consecutive retries of one change. Past it the member
+// waits for the next recompute rather than retrying on a timer.
+const deafRetryLimit = 3
+
+// stopTimer cancels a pending delayed change. Caller must hold c.mu.
+func (m *deafMember) stopTimer() {
+	if m.timer != nil {
+		m.timer.Stop()
+		m.timer = nil
+	}
 }
 
 func newDeafController(m *Service, guildID snowflake.ID) *deafController {
@@ -206,7 +230,7 @@ func (c *deafController) Register(botID snowflake.ID, deaf bool) {
 	if c.closed {
 		return
 	}
-	c.members[botID] = &deafMember{deaf: deaf}
+	c.members[botID] = &deafMember{deaf: deaf, want: deaf}
 }
 
 // Observe is the router.WithCaptureObserver callback.
@@ -219,61 +243,79 @@ func (c *deafController) Observe(capturing map[snowflake.ID]bool) {
 		c.mu.Unlock()
 		return
 	}
-	type action struct {
-		botID snowflake.ID
-		deaf  bool
-	}
-	var now []action
+	var undeafen []snowflake.ID
 	for botID, mem := range c.members {
-		if mem.inFlight {
-			continue
+		// Every recompute restores the retry budget. Pacing comes from the
+		// timer, not the counter, so this cannot turn churn into extra PATCHes
+		// — it only means the limit stops a retry chain that has gone quiet
+		// rather than one the router is still asking for.
+		mem.failures = 0
+		mem.want = !capturing[botID]
+		if c.reconcileLocked(botID, mem, true) {
+			undeafen = append(undeafen, botID)
 		}
-		want := !capturing[botID]
-		if want == mem.deaf {
-			// Already correct. Cancel a pending move in the other direction.
-			if mem.timer != nil {
-				mem.timer.Stop()
-				mem.timer = nil
-			}
-			continue
-		}
-		if !want {
-			// Undeafen: immediately, and drop any pending deafen.
-			if mem.timer != nil {
-				mem.timer.Stop()
-				mem.timer = nil
-			}
-			mem.inFlight = true
-			now = append(now, action{botID, false})
-			continue
-		}
-		// Deafen: only after the bot has stayed idle for deafenDelay.
-		if mem.timer != nil {
-			continue // already counting down
-		}
-		id := botID
-		mem.timer = time.AfterFunc(c.delay, func() { c.deafenNow(id) })
 	}
 	c.mu.Unlock()
 
-	for _, a := range now {
-		c.apply(a.botID, a.deaf)
+	for _, botID := range undeafen {
+		c.apply(botID, false)
 	}
 }
 
-// deafenNow fires when a bot has been idle for deafenDelay without the router
-// reporting it live again.
-func (c *deafController) deafenNow(botID snowflake.ID) {
+// reconcileLocked drives one member toward mem.want under the asymmetric
+// timing rule: undeafening is immediate, deafening waits out the delay.
+// Returns true when the caller must run apply(botID, false) once c.mu is
+// released — the only change issued without going through the timer.
+//
+// immediate is false on the retry path, so a rejected change backs off by a
+// delay instead of spinning. Caller must hold c.mu.
+func (c *deafController) reconcileLocked(botID snowflake.ID, mem *deafMember, immediate bool) bool {
+	if c.closed || c.disabled || mem.inFlight {
+		return false
+	}
+	if mem.want == mem.deaf {
+		// Already correct. Cancel a pending move in the other direction.
+		mem.stopTimer()
+		mem.failures = 0
+		return false
+	}
+	if mem.failures >= deafRetryLimit {
+		mem.stopTimer()
+		return false
+	}
+	if !mem.want && immediate {
+		mem.stopTimer()
+		mem.inFlight = true
+		return true
+	}
+	if mem.timer != nil {
+		return false // already counting down
+	}
+	id := botID
+	mem.timer = time.AfterFunc(c.delay, func() { c.applyAfterDelay(id) })
+	return false
+}
+
+// applyAfterDelay fires when a change has waited out c.delay: a bot idle for
+// deafenDelay, or a retry of a change Discord rejected. It applies whatever
+// the router last asked for rather than a value captured when the timer was
+// armed, so an Observe that landed mid-PATCH is honoured here.
+func (c *deafController) applyAfterDelay(botID snowflake.ID) {
 	c.mu.Lock()
 	mem, ok := c.members[botID]
-	if !ok || c.closed || c.disabled || mem.timer == nil {
+	if !ok || c.closed || c.disabled || mem.inFlight || mem.timer == nil {
 		c.mu.Unlock()
 		return
 	}
 	mem.timer = nil
+	if mem.want == mem.deaf {
+		c.mu.Unlock()
+		return
+	}
+	want := mem.want
 	mem.inFlight = true
 	c.mu.Unlock()
-	c.apply(botID, true)
+	c.apply(botID, want)
 }
 
 // apply issues the REST change off the caller's goroutine. The router invokes
@@ -290,13 +332,23 @@ func (c *deafController) apply(botID snowflake.ID, deaf bool) {
 		defer cancel()
 		err := c.setDeaf(ctx, c.guildID, botID, deaf)
 		c.mu.Lock()
+		var undeafen bool
 		if mem, ok := c.members[botID]; ok {
 			mem.inFlight = false
 			if err == nil {
 				mem.deaf = deaf
+				mem.failures = 0
+			} else {
+				mem.failures++
 			}
+			// Re-read the desired state: Observe may have moved it while this
+			// PATCH was in flight, and nothing else would revisit it.
+			undeafen = c.reconcileLocked(botID, mem, err == nil)
 		}
 		c.mu.Unlock()
+		if undeafen {
+			c.apply(botID, false)
+		}
 		if err != nil {
 			c.noteError(err)
 			slog.WarnContext(ctx, "failed to apply dynamic server-deaf",

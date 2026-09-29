@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -404,4 +405,80 @@ func TestDeafControllerCloseWaitsForInFlightDeafen(t *testing.T) {
 	if !undeafened {
 		t.Error("Close left the member deafened: it snapshotted before the in-flight apply recorded itself")
 	}
+}
+
+// TestDeafControllerReconcilesStateObservedDuringApply reproduces a session
+// going permanently silent after a deafen.
+//
+// A caller arriving while a deafen PATCH is still in flight is dropped on the
+// floor: Observe skips every member with inFlight set, and apply never
+// re-reads the desired state once Discord answers. Recomputes are purely
+// event-driven, so nothing revisits the decision — the bot stays deafened with
+// a caller in its channel and captures silence for the rest of the raid.
+func TestDeafControllerReconcilesStateObservedDuringApply(t *testing.T) {
+	rec := &deafRecorder{block: make(chan struct{})}
+	c := newTestController(rec)
+	c.Register(testBot, false) // capture bot starts hearing
+
+	c.Observe(map[snowflake.ID]bool{testBot: false}) // channel empties: arm deafen
+	waitFor(t, "deafen apply to start", func() bool { return rec.attempts() == 1 })
+
+	// A caller arrives while the deafen PATCH is in flight.
+	c.Observe(map[snowflake.ID]bool{testBot: true})
+	close(rec.block)
+
+	waitFor(t, "undeafen after the caller arrived", func() bool {
+		ev, ok := lastEvent(rec)
+		return ok && ev == deafEvent{testBot, false}
+	})
+}
+
+// setErr swaps the error setDeaf returns, so a test can make a change fail
+// once and then succeed.
+func (r *deafRecorder) setErr(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.err = err
+}
+
+// TestDeafControllerRetriesRejectedChange covers the non-permission half of the
+// same defect. A change Discord rejects for a transient reason left the member
+// at the wrong state with nothing to revisit it, because recomputes only happen
+// on voice events. Retries back off by the delay rather than spinning.
+func TestDeafControllerRetriesRejectedChange(t *testing.T) {
+	rec := &deafRecorder{err: errors.New("503 service unavailable")}
+	c := newTestController(rec)
+	c.Register(testBot, true) // deafened; the router wants it hearing
+
+	c.Observe(map[snowflake.ID]bool{testBot: true})
+	waitFor(t, "first (failing) undeafen", func() bool { return rec.attempts() == 1 })
+
+	rec.setErr(nil)
+	waitFor(t, "retried undeafen", func() bool {
+		ev, ok := lastEvent(rec)
+		return ok && ev == deafEvent{testBot, false}
+	})
+}
+
+// TestDeafControllerStopsRetryingRejectedChange bounds those retries. A
+// rejection the permission latch does not cover — an unknown member, a bot no
+// longer connected to voice — persists for the session, and retrying it every
+// delay until teardown is the behaviour the latch exists to prevent.
+func TestDeafControllerStopsRetryingRejectedChange(t *testing.T) {
+	rec := &deafRecorder{err: errors.New("10007 unknown member")}
+	c := newTestController(rec)
+	c.Register(testBot, true)
+
+	c.Observe(map[snowflake.ID]bool{testBot: true})
+	waitFor(t, "retries to be exhausted", func() bool { return rec.attempts() == deafRetryLimit })
+
+	time.Sleep(settleAfter)
+	if n := rec.attempts(); n != deafRetryLimit {
+		t.Errorf("made %d attempts, want %d — retries are not bounded", n, deafRetryLimit)
+	}
+
+	// A fresh recompute restores the budget: the router is still asking, so
+	// this is not the quiet chain the limit exists to stop.
+	c.Observe(map[snowflake.ID]bool{testBot: true})
+	waitFor(t, "retries to resume after a recompute", func() bool { return rec.attempts() > deafRetryLimit })
 }

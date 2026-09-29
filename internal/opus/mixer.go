@@ -405,9 +405,20 @@ func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) int {
 			continue
 		}
 		f, ok := e.src.Pull()
-		if ok && len(f.PCM) > 0 {
-			m.framesBuf = append(m.framesBuf, f)
+		if !ok {
+			continue
 		}
+		if len(f.PCM) == 0 {
+			// Nothing to mix, but the producer handed its buffers over.
+			if f.PCM != nil {
+				PutPCM(f.PCM)
+			}
+			if f.Opus != nil {
+				PutEncodedFrame(f.Opus)
+			}
+			continue
+		}
+		m.framesBuf = append(m.framesBuf, f)
 	}
 	return drained
 }

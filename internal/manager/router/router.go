@@ -476,6 +476,15 @@ func (r *Router) Recompute() {
 func (r *Router) applyModes(sourceModes map[snowflake.ID]RouteMode, destMix map[snowflake.ID]bool, usersPerChannel map[snowflake.ID][]snowflake.ID, listenersPerChannel map[snowflake.ID]bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	// Stopping a mixer comes first, resuming one comes last, with the installs
+	// in between. A copy-mode source writes raw Opus into the destination's
+	// ChOuts itself, so it must never be published while that destination's
+	// mixer can still emit into them — the mixer ticks on its own goroutine, and
+	// one tick inside the window puts a mixed frame and a raw packet into the
+	// same speaker channel.
+	r.setDestPaused(destMix, listenersPerChannel, true)
+
 	for id, newMode := range sourceModes {
 		s, ok := r.sources[id]
 		if !ok {
@@ -530,19 +539,28 @@ func (r *Router) applyModes(sourceModes map[snowflake.ID]RouteMode, destMix map[
 		// reaches this branch within one debounce window.
 		pruneSynthIDsLocked(s, users)
 	}
+	r.setDestPaused(destMix, listenersPerChannel, false)
+}
+
+// setDestPaused drives every destination mixer toward the state destMix and the
+// listener probe ask for, applying only the pauses when pausing is true and only
+// the resumes when it is false. Caller must hold r.mu.
+//
+// A mixer runs when the cascade has something to mix AND the destination has a
+// human listener. Synthetic destinations (relay; ChOuts nil) are absent from
+// listenersPerChannel and count as having listeners, since their consumers are
+// ally guests rather than local users.
+func (r *Router) setDestPaused(destMix map[snowflake.ID]bool, listenersPerChannel map[snowflake.ID]bool, pausing bool) {
 	for chID, d := range r.destinations {
 		if d.Mixer == nil {
 			continue
 		}
-		// Pause when the cascade has nothing to mix OR when the destination
-		// has no human listener. Synthetic destinations (relay; ChOuts nil)
-		// are absent from listenersPerChannel and default to "has listeners"
-		// since their consumers are ally guests, not local users.
 		shouldRun := destMix[chID]
-		if shouldRun && len(d.ChOuts) > 0 {
-			if !listenersPerChannel[chID] {
-				shouldRun = false
-			}
+		if shouldRun && len(d.ChOuts) > 0 && !listenersPerChannel[chID] {
+			shouldRun = false
+		}
+		if shouldRun == pausing {
+			continue
 		}
 		d.Mixer.SetPaused(!shouldRun)
 	}

@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"context"
 	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -22,26 +23,42 @@ import (
 // m.statuses with no bots in voice and a relay code no guest can join.
 //
 // So the second start has to be rejected before it touches anything, which is
-// what this guard does.
+// what this guard does. It also holds each start's cancel func, so /stop can
+// abort a raid that is still coming up rather than report that there is
+// nothing to stop.
 type startGuard struct {
 	mu       sync.Mutex
-	inFlight map[snowflake.ID]struct{}
+	inFlight map[snowflake.ID]context.CancelFunc
 }
 
 // tryBegin reserves guildID for one start. When it returns false a start is
 // already running for that guild and the caller must do nothing; when it
 // returns true the caller must call end before returning.
-func (g *startGuard) tryBegin(guildID snowflake.ID) bool {
+func (g *startGuard) tryBegin(guildID snowflake.ID, cancel context.CancelFunc) bool {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if _, ok := g.inFlight[guildID]; ok {
 		return false
 	}
 	if g.inFlight == nil {
-		g.inFlight = make(map[snowflake.ID]struct{})
+		g.inFlight = make(map[snowflake.ID]context.CancelFunc)
 	}
-	g.inFlight[guildID] = struct{}{}
+	g.inFlight[guildID] = cancel
 	return true
+}
+
+// cancel aborts the start in flight for guildID and reports whether there was
+// one. The reservation outlives the cancel on purpose: the start is still
+// unwinding what it joined, and a fresh start let in during that would race it
+// exactly as two starts did.
+func (g *startGuard) cancel(guildID snowflake.ID) bool {
+	g.mu.Lock()
+	cancel, ok := g.inFlight[guildID]
+	g.mu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
+	return ok
 }
 
 // end releases the reservation tryBegin took.

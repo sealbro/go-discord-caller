@@ -32,7 +32,7 @@ func countSpeakers(joined int, ownerJoined bool) int {
 // Returns the effective RaidMode (which may differ from the requested mode).
 // The session ends automatically when the host ends or ctx is cancelled.
 func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (effectiveMode guild.RaidMode, err error) {
-	if !m.starting.tryBegin(guestGuildID) {
+	if !m.starting.tryBegin(guestGuildID, cancelFunc) {
 		return guestMode, ErrSessionExists
 	}
 	defer m.starting.end(guestGuildID)
@@ -209,7 +209,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	return guestMode, nil
 }
 
-// StopVoiceRaid makes all active speakers leave their voice channels.
+// StopVoiceRaid makes all active speakers leave their voice channels, or
+// aborts the raid still starting when there is no committed session yet.
 func (m *Service) StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error {
 	return m.stopSession(ctx, guildID, nil)
 }
@@ -223,6 +224,15 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 	status := m.statuses[guildID]
 	if status == nil || !status.HasActiveSession() {
 		m.mu.Unlock()
+		// A raid is committed only once every bot is in, so during the whole
+		// startup there is nothing here to stop. Cancelling that start aborts
+		// it before it commits and its own cleanup releases whatever it had
+		// already joined. A stop aimed at one specific session (the idle
+		// watcher) never does this: the start it would abort is by definition
+		// not the session it was watching.
+		if want == nil && m.starting.cancel(guildID) {
+			return nil
+		}
 		return ErrNoActiveSession
 	}
 	session := status.Session
@@ -250,7 +260,7 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (code ally.Code, err error) {
-	if !m.starting.tryBegin(guildID) {
+	if !m.starting.tryBegin(guildID, cancelFunc) {
 		return "", ErrSessionExists
 	}
 	defer m.starting.end(guildID)
@@ -364,6 +374,16 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	session, start, err := pipeline.HostFor(mode).Build(ctx, p)
 	endBuild(err)
 	if err != nil {
+		errCleanup()
+		endSpanErr(span, err)
+		return "", err
+	}
+	// A /stop during startup cancels this context. Committing after that would
+	// leave the operator's stop undone: nothing watches ctx on the host path
+	// once the session is committed, so the raid would simply stay up. (The
+	// guest path needs no such check — the goroutine it starts right after its
+	// own commit tears the session down on ctx.Done.)
+	if err = ctx.Err(); err != nil {
 		errCleanup()
 		endSpanErr(span, err)
 		return "", err

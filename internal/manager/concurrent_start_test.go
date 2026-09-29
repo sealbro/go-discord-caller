@@ -58,9 +58,8 @@ func (c *fakeVoiceConn) SetEventHandlerFunc(voice.EventHandlerFunc)             
 // one guild therefore share the bot's connection — which is what makes one
 // raid's teardown reach into the other.
 type fakeVoiceManager struct {
-	conn    *fakeVoiceConn
-	onOpen  func()
-	opening sync.Once
+	conn   *fakeVoiceConn
+	onOpen func()
 }
 
 func (f *fakeVoiceManager) CreateConn(snowflake.ID) voice.Conn {

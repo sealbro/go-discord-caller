@@ -97,23 +97,21 @@ func (v *VoiceRegionMetrics) ForgetRegion(guildID, botID snowflake.ID) {
 }
 
 // ParseVoiceRegion extracts the region from a Discord voice endpoint such as
-// "c-ams18-50a8bfa.discord.media:443", which yields "ams": a "c-" prefix, the
-// region and its server number, then a hex instance id. Both the instance id
-// and the server number are dropped — keeping either would make every
-// reconnect a new series.
+// "c-ams18-50a8bfa.discord.media:443", which yields "c-ams", or the older
+// "rotterdam9231.discord.media:443", which yields "rotterdam".
 //
-// The instance id is removed by cutting at the *last* hyphen rather than the
-// first, so a hyphenated region name survives.
+// Everything from the first digit on names the individual media server — its
+// number, and in the current format a hex instance id — and is dropped, since
+// keeping it would mint a series per reconnect. Cutting there rather than at a
+// hyphen means a region whose own name contains one survives without the
+// parser having to know how many segments an endpoint has.
 func ParseVoiceRegion(endpoint string) string {
 	host, _, _ := strings.Cut(endpoint, ":")
 	host, _, _ = strings.Cut(host, ".")
 
-	if rest, ok := strings.CutPrefix(host, "c-"); ok {
-		if i := strings.LastIndex(rest, "-"); i > 0 {
-			rest = rest[:i]
-		}
-		host = rest
+	if i := strings.IndexFunc(host, func(r rune) bool { return r >= '0' && r <= '9' }); i >= 0 {
+		host = host[:i]
 	}
 
-	return strings.TrimRight(host, "0123456789")
+	return strings.Trim(host, "-")
 }

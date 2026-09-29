@@ -11,10 +11,15 @@ STRESS_FLAGS := --tags=stress -v -count=1 -timeout $(STRESS_TIMEOUT) ./integrati
 
 .PHONY: test test-unit test-integration coverage clean-cache \
 	test-stress test-stress-audio test-stress-star test-stress-mixminus \
-	release
+	sec release
 
 clean-cache:
 	go clean -testcache
+
+GOSEC_FLAGS := -tags=integration,stress
+
+sec:
+	gosec $(GOSEC_FLAGS) ./...
 
 RELEASE_VERSION := $(shell grep -m1 -oE '^\#\# \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 

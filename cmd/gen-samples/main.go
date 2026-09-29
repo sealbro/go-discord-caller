@@ -17,6 +17,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -63,7 +64,7 @@ func main() {
 	bitrate := flag.Int("bitrate", 64000, "Opus bitrate in bps")
 	flag.Parse()
 
-	if err := os.MkdirAll(*outDir, 0o755); err != nil {
+	if err := os.MkdirAll(*outDir, 0o750); err != nil {
 		log.Fatalf("mkdir: %v", err)
 	}
 
@@ -131,12 +132,15 @@ func synthesize(text, voice string) (string, error) {
 		return "", err
 	}
 	wavPath := f.Name()
-	f.Close()
+	if err := f.Close(); err != nil {
+		return "", err
+	}
 
 	if runtime.GOOS == "darwin" {
 		if path, err := exec.LookPath("say"); err == nil {
 			// Output AIFF; ffmpeg resamples to 48 kHz stereo in the next step.
 			aiffPath := wavPath + ".aiff"
+			//#nosec G204 -- dev-only generator: path comes from LookPath, voice and text from the tables above
 			out, err := exec.Command(path,
 				"-v", voice,
 				"-r", "150",
@@ -152,6 +156,7 @@ func synthesize(text, voice string) (string, error) {
 	}
 
 	if path, err := exec.LookPath("espeak-ng"); err == nil {
+		//#nosec G204 -- dev-only generator: path comes from LookPath, voice and text from the tables above
 		out, err := exec.Command(path,
 			"-v", voice,
 			"-s", "150",
@@ -180,8 +185,11 @@ func toPCM(audioFile string) (string, error) {
 		return "", err
 	}
 	pcmPath := f.Name()
-	f.Close()
+	if err := f.Close(); err != nil {
+		return "", err
+	}
 
+	//#nosec G204 -- dev-only generator: ffmpeg comes from LookPath, the rest are constants
 	out, err := exec.Command(ffmpeg,
 		"-y",
 		"-i", audioFile,
@@ -208,18 +216,17 @@ func encodeDCA(pcmFile, outFile string, bitrate int) (int, error) {
 		return 0, fmt.Errorf("set bitrate: %w", err)
 	}
 
-	raw, err := os.ReadFile(pcmFile)
+	raw, err := os.ReadFile(filepath.Clean(pcmFile))
 	if err != nil {
 		return 0, fmt.Errorf("read pcm: %w", err)
 	}
 
-	// Convert raw bytes to int16 samples.
 	samples := make([]int16, len(raw)/2)
-	for i := range samples {
-		samples[i] = int16(binary.LittleEndian.Uint16(raw[i*2:]))
+	if _, err := binary.Decode(raw, binary.LittleEndian, samples); err != nil {
+		return 0, fmt.Errorf("decode pcm: %w", err)
 	}
 
-	dst, err := os.Create(outFile)
+	dst, err := os.Create(filepath.Clean(outFile))
 	if err != nil {
 		return 0, fmt.Errorf("create output: %w", err)
 	}
@@ -232,6 +239,9 @@ func encodeDCA(pcmFile, outFile string, bitrate int) (int, error) {
 		n, err := enc.Encode(samples[offset:offset+pcmFrameLen], opusBuf)
 		if err != nil {
 			return frames, fmt.Errorf("encode frame %d: %w", frames, err)
+		}
+		if n < 0 || n > math.MaxInt16 {
+			return frames, fmt.Errorf("frame %d does not fit a DCA length prefix: %d bytes", frames, n)
 		}
 		if err := binary.Write(dst, binary.LittleEndian, int16(n)); err != nil {
 			return frames, err

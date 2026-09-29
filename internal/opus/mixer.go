@@ -490,13 +490,7 @@ func (m *Mixer) mixAndEncode() ([]byte, error) {
 	// clamp loop integer-only and SIMD-friendly.
 	scale := int32(float64(1<<15) / math.Sqrt(float64(len(m.framesBuf))))
 	for i, v := range m.mixed {
-		v = (v * scale) >> 15
-		if v > 32767 {
-			v = 32767
-		} else if v < -32768 {
-			v = -32768
-		}
-		m.pcm[i] = int16(v)
+		m.pcm[i] = int16(max(math.MinInt16, min(math.MaxInt16, (v*scale)>>15)))
 	}
 
 	n, err := m.enc.Encode(m.pcm, m.encodeBuf)

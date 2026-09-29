@@ -233,7 +233,7 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 // configured channel. Use Join/Leave on the result to manage the connection.
 func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
 	channelID, _ := m.store.GetBoundChannel(guildID, m.ownerBotID)
-	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID)
+	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID).ForBot(m.ownerBotID)
 }
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
@@ -442,7 +442,7 @@ func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice
 		return pool.GuildVoice{}, false
 	}
 	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
-	return pool.NewGuildVoice(client.VoiceManager, channelID), true
+	return pool.NewGuildVoice(client.VoiceManager, channelID).ForBot(botUserID), true
 }
 
 // CheckGuildChannelAccess checks Connect+Speak permissions for the owner bot and

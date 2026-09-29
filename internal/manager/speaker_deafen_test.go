@@ -482,3 +482,32 @@ func TestDeafControllerStopsRetryingRejectedChange(t *testing.T) {
 	c.Observe(map[snowflake.ID]bool{testBot: true})
 	waitFor(t, "retries to resume after a recompute", func() bool { return rec.attempts() > deafRetryLimit })
 }
+
+// A change Discord keeps rejecting for a reason retrying cannot fix — 10007
+// unknown member, or the bot no longer being in voice — is still a retry when
+// the router re-asks for it. The router recomputes on every voice join, leave
+// and role change, so taking the immediate path on each one turns a busy
+// channel into a burst of rejected moderation requests; the delay is what
+// paces them.
+func TestRecomputesDoNotReissueARejectedChangeUnpaced(t *testing.T) {
+	rec := &deafRecorder{err: errors.New("unknown member")}
+	c := newTestController(rec)
+	c.Register(testBot, true) // deafened, and the router wants it hearing
+
+	capturing := map[snowflake.ID]bool{testBot: true}
+	c.Observe(capturing)
+	waitFor(t, "the first attempt to be rejected", func() bool { return rec.attempts() >= 1 })
+
+	// None of these recomputes is a new request: the desired state is the one
+	// Discord just refused.
+	before := rec.attempts()
+	for range 10 {
+		c.Observe(capturing)
+	}
+	time.Sleep(testDelay / 4)
+
+	if extra := rec.attempts() - before; extra > 0 {
+		t.Errorf("%d extra PATCHes inside a quarter of the retry delay, from 10 recomputes; "+
+			"re-asking for a rejected change must wait out the delay like any other retry", extra)
+	}
+}

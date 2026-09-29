@@ -196,6 +196,11 @@ type deafMember struct {
 	// member, a bot no longer connected to voice — would otherwise be retried
 	// every delay for the whole session.
 	failures int
+	// rejected records that the last attempt at want was refused, and unlike
+	// failures it survives the budget refill a recompute brings. It is what
+	// tells a re-request of a rejected state apart from a new one, so the
+	// former waits out the delay instead of issuing an unpaced PATCH.
+	rejected bool
 }
 
 // deafRetryLimit caps consecutive retries of one change. Past it the member
@@ -245,13 +250,23 @@ func (c *deafController) Observe(capturing map[snowflake.ID]bool) {
 	}
 	var undeafen []snowflake.ID
 	for botID, mem := range c.members {
-		// Every recompute restores the retry budget. Pacing comes from the
-		// timer, not the counter, so this cannot turn churn into extra PATCHes
-		// — it only means the limit stops a retry chain that has gone quiet
-		// rather than one the router is still asking for.
+		want := !capturing[botID]
+		// Every recompute restores the retry budget, because the router is
+		// still asking for this state — the limit exists to stop a chain that
+		// has gone quiet, not one being re-requested.
+		//
+		// What a recompute must not do is issue the PATCH unpaced. Re-asking
+		// for a state Discord has already rejected is a retry, however the
+		// request arrived, and the router recomputes on every join, leave and
+		// role change: taking the immediate path each time turns one stuck
+		// member into a burst of rejected moderation requests. Only a genuinely
+		// new desired state skips the delay, which is what keeps undeafening a
+		// new speaker immediate.
+		retrying := mem.rejected && want == mem.want
 		mem.failures = 0
-		mem.want = !capturing[botID]
-		if c.reconcileLocked(botID, mem, true) {
+		mem.rejected = retrying
+		mem.want = want
+		if c.reconcileLocked(botID, mem, !retrying) {
 			undeafen = append(undeafen, botID)
 		}
 	}
@@ -338,8 +353,10 @@ func (c *deafController) apply(botID snowflake.ID, deaf bool) {
 			if err == nil {
 				mem.deaf = deaf
 				mem.failures = 0
+				mem.rejected = false
 			} else {
 				mem.failures++
+				mem.rejected = true
 			}
 			// Re-read the desired state: Observe may have moved it while this
 			// PATCH was in flight, and nothing else would revisit it.

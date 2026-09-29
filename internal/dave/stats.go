@@ -21,6 +21,7 @@ import (
 const (
 	outcomeSuccess     = "success"
 	outcomePassthrough = "passthrough"
+	outcomeDropped     = "dropped"
 	outcomeFailure     = "failure"
 
 	reasonNone = "none"
@@ -30,6 +31,9 @@ const (
 // No decryptor exists for it, so those frames are passed through rather than
 // decrypted — and the backend reports no error, making them invisible in the
 // logs.
+//
+// UPSTREAM(disgo v0.19.3): ReadPacket resolves an SSRC it has no SPEAKING op
+// for to user "0" rather than skipping the packet.
 const UnknownUserID = "0"
 
 // key identifies one counter series. All fields are label values.
@@ -59,16 +63,24 @@ type user struct {
 // Stats is created before the meter exists (clients are built ahead of
 // telemetry.NewMetrics), which is why the instrument is attached later by
 // StartMetrics rather than passed to the constructor.
-// Series are retired when the backend drops the user, because a voice channel
-// sees an unbounded number of distinct speakers over the life of the process
-// and nothing else would ever remove them — the counters would accumulate in
-// memory and as billed series for as long as the bot runs. Retirement is
-// deferred by one collection so the final values are still exported; a user who
-// rejoins before that keeps their counters, and one who rejoins later starts a
-// new series from zero, which reads as an ordinary counter reset.
+// Series are retired when the last session drops the user, because a voice
+// channel sees an unbounded number of distinct speakers over the life of the
+// process and nothing else would ever remove them — the counters would
+// accumulate in memory and as billed series for as long as the bot runs.
+// Retirement is deferred by one collection so the final values are still
+// exported; a user who rejoins before that keeps their counters, and one who
+// rejoins later starts a new series from zero, which reads as an ordinary
+// counter reset.
+//
+// "The last session" is why holders are counted rather than just flagged: one
+// bot runs one DAVE session per voice connection — the owner bot has one per
+// guest guild plus the host — and they all share this Stats, aggregated under
+// one series per sender. Retiring on the first leave would delete counters a
+// still-live session keeps incrementing, exporting a reset that never happened.
 type Stats struct {
 	mu       sync.RWMutex
 	counters map[key]*atomic.Uint64
+	holders  map[user]int
 	retiring map[user]struct{}
 	metrics  *telemetry.DaveMetrics
 }
@@ -76,6 +88,7 @@ type Stats struct {
 func NewStats() *Stats {
 	return &Stats{
 		counters: make(map[key]*atomic.Uint64),
+		holders:  make(map[user]int),
 		retiring: make(map[user]struct{}),
 	}
 }
@@ -114,20 +127,44 @@ func (s *Stats) RecordPassthrough(botUserID, userID string) {
 	}).Add(1)
 }
 
-// Retire marks a user's series for removal after the next collection exports
-// their final values. Call when the backend drops the user.
-func (s *Stats) Retire(botUserID, userID string) {
-	s.mu.Lock()
-	s.retiring[user{botUserID: botUserID, userID: userID}] = struct{}{}
-	s.mu.Unlock()
+// RecordDropped counts one frame discarded because there was no decryptor for
+// the sender while the group was encrypted, so the frame could only be
+// ciphertext.
+func (s *Stats) RecordDropped(botUserID, userID string) {
+	s.counter(key{
+		botUserID: botUserID,
+		userID:    userID,
+		outcome:   outcomeDropped,
+		reason:    reasonNone,
+	}).Add(1)
 }
 
-// Keep cancels a pending retirement. Call when the backend adds the user, so a
-// rejoin before the next collection continues the existing series instead of
-// resetting it.
-func (s *Stats) Keep(botUserID, userID string) {
+// Retire releases one session's hold on a user and, once none are left, marks
+// their series for removal after the next collection exports the final values.
+// Call when a session drops the user, exactly once per Keep.
+func (s *Stats) Retire(botUserID, userID string) {
+	u := user{botUserID: botUserID, userID: userID}
+
 	s.mu.Lock()
-	delete(s.retiring, user{botUserID: botUserID, userID: userID})
+	defer s.mu.Unlock()
+
+	s.holders[u]--
+	if s.holders[u] > 0 {
+		return
+	}
+	delete(s.holders, u)
+	s.retiring[u] = struct{}{}
+}
+
+// Keep takes a hold on a user's series and cancels any pending retirement. Call
+// when a session adds the user, so a rejoin before the next collection
+// continues the existing series instead of resetting it.
+func (s *Stats) Keep(botUserID, userID string) {
+	u := user{botUserID: botUserID, userID: userID}
+
+	s.mu.Lock()
+	s.holders[u]++
+	delete(s.retiring, u)
 	s.mu.Unlock()
 }
 
@@ -191,6 +228,9 @@ func outcome(err error) string {
 // package CGO-only. libdave's set is small and stable
 // (libdave/errors.go): anything outside it lands in "other" rather than
 // becoming an unbounded label.
+//
+// UPSTREAM(libdave v0.3.0): the sentinel errors live in a CGO-only package, so
+// they are matched by message instead.
 func reason(err error) string {
 	if err == nil {
 		return reasonNone

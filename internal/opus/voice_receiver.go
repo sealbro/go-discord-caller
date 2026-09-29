@@ -165,7 +165,7 @@ type VoiceReceiver struct {
 
 	// cacheMu guards decoders + the same-user cache fields below.
 	//
-	// TEMP(disgo-cleanup-goroutine): ReceiveOpusFrame → dispatchFanout is
+	// ReceiveOpusFrame → dispatchFanout is
 	// single-producer (disgo serialises it per receiver), but disgo also invokes
 	// CleanupUser from the voice GATEWAY goroutine (voice/conn.go handleMessage),
 	// not the UDP receive goroutine — so the "single-producer, no sync" invariant
@@ -173,6 +173,9 @@ type VoiceReceiver struct {
 	// (caught by `go test -race` in the integration suite). This mutex is a local
 	// workaround; remove it if/when disgo routes CleanupUser onto the receive
 	// goroutine. Held only around map/cache access — never across CGO decode.
+	//
+	// UPSTREAM(disgo v0.19.3): CleanupUser runs on the gateway goroutine, not the
+	// receive one, so these fields need a mutex they were designed without.
 	cacheMu sync.Mutex
 
 	// Per-user decoder cache + shared scratch buffer for fanout-mode dispatch.
@@ -211,7 +214,9 @@ func NewVoiceReceiver(botID snowflake.ID, allowUser func(snowflake.ID) bool, met
 }
 
 func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Packet) error {
-	if packet == nil {
+	// A packet the DAVE layer dropped arrives with an empty payload, and a real
+	// silence frame is three bytes — zero length is never audio.
+	if packet == nil || len(packet.Opus) == 0 {
 		return nil
 	}
 

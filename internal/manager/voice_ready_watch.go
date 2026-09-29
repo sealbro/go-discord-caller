@@ -38,6 +38,8 @@ import (
 //
 // Only Ready is watched, not Resumed: a successful resume keeps the existing
 // UDP socket and needs no repair.
+//
+// UPSTREAM(disgo v0.19.3): a transparent voice re-identify swaps in a new UDP conn.
 func (m *Service) watchVoiceReady(guildID, botUserID snowflake.ID, conn voice.Conn) {
 	conn.SetEventHandlerFunc(func(_ voice.Gateway, op voice.Opcode, _ int, _ voice.GatewayMessageData) {
 		if op != voice.OpcodeReady {

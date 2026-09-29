@@ -11,10 +11,18 @@ import (
 
 // disgo's Open and Close both block on nothing but the caller's context, and
 // the raid context they are given has no deadline.
+//
+// UPSTREAM(disgo v0.19.3): Open and Close bound nothing themselves.
 const (
 	VoiceJoinTimeout    = 15 * time.Second
 	voiceCleanupTimeout = 5 * time.Second
 )
+
+// VoiceJoinCost is the longest a single failed Join can take: the bounded
+// handshake plus the cleanup Leave that follows it, which waits on disgo's
+// Close for a conn that never finished opening. Callers budgeting more than one
+// attempt must use this, not VoiceJoinTimeout alone.
+const VoiceJoinCost = VoiceJoinTimeout + voiceCleanupTimeout
 
 // GuildVoice manages join/leave for one bot's voice connection in a guild.
 // Obtain via pool.Service.VoiceFor or manager.Service.ownerVoice.
@@ -22,9 +30,21 @@ type GuildVoice struct {
 	vm        voice.Manager
 	channelID snowflake.ID // zero when unbound
 
+	// botID is the bot this connection belongs to; zero when the caller did
+	// not say, which only costs the region bookkeeping in Leave.
+	botID snowflake.ID
+
 	// zero means the package default
 	joinTimeout    time.Duration
 	cleanupTimeout time.Duration
+}
+
+// ForBot records which bot this GuildVoice acts for, so Leave can retire the
+// bot's voice-region series itself rather than trusting the GuildVoiceLeave
+// event to arrive.
+func (v GuildVoice) ForBot(botID snowflake.ID) GuildVoice {
+	v.botID = botID
+	return v
 }
 
 func (v GuildVoice) openTimeout() time.Duration {
@@ -87,4 +107,5 @@ func (v GuildVoice) Leave(ctx context.Context, guildID snowflake.ID) {
 		conn.Close(ctx)
 		CloseAudioSender(conn)
 	}
+	ForgetVoiceRegion(v.botID, guildID)
 }

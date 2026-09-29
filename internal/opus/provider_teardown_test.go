@@ -68,6 +68,8 @@ func (c *countingProvider) Close() { c.inner.Close() }
 //
 // When this test fails, disgo has stopped spinning on provider errors and the
 // registry workaround can be deleted.
+//
+// UPSTREAM-TRIPWIRE(disgo v0.19.3): delete AudioSenderRegistry.
 func TestDisgoSpinsOnClosedProvider(t *testing.T) {
 	t.Parallel()
 

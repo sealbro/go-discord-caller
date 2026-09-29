@@ -153,8 +153,10 @@ func TestAudioSenderCloseBeforeOpen(t *testing.T) {
 }
 
 // TestDisgoAudioSenderStillPanicsOnCloseBeforeOpen is the tripwire for the
-// upstream bug. When it fails, disgo has fixed defaultAudioSender.Close and
-// the recover inside safeAudioSender.Close is obsolete.
+// upstream bug. When it fails, disgo has fixed defaultAudioSender.Close and the
+// recover inside safeAudioSender.Close is obsolete.
+//
+// UPSTREAM-TRIPWIRE(disgo v0.19.3): delete safeAudioSender's recover.
 func TestDisgoAudioSenderStillPanicsOnCloseBeforeOpen(t *testing.T) {
 	t.Parallel()
 	defer func() {

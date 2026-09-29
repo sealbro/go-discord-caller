@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-09-29
+
+### Added
+- **Voice region metric**: reports which Discord voice region each bot's connection landed on.
+
+### Changed
+- **Go 1.27**: toolchain updated, modules refreshed, and the CI actions moved to their latest versions.
+- **Decrypt metric gained a dropped outcome**: frames discarded because their sender could not be decrypted are counted separately.
+
+### Fixed
+- **Two `/start` commands at once**: a second start no longer tears down the raid the first one was still building.
+- **`/stop` during startup**: stopping a raid that is still starting now aborts it instead of being ignored.
+- **Voice joins that Discord never answers**: the attempt is now bounded and the half-open connection released, instead of parking the bot for the rest of the session.
+- **Audio from senders Discord has not announced**: those frames are no longer turned into silence or relayed as garbage.
+- **Speaker deafening during an in-flight change**: a state the router asked for mid-change is no longer lost.
+- **Repeated deafen attempts**: a change Discord keeps rejecting is no longer re-issued on every recompute.
+- **Reconnect retry never running**: the second join attempt after a failed reconnect now has time to happen.
+- **Decrypt counters resetting early**: a sender's counters survive until the last connection using them drops.
+
 ## [0.10.2] - 2026-09-28
 
 ### Added

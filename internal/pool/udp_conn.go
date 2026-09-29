@@ -36,6 +36,8 @@ import (
 //
 // Everything except Close is promoted from the embedded interface, so this
 // stays a pure pass-through of disgo's own implementation.
+//
+// UPSTREAM(disgo v0.19.3): Close dereferences a socket that is nil until Open completes.
 type safeUDPConn struct {
 	voice.UDPConn
 }

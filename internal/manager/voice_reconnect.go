@@ -78,19 +78,19 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 		return // session ended while we were closing
 	}
 
-	reconnCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	reconnCtx, cancel := context.WithTimeout(ctx, reconnectBudget)
 	defer cancel()
 	conn, err := gv.Join(reconnCtx, guildID)
 	if err != nil {
 		// Single retry after a short backoff to handle transient failures
 		// (Discord rate limits, brief network interruptions). The reconnect
 		// guard stays held so a concurrent leave event does not race us.
-		slog.WarnContext(ctx, "reconnect: first join attempt failed, retrying in 2s",
+		slog.WarnContext(ctx, "reconnect: first join attempt failed, retrying after a backoff",
 			slog.String("guildID", guildID.String()),
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
-		t := time.NewTimer(2 * time.Second)
+		t := time.NewTimer(reconnectBackoff)
 		select {
 		case <-reconnCtx.Done():
 			t.Stop()
@@ -178,6 +178,8 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 // the residual VStateU hits the NEW conn and corrupts its target channel.
 // Polls the speaker's conn for up to 500ms; returns immediately once the
 // move is observed or if the conn is already gone.
+//
+// UPSTREAM(disgo v0.19.3): two bots' gateway listeners consume independent queues.
 func (m *Service) waitSpeakerConnDrained(guildID, botUserID, boundChID snowflake.ID) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok || client.VoiceManager == nil {

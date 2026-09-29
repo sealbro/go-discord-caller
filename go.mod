@@ -7,6 +7,7 @@ require (
 	github.com/disgoorg/godave v0.3.0
 	github.com/disgoorg/godave/golibdave v0.3.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
+	github.com/gorilla/websocket v1.5.3
 	github.com/hraban/opus v0.0.0-20260708213942-bde8e4304501
 	github.com/joho/godotenv v1.5.1
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
@@ -35,7 +36,6 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.31.0 // indirect
 	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/kr/text v0.2.0 // indirect
@@ -53,6 +53,8 @@ require (
 
 // Pinned to v0.19.3: v0.19.4-v0.19.6 break bot reconnection when moved between
 // voice channels. Drop these excludes once a release later than v0.19.6 lands.
+//
+// UPSTREAM(disgo v0.19.3)
 exclude (
 	github.com/disgoorg/disgo v0.19.4
 	github.com/disgoorg/disgo v0.19.5

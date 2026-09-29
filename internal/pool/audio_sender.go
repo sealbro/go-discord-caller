@@ -46,6 +46,8 @@ import (
 // The registry is keyed by the voice.Conn that disgo passes to the create
 // func, which is the same Conn our GuildVoice.Leave holds — so Leave can
 // close exactly the right sender.
+//
+// UPSTREAM(disgo v0.19.3): Conn.Close leaves the audio sender running.
 type AudioSenderRegistry struct {
 	mu      sync.Mutex
 	senders map[voice.Conn]*safeAudioSender
@@ -160,6 +162,8 @@ var senderStartTimeout = 2 * time.Second
 // safeAudioSender wraps disgo's audio sender so Close is idempotent, cannot
 // panic, and cannot race the sender goroutine's start-up. Everything except
 // Close is promoted from the embedded interface.
+//
+// UPSTREAM(disgo v0.19.3): defaultAudioSender.Close cancels a func Open has not set yet.
 type safeAudioSender struct {
 	voice.AudioSender
 	once    sync.Once
@@ -192,8 +196,7 @@ func (s *safeAudioSender) Close() {
 
 // defaultSenders is the process-wide registry. Senders are keyed by voice.Conn,
 // which is unique across every client this process builds, so one registry
-// serves the owner bot and the whole speaker pool without collisions — the same
-// arrangement dave.Registry uses for DAVE sessions.
+// serves the owner bot and the whole speaker pool without collisions.
 var defaultSenders = NewAudioSenderRegistry()
 
 // SafeAudioSenderOpt installs the process-wide audio-sender registry on a bot's

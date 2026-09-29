@@ -19,16 +19,17 @@ import (
 
 // Decrypt outcomes, reported as the outcome label.
 const (
-	outcomeSuccess = "success"
-	outcomeUnknown = "unknown_user"
-	outcomeFailure = "failure"
+	outcomeSuccess     = "success"
+	outcomePassthrough = "passthrough"
+	outcomeFailure     = "failure"
 
 	reasonNone = "none"
 )
 
 // UnknownUserID is what disgo passes for an SSRC it has no SPEAKING op for.
-// golibdave has no decryptor for it and falls back to passthrough, which
-// returns no error, so these frames are invisible in the logs.
+// No decryptor exists for it, so those frames are passed through rather than
+// decrypted — and the backend reports no error, making them invisible in the
+// logs.
 const UnknownUserID = "0"
 
 // key identifies one counter series. All fields are label values.
@@ -37,6 +38,13 @@ type key struct {
 	userID    string
 	outcome   string
 	reason    string
+}
+
+// user identifies every series belonging to one sender on one bot, which is
+// the granularity the backend adds and removes them at.
+type user struct {
+	botUserID string
+	userID    string
 }
 
 // Stats aggregates decrypt outcomes in memory and reports them through an
@@ -51,14 +59,25 @@ type key struct {
 // Stats is created before the meter exists (clients are built ahead of
 // telemetry.NewMetrics), which is why the instrument is attached later by
 // StartMetrics rather than passed to the constructor.
+// Series are retired when the backend drops the user, because a voice channel
+// sees an unbounded number of distinct speakers over the life of the process
+// and nothing else would ever remove them — the counters would accumulate in
+// memory and as billed series for as long as the bot runs. Retirement is
+// deferred by one collection so the final values are still exported; a user who
+// rejoins before that keeps their counters, and one who rejoins later starts a
+// new series from zero, which reads as an ordinary counter reset.
 type Stats struct {
 	mu       sync.RWMutex
 	counters map[key]*atomic.Uint64
+	retiring map[user]struct{}
 	metrics  *telemetry.DaveMetrics
 }
 
 func NewStats() *Stats {
-	return &Stats{counters: make(map[key]*atomic.Uint64)}
+	return &Stats{
+		counters: make(map[key]*atomic.Uint64),
+		retiring: make(map[user]struct{}),
+	}
 }
 
 // StartMetrics attaches m and registers the observable callback. Call once,
@@ -73,14 +92,43 @@ func (s *Stats) StartMetrics(m *telemetry.DaveMetrics) {
 	}
 }
 
-// Record counts one Decrypt call. err is the error it returned, or nil.
+// Record counts one Decrypt call that reached the backend. err is the error it
+// returned, or nil.
 func (s *Stats) Record(botUserID, userID string, err error) {
 	s.counter(key{
 		botUserID: botUserID,
 		userID:    userID,
-		outcome:   outcome(userID, err),
+		outcome:   outcome(err),
 		reason:    reason(err),
 	}).Add(1)
+}
+
+// RecordPassthrough counts one frame from a user the backend has no decryptor
+// for, which is forwarded as-is rather than decrypted.
+func (s *Stats) RecordPassthrough(botUserID, userID string) {
+	s.counter(key{
+		botUserID: botUserID,
+		userID:    userID,
+		outcome:   outcomePassthrough,
+		reason:    reasonNone,
+	}).Add(1)
+}
+
+// Retire marks a user's series for removal after the next collection exports
+// their final values. Call when the backend drops the user.
+func (s *Stats) Retire(botUserID, userID string) {
+	s.mu.Lock()
+	s.retiring[user{botUserID: botUserID, userID: userID}] = struct{}{}
+	s.mu.Unlock()
+}
+
+// Keep cancels a pending retirement. Call when the backend adds the user, so a
+// rejoin before the next collection continues the existing series instead of
+// resetting it.
+func (s *Stats) Keep(botUserID, userID string) {
+	s.mu.Lock()
+	delete(s.retiring, user{botUserID: botUserID, userID: userID})
+	s.mu.Unlock()
 }
 
 func (s *Stats) counter(k key) *atomic.Uint64 {
@@ -103,23 +151,37 @@ func (s *Stats) counter(k key) *atomic.Uint64 {
 
 func (s *Stats) observe(_ context.Context, o metric.Observer) error {
 	s.mu.RLock()
-	defer s.mu.RUnlock()
-
 	for k, c := range s.counters {
 		s.metrics.ObserveDecrypt(o, k.botUserID, k.userID, k.outcome, k.reason, int64(c.Load()))
 	}
+	s.mu.RUnlock()
+
+	s.evictRetired()
 	return nil
 }
 
-func outcome(userID string, err error) string {
-	switch {
-	case err != nil:
-		return outcomeFailure
-	case userID == UnknownUserID:
-		return outcomeUnknown
-	default:
-		return outcomeSuccess
+// evictRetired drops the series of every user retired before this collection.
+// Their final values have just been exported.
+func (s *Stats) evictRetired() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if len(s.retiring) == 0 {
+		return
 	}
+	for k := range s.counters {
+		if _, ok := s.retiring[user{botUserID: k.botUserID, userID: k.userID}]; ok {
+			delete(s.counters, k)
+		}
+	}
+	clear(s.retiring)
+}
+
+func outcome(err error) string {
+	if err != nil {
+		return outcomeFailure
+	}
+	return outcomeSuccess
 }
 
 // reason maps a libdave decrypt error to a stable label value.

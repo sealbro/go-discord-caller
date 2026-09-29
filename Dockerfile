@@ -28,6 +28,13 @@ RUN mkdir -p /runtime-libs && \
         | awk '{print $3}' \
         | xargs -I{} cp --dereference {} /runtime-libs/
 
+FROM builder AS sec
+
+WORKDIR /src
+
+RUN go install github.com/securego/gosec/v2/cmd/gosec@latest \
+	&& gosec -tags=integration,stress ./...
+
 FROM gcr.io/distroless/base AS runtime
 
 LABEL org.opencontainers.image.title="go-discord-caller" \

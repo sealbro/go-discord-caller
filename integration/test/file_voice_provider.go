@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 
@@ -55,9 +56,10 @@ func NewRandomFileVoiceProvider(paths []string) (*RandomFileVoiceProvider, error
 	if len(paths) == 0 {
 		return nil, fmt.Errorf("no dca files provided")
 	}
+	//#nosec G404 -- picks a test fixture, not a secret
 	fileIndexOnce.Do(func() { fileIndex.Store(rand.Uint64N(uint64(len(paths)))) })
 	p := paths[fileIndex.Add(1)%uint64(len(paths))]
-	f, err := os.Open(p)
+	f, err := os.Open(filepath.Clean(p))
 	if err != nil {
 		return nil, fmt.Errorf("open dca file %q: %w", p, err)
 	}

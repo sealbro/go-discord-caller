@@ -614,7 +614,7 @@ func (r *Router) ScheduleRecompute(delay time.Duration) {
 	if r.closed {
 		return
 	}
-	key := snowflake.ID(delay.Nanoseconds()) | (snowflake.ID(1) << 62)
+	key := snowflake.ID(max(0, delay.Nanoseconds())) | (snowflake.ID(1) << 62)
 	if t, ok := r.debounceTimers[key]; ok {
 		t.Reset(delay)
 		return

@@ -79,7 +79,7 @@ type user struct {
 // still-live session keeps incrementing, exporting a reset that never happened.
 type Stats struct {
 	mu       sync.RWMutex
-	counters map[key]*atomic.Uint64
+	counters map[key]*atomic.Int64
 	holders  map[user]int
 	retiring map[user]struct{}
 	metrics  *telemetry.DaveMetrics
@@ -87,7 +87,7 @@ type Stats struct {
 
 func NewStats() *Stats {
 	return &Stats{
-		counters: make(map[key]*atomic.Uint64),
+		counters: make(map[key]*atomic.Int64),
 		holders:  make(map[user]int),
 		retiring: make(map[user]struct{}),
 	}
@@ -168,7 +168,7 @@ func (s *Stats) Keep(botUserID, userID string) {
 	s.mu.Unlock()
 }
 
-func (s *Stats) counter(k key) *atomic.Uint64 {
+func (s *Stats) counter(k key) *atomic.Int64 {
 	s.mu.RLock()
 	c, ok := s.counters[k]
 	s.mu.RUnlock()
@@ -181,7 +181,7 @@ func (s *Stats) counter(k key) *atomic.Uint64 {
 	if c, ok = s.counters[k]; ok {
 		return c
 	}
-	c = new(atomic.Uint64)
+	c = new(atomic.Int64)
 	s.counters[k] = c
 	return c
 }
@@ -189,7 +189,7 @@ func (s *Stats) counter(k key) *atomic.Uint64 {
 func (s *Stats) observe(_ context.Context, o metric.Observer) error {
 	s.mu.RLock()
 	for k, c := range s.counters {
-		s.metrics.ObserveDecrypt(o, k.botUserID, k.userID, k.outcome, k.reason, int64(c.Load()))
+		s.metrics.ObserveDecrypt(o, k.botUserID, k.userID, k.outcome, k.reason, c.Load())
 	}
 	s.mu.RUnlock()
 

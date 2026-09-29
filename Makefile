@@ -11,10 +11,17 @@ STRESS_FLAGS := --tags=stress -v -count=1 -timeout $(STRESS_TIMEOUT) ./integrati
 
 .PHONY: test test-unit test-integration coverage clean-cache \
 	test-stress test-stress-audio test-stress-star test-stress-mixminus \
-	release
+	sec release
 
 clean-cache:
 	go clean -testcache
+
+GO_VERSION := $(shell grep -m1 '^go ' go.mod | awk '{print $$2}' | cut -d. -f1,2)
+
+# The scan runs in the Dockerfile's sec stage, the same one CI builds: gosec
+# cannot type-check the libopus and libdave packages without that toolchain.
+sec:
+	docker build --target sec --build-arg GO_VERSION=$(GO_VERSION) .
 
 RELEASE_VERSION := $(shell grep -m1 -oE '^\#\# \[[0-9]+\.[0-9]+\.[0-9]+\]' CHANGELOG.md | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 

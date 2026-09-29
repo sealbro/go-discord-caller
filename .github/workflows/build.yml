@@ -28,6 +28,15 @@ jobs:
       run: |
         echo "GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' | cut -d. -f1,2)" >> $GITHUB_ENV
     -
+      name: Run Gosec Security Scanner
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        platforms: linux/amd64
+        build-args: "GO_VERSION=${{ env.GO_VERSION }}"
+        target: sec
+        push: false
+    -
       name: Build
       uses: docker/build-push-action@v7
       with:

@@ -74,6 +74,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.no_bound_speakers"))
 					return
 				}
+				// A raid that came up between the command's pre-check and here,
+				// including one this very command raced with.
+				if errors.Is(err, manager.ErrSessionExists) {
+					h.followUp(e, loc.T("raid.already_active"))
+					return
+				}
 				h.followUp(e, loc.T("raid.join_failed", "Code", code, "Err", err.Error()))
 				return
 			}
@@ -108,6 +114,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				slog.String("guildID", guildID.String()), slog.Any("err", err))
 			if errors.Is(err, manager.ErrNoBoundSpeakers) {
 				h.followUp(e, loc.T("raid.no_bound_speakers"))
+				return
+			}
+			if errors.Is(err, manager.ErrSessionExists) {
+				h.followUp(e, loc.T("raid.already_active"))
 				return
 			}
 			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error()))

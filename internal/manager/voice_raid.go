@@ -32,6 +32,11 @@ func countSpeakers(joined int, ownerJoined bool) int {
 // Returns the effective RaidMode (which may differ from the requested mode).
 // The session ends automatically when the host ends or ctx is cancelled.
 func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (effectiveMode guild.RaidMode, err error) {
+	if !m.starting.tryBegin(guestGuildID) {
+		return guestMode, ErrSessionExists
+	}
+	defer m.starting.end(guestGuildID)
+
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session.guest",
 		trace.WithAttributes(
 			attribute.String("guild.id", guestGuildID.String()),
@@ -245,6 +250,11 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (code ally.Code, err error) {
+	if !m.starting.tryBegin(guildID) {
+		return "", ErrSessionExists
+	}
+	defer m.starting.end(guildID)
+
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session",
 		trace.WithAttributes(
 			attribute.String("guild.id", guildID.String()),

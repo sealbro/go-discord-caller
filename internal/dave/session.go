@@ -33,6 +33,9 @@ func Instrument(inner godave.SessionCreateFunc, stats *Stats) godave.SessionCrea
 // through here. Re-verify that when the backend is upgraded — if the backend
 // gained a decryptor this wrapper does not know about, Decrypt would pass
 // encrypted audio through as plaintext.
+//
+// UPSTREAM(golibdave v0.3.0): the mirror assumes only AddUser and RemoveUser
+// ever write the backend's decryptor map.
 type countingSession struct {
 	godave.Session
 	stats     *Stats
@@ -57,6 +60,9 @@ type countingSession struct {
 // so forwarding it would feed the mixer and relay garbage audio. Dropping
 // returns a zero-length frame rather than an error, which disgo would turn into
 // a log line per packet.
+//
+// UPSTREAM(golibdave v0.3.0): the unknown-user passthrough copies its arguments
+// the wrong way round (golibdave.go:104), returning a frame of silence.
 func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedFrame []byte) (int, error) {
 	if !s.knows(userID) {
 		if s.Session.Ready() {

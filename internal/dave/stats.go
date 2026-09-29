@@ -31,6 +31,9 @@ const (
 // No decryptor exists for it, so those frames are passed through rather than
 // decrypted — and the backend reports no error, making them invisible in the
 // logs.
+//
+// UPSTREAM(disgo v0.19.3): ReadPacket resolves an SSRC it has no SPEAKING op
+// for to user "0" rather than skipping the packet.
 const UnknownUserID = "0"
 
 // key identifies one counter series. All fields are label values.
@@ -225,6 +228,9 @@ func outcome(err error) string {
 // package CGO-only. libdave's set is small and stable
 // (libdave/errors.go): anything outside it lands in "other" rather than
 // becoming an unbounded label.
+//
+// UPSTREAM(libdave v0.3.0): the sentinel errors live in a CGO-only package, so
+// they are matched by message instead.
 func reason(err error) string {
 	if err == nil {
 		return reasonNone

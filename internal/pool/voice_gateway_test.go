@@ -69,6 +69,8 @@ func testGatewayOpts() []voice.GatewayConfigOpt {
 
 // Tripwire: when this fails, upstream has fixed the dereference and safeGateway
 // should be deleted.
+//
+// UPSTREAM-TRIPWIRE(disgo v0.19.3): delete safeGateway.
 func TestDisgoVoiceGatewayStillPanicsOnNilChannelID(t *testing.T) {
 	endpoint := acceptingVoiceServer(t)
 

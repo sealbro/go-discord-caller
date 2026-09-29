@@ -53,6 +53,8 @@ require (
 
 // Pinned to v0.19.3: v0.19.4-v0.19.6 break bot reconnection when moved between
 // voice channels. Drop these excludes once a release later than v0.19.6 lands.
+//
+// UPSTREAM(disgo v0.19.3)
 exclude (
 	github.com/disgoorg/disgo v0.19.4
 	github.com/disgoorg/disgo v0.19.5

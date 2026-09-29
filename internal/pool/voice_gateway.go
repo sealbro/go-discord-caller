@@ -12,11 +12,11 @@ import (
 // whose channel is already gone.
 var ErrNoVoiceChannel = errors.New("voice gateway open with no channel")
 
-// safeGateway keeps a nil channel from crashing the process: disgo v0.19.3
-// dereferences state.ChannelID once the dial succeeds (voice/gateway.go:183),
-// and nils that field itself when the bot leaves voice. The Open that panics
-// runs on disgo's own goroutine, so the guard has to sit inside the gateway.
-// TestDisgoVoiceGatewayStillPanicsOnNilChannelID is the tripwire.
+// safeGateway refuses an open whose channel is already gone. The panic happens
+// on disgo's own goroutine, so the guard cannot live in a caller.
+//
+// UPSTREAM(disgo v0.19.3): gateway Open dereferences a nil ChannelID
+// (voice/gateway.go:183), which disgo nils itself when the bot leaves voice.
 type safeGateway struct {
 	voice.Gateway
 }

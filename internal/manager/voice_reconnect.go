@@ -178,6 +178,8 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 // the residual VStateU hits the NEW conn and corrupts its target channel.
 // Polls the speaker's conn for up to 500ms; returns immediately once the
 // move is observed or if the conn is already gone.
+//
+// UPSTREAM(disgo v0.19.3): two bots' gateway listeners consume independent queues.
 func (m *Service) waitSpeakerConnDrained(guildID, botUserID, boundChID snowflake.ID) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok || client.VoiceManager == nil {

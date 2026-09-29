@@ -11,6 +11,8 @@ import (
 
 // disgo's Open and Close both block on nothing but the caller's context, and
 // the raid context they are given has no deadline.
+//
+// UPSTREAM(disgo v0.19.3): Open and Close bound nothing themselves.
 const (
 	VoiceJoinTimeout    = 15 * time.Second
 	voiceCleanupTimeout = 5 * time.Second

@@ -25,6 +25,8 @@ func TestSafeUDPConn_CloseBeforeOpen(t *testing.T) {
 // starts guarding udpConnImpl.Close against a nil socket, this test fails —
 // that is the signal to delete safeUDPConn, SafeUDPConnOpt, its call sites in
 // bot.NewOwnerClient / newPoolClient / the integration harness, and this file.
+//
+// UPSTREAM-TRIPWIRE(disgo v0.19.3): delete safeUDPConn.
 func TestDisgoUDPConnStillPanicsOnCloseBeforeOpen(t *testing.T) {
 	t.Parallel()
 	defer func() {

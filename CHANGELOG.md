@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Go 1.27**: toolchain updated, modules refreshed, and the CI actions moved to their latest versions.
 - **Decrypt metric gained a dropped outcome**: frames discarded because their sender could not be decrypted are counted separately.
+- **Security scan in the build**: the image build now runs a Go security scanner and fails on any finding.
 
 ### Fixed
 - **Two `/start` commands at once**: a second start no longer tears down the raid the first one was still building.
@@ -23,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Repeated deafen attempts**: a change Discord keeps rejecting is no longer re-issued on every recompute.
 - **Reconnect retry never running**: the second join attempt after a failed reconnect now has time to happen.
 - **Decrypt counters resetting early**: a sender's counters survive until the last connection using them drops.
+- **Garbled audio with two speakers in one channel**: they no longer share a single frame buffer and overwrite each other's audio.
+- **Glitch when someone joined or left a channel**: a mixed frame and a raw packet could reach listeners in the same tick, decoded as two interleaved streams.
+- **Crash on a voice server update after leaving a channel**: the reconnect is now refused instead of taking the process down.
 
 ## [0.10.2] - 2026-09-28
 

@@ -36,6 +36,7 @@ type Service struct {
 	poolClients map[snowflake.ID]*bot.Client
 	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
 	metrics     *telemetry.PoolMetrics
+	voiceRegion *telemetry.VoiceRegionMetrics
 	daveStats   *dave.Stats
 }
 
@@ -47,11 +48,12 @@ type extraBot struct {
 }
 
 // NewService creates a new speaker Service.
-func NewService(metrics *telemetry.PoolMetrics, daveStats *dave.Stats) *Service {
+func NewService(metrics *telemetry.PoolMetrics, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
 		extraBots:   make(map[snowflake.ID]extraBot),
 		metrics:     metrics,
+		voiceRegion: voiceRegion,
 		daveStats:   daveStats,
 	}
 }
@@ -67,10 +69,11 @@ func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) 
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string, daveStats *dave.Stats) (*bot.Client, error) {
+func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
 	return disgo.New(token,
+		bot.WithEventListeners(VoiceRegionListeners(botUserID, voiceRegion)...),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
@@ -108,7 +111,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			client, err := newPoolClient(token, s.daveStats)
+			client, err := newPoolClient(token, s.voiceRegion, s.daveStats)
 			if err != nil {
 				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
@@ -222,7 +225,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	s.metrics.ReconnectAttempt(ctx, botUserID)
 
-	newClient, err := newPoolClient(token, s.daveStats)
+	newClient, err := newPoolClient(token, s.voiceRegion, s.daveStats)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),

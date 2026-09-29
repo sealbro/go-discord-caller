@@ -63,7 +63,7 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build metrics: %w", err)
 	}
-	h.Pool = pool.NewService(&metrics.Pool, daveStats)
+	h.Pool = pool.NewService(&metrics.Pool, &metrics.Voice, daveStats)
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
 	h.Pool.ConnectPool(poolCtx, cfg.SpeakerTokens)
 	poolCancel()

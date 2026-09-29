@@ -10,6 +10,7 @@ type Metrics struct {
 	Bot     BotMetrics
 	Opus    OpusMetrics
 	Dave    DaveMetrics
+	Voice   VoiceRegionMetrics
 }
 
 // NewMetrics initialises all instruments from the provided meter.
@@ -29,6 +30,9 @@ func NewMetrics(meter metric.Meter) (*Metrics, error) {
 		return nil, err
 	}
 	if err := m.Dave.init(meter); err != nil {
+		return nil, err
+	}
+	if err := m.Voice.init(meter); err != nil {
 		return nil, err
 	}
 	return m, nil

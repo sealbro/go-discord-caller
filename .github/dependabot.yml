@@ -11,3 +11,8 @@ updates:
   - dependency-name: github.com/disgoorg/disgo
     versions: ["<= 0.19.6"]
 
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: monthly
+  open-pull-requests-limit: 1

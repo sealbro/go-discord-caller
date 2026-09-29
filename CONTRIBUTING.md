@@ -27,7 +27,7 @@ docker build -t go-discord-caller .
 docker run --env-file .env go-discord-caller
 ```
 
-If you do want a local toolchain: Go 1.26+, plus libdave installed and
+If you do want a local toolchain: Go 1.27+, plus libdave installed and
 `PKG_CONFIG_PATH` pointing at its `.pc` file. Then `go build ./...` and
 `go run ./cmd/bot` work as normal.
 

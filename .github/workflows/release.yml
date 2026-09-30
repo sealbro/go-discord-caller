@@ -49,6 +49,7 @@ jobs:
       run: |
         version="${{ env.RELEASE_VERSION }}"
         notes=$(awk "/^## \[${version}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+        notes=$(printf '%s\n' "$notes" | sed -e 's/^[[:space:]]*$//' -e '/./,$!d')
         repo_url="${{ github.server_url }}/${{ github.repository }}"
         previous=$(git describe --tags --abbrev=0 "${version}^" 2>/dev/null || true)
         if [ -n "$previous" ]; then
@@ -59,6 +60,7 @@ jobs:
         {
           echo "notes<<EOF"
           echo "$notes"
+          echo ""
           echo "$full_changelog"
           echo "EOF"
         } >> $GITHUB_OUTPUT

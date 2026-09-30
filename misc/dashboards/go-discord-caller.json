@@ -2899,9 +2899,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum(rate(gdc_mixer_pipeline_latency_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval])) by (le))",
+                        "expr": "histogram_quantile(0.99, sum by (le, region) (rate(gdc_mixer_pipeline_latency_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]) * on (guild_id) group_left (region) clamp_max(topk by (guild_id) (1, timestamp(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})), 1)))",
                         "instant": false,
-                        "legendFormat": "p99",
+                        "legendFormat": "{{region}}",
                         "range": true
                       },
                       "version": "v0"
@@ -2914,7 +2914,7 @@
               "transformations": []
             }
           },
-          "description": "End-to-end audio relay latency at 99th percentile",
+          "description": "End-to-end audio relay latency at 99th percentile, broken out by Discord voice region",
           "id": 5,
           "links": [],
           "title": "Pipeline Latency P99",
@@ -2962,7 +2962,7 @@
                   "values": false
                 },
                 "showPercentChange": false,
-                "textMode": "auto",
+                "textMode": "value_and_name",
                 "wideLayout": true
               }
             },
@@ -4379,6 +4379,82 @@
             "version": "13.1.0-24779284961"
           }
         }
+      },
+      "panel-38": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (region) (count_over_time(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__range]))",
+                        "instant": true,
+                        "legendFormat": "{{region}}",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Share of voice-connection time spent in each Discord voice region over the selected range; slice size is time-weighted, the raw value is a sample count",
+          "id": 38,
+          "links": [],
+          "title": "Voice Region",
+          "vizConfig": {
+            "group": "piechart",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "displayLabels": [
+                  "percent"
+                ],
+                "legend": {
+                  "displayMode": "list",
+                  "placement": "right",
+                  "showLegend": true,
+                  "values": []
+                },
+                "pieType": "donut",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "single",
+                  "sort": "none"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
       }
     },
     "layout": {
@@ -4448,6 +4524,19 @@
               "width": 4,
               "x": 16,
               "y": 0
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-38"
+              },
+              "height": 4,
+              "width": 4,
+              "x": 20,
+              "y": 8
             }
           },
           {
@@ -4835,7 +4924,7 @@
                 "name": "panel-34"
               },
               "height": 4,
-              "width": 8,
+              "width": 4,
               "x": 16,
               "y": 8
             }

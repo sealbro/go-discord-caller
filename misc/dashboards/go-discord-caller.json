@@ -811,7 +811,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (le) (increase(gdc_mixer_pipeline_latency_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "expr": "sum by (le) (increase(gdc_mixer_pipeline_latency_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]) * on (guild_id) group_left (region) clamp_max(topk by (guild_id) (1, timestamp(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\", region=~\"$region\"})), 1))",
                         "format": "heatmap",
                         "instant": false,
                         "legendFormat": "{{le}}",
@@ -827,7 +827,7 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Pipeline latency distribution, limited to guilds whose voice connections landed in the selected region. A guild split across regions is attributed to the freshest one.",
           "id": 15,
           "links": [],
           "title": "Pipeline Latency Heatmap",
@@ -5055,6 +5055,40 @@
           "refresh": "onTimeRangeChanged",
           "regex": "/guild_id=\"(?<value>[^\"]+)\".*guild_name=\"(?<text>[^\"]+)\"/",
           "regexApplyTo": "value",
+          "skipUrlSync": false,
+          "sort": "alphabeticalAsc"
+        }
+      },
+      {
+        "kind": "QueryVariable",
+        "spec": {
+          "allValue": ".*",
+          "allowCustomValue": true,
+          "current": {
+            "text": "",
+            "value": ""
+          },
+          "definition": "label_values(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, region)",
+          "hide": "dontHide",
+          "includeAll": true,
+          "label": "Region",
+          "multi": true,
+          "name": "region",
+          "options": [],
+          "query": {
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "group": "prometheus",
+            "kind": "DataQuery",
+            "spec": {
+              "query": "label_values(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, region)",
+              "refId": "StandardVariableQuery"
+            },
+            "version": "v0"
+          },
+          "refresh": "onTimeRangeChanged",
+          "regex": "",
           "skipUrlSync": false,
           "sort": "alphabeticalAsc"
         }

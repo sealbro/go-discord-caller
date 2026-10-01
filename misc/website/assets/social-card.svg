@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1b1d35"/>
+      <stop offset="55%" stop-color="#232753"/>
+      <stop offset="100%" stop-color="#2d1f4e"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#5865F2"/>
+      <stop offset="100%" stop-color="#8b7bf7"/>
+    </linearGradient>
+    <marker id="ae" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 L7 3.5 L0 7 z" fill="#8b7bf7"/>
+    </marker>
+    <marker id="as" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M7 0 L0 3.5 L7 7 z" fill="#8b7bf7"/>
+    </marker>
+    <marker id="aes" markerWidth="5" markerHeight="5" refX="4.3" refY="2.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M0 0 L5 2.5 L0 5 z" fill="#8b7bf7"/>
+    </marker>
+    <marker id="ass" markerWidth="5" markerHeight="5" refX="0.7" refY="2.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M5 0 L0 2.5 L5 5 z" fill="#8b7bf7"/>
+    </marker>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+  <rect width="1200" height="8" fill="url(#accent)"/>
+
+  <!-- text column -->
+  <text x="80" y="188" font-family="Helvetica,Arial,sans-serif" font-size="30" font-weight="500"
+        fill="#8b93d6" letter-spacing="3">DISCORD VOICE RELAY · OPEN SOURCE</text>
+
+  <text x="80" y="294" font-family="Helvetica,Arial,sans-serif" font-size="80" font-weight="700"
+        fill="#ffffff">go-discord-caller</text>
+
+  <text x="80" y="376" font-family="Helvetica,Arial,sans-serif" font-size="38" font-weight="400" fill="#cfd3f2">
+    Everyone hears the shot caller —
+  </text>
+  <text x="80" y="428" font-family="Helvetica,Arial,sans-serif" font-size="38" font-weight="400" fill="#cfd3f2">
+    and the squads can hear each other
+  </text>
+  <text x="80" y="468" font-family="Helvetica,Arial,sans-serif" font-size="26" font-weight="400" fill="#8b93d6">
+    (depends on mode)
+  </text>
+
+  <rect x="80" y="504" width="286" height="54" rx="27" fill="#5865F2"/>
+  <text x="223" y="539" text-anchor="middle" font-family="Helvetica,Arial,sans-serif" font-size="25"
+        font-weight="600" fill="#ffffff">Free &amp; self-hosted</text>
+
+  <text x="396" y="539" font-family="Helvetica,Arial,sans-serif" font-size="25" fill="#8b93d6">
+    Go · Apache-2.0 · DAVE E2EE
+  </text>
+
+  <!-- fan-out diagram -->
+  <g transform="translate(856,315)">
+    <circle cx="0" cy="0" r="62" fill="none" stroke="#5865F2" stroke-width="4"/>
+    <circle cx="0" cy="0" r="86" fill="none" stroke="#5865F2" stroke-width="2" opacity="0.45"/>
+    <g fill="#ffffff" transform="translate(-19,-26)">
+      <rect x="11" y="0" width="16" height="30" rx="8"/>
+      <path d="M4 22a15 15 0 0 0 30 0" fill="none" stroke="#ffffff" stroke-width="4"/>
+      <rect x="17" y="36" width="4" height="12"/>
+      <rect x="9" y="48" width="20" height="4" rx="2"/>
+    </g>
+
+    <g stroke="#8b7bf7" stroke-width="3" fill="none" opacity="0.9" marker-end="url(#ae)">
+      <path d="M88.7 -33.8 C 138.7 -75.8, 146.7 -111.8, 190 -119.8"/>
+      <path d="M96 -5 H 190"/>
+      <path d="M88.7 33.8 C 138.7 75.8, 146.7 111.8, 190 119.8"/>
+    </g>
+    <g stroke="#8b7bf7" stroke-width="3" fill="none" opacity="0.9"
+       stroke-dasharray="9 7" marker-start="url(#as)">
+      <path d="M95.3 -26.2 C 145.3 -68.2, 153.3 -104.2, 194 -112.2"/>
+      <path d="M96 5 H 194"/>
+      <path d="M95.3 26.2 C 145.3 68.2, 153.3 104.2, 194 112.2"/>
+    </g>
+
+    <g>
+      <rect x="196" y="-146" width="118" height="60" rx="14" fill="#30345f"/>
+      <rect x="196" y="-30" width="118" height="60" rx="14" fill="#30345f"/>
+      <rect x="196" y="86" width="118" height="60" rx="14" fill="#30345f"/>
+      <g stroke="#8b7bf7" stroke-width="3" fill="none" opacity="0.9" stroke-dasharray="0.01 5.5"
+         stroke-linecap="round" marker-start="url(#ass)" marker-end="url(#aes)">
+        <path d="M255 -83 V -33"/>
+        <path d="M255 33 V 83"/>
+      </g>
+      <g fill="#cfd3f2" font-family="Helvetica,Arial,sans-serif" font-size="22" text-anchor="middle">
+        <text x="255" y="-108">squad 1</text>
+        <text x="255" y="8">squad 2</text>
+        <text x="255" y="124">squad N</text>
+      </g>
+      <g text-anchor="end" font-family="Helvetica,Arial,sans-serif" font-size="22" fill="#8b93d6">
+        <text x="314" y="180">solid: every mode</text>
+        <text x="314" y="210">dashed: mode:one-many · mode:many</text>
+        <text x="314" y="240">dotted: mode:many</text>
+      </g>
+    </g>
+  </g>
+</svg>

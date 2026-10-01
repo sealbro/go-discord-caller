@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "misc/website/**"
+      - "docs/**"
       - "misc/overrides/**"
       - "mkdocs.yml"
       - "docs-requirements.txt"

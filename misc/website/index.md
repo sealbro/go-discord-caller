@@ -58,7 +58,7 @@ graph TB
     SP3 -- "▶️ plays back" --> SCH3
 ```
 
-See the [detailed voice flow](https://github.com/sealbro/go-discord-caller/blob/main/docs/VOICE_FLOW.md) and [end-to-end latency breakdown](https://github.com/sealbro/go-discord-caller/blob/main/docs/LATENCY.md).
+See the [detailed voice flow](voice-flow.md) and [end-to-end latency breakdown](latency.md).
 
 ## Caller modes
 
@@ -132,7 +132,7 @@ A game-agnostic Discord voice command system — it works for any guild on any t
 
 ## Learn more
 
-- [How it works — voice flow diagrams](https://github.com/sealbro/go-discord-caller/blob/main/docs/VOICE_FLOW.md)
+- [How it works — voice flow diagrams](voice-flow.md)
 - [Free shot-caller bot vs paid services](free-shot-caller-bot.md)
 - [Building a Discord Caller (Voice Relay) Bot in Go](https://dev.to/sealbro/building-a-discord-caller-voice-relay-bot-in-go-5b9h)
 - [Source code on GitHub](https://github.com/sealbro/go-discord-caller)

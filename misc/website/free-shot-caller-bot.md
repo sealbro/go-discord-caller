@@ -55,4 +55,4 @@ docker run -d \
 
 Create one owner bot and one or more speaker bots in the [Discord Developer Portal](https://discord.com/developers/applications), drop the tokens in, and run `/setup` in your server. Prefer not to host at all? Use the [hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565771282752) for evaluation.
 
-See the [full setup guide on GitHub](https://github.com/sealbro/go-discord-caller#discord-app-setup) and [how it works](https://github.com/sealbro/go-discord-caller/blob/main/docs/VOICE_FLOW.md).
+See the [full setup guide on GitHub](https://github.com/sealbro/go-discord-caller#discord-app-setup) and [how it works](voice-flow.md).

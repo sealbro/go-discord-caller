@@ -60,7 +60,10 @@ markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
   - pymdownx.inlinehilite
-  - pymdownx.snippets
+  - pymdownx.snippets:
+      # Site pages wrap the repo's docs/*.md so GitHub and the site share one source.
+      base_path: ["."]
+      check_paths: true
   - pymdownx.superfences:
       custom_fences:
         - name: mermaid
@@ -70,9 +73,9 @@ markdown_extensions:
 nav:
   - Home: index.md
   - Free Shot Caller Bot: free-shot-caller-bot.md
-  - How it works: https://github.com/sealbro/go-discord-caller/blob/main/docs/VOICE_FLOW.md
-  - Audio latency: https://github.com/sealbro/go-discord-caller/blob/main/docs/LATENCY.md
-  - Metrics: https://github.com/sealbro/go-discord-caller/blob/main/docs/METRICS.md
+  - How it works: voice-flow.md
+  - Audio latency: latency.md
+  - Metrics: metrics.md
 
 extra:
   google_site_verification:

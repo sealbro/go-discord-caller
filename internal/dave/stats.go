@@ -27,6 +27,16 @@ const (
 	reasonNone = "none"
 )
 
+// Decrypt health of one sender, reported as the health label. Identities are
+// deliberately not exported: the production question is whether failures are
+// concentrated on one sender or spread across all of them, and the bucket
+// counts answer it without naming anyone.
+const (
+	healthClean   = "clean"   // every frame decrypted
+	healthPartial = "partial" // some frames decrypted, some not
+	healthFailing = "failing" // nothing decrypted
+)
+
 // UnknownUserID is what disgo passes for an SSRC it has no SPEAKING op for.
 // No decryptor exists for it, so those frames are passed through rather than
 // decrypted — and the backend reports no error, making them invisible in the
@@ -51,6 +61,36 @@ type user struct {
 	userID    string
 }
 
+// aggKey identifies one exported counter series: key without the sender.
+type aggKey struct {
+	botUserID string
+	outcome   string
+	reason    string
+}
+
+// healthKey identifies one exported sender-gauge series.
+type healthKey struct {
+	botUserID string
+	health    string
+}
+
+// tally is one sender's frames, split by whether they were decrypted.
+type tally struct {
+	success int64
+	other   int64
+}
+
+func (t tally) health() string {
+	switch {
+	case t.other == 0:
+		return healthClean
+	case t.success == 0:
+		return healthFailing
+	default:
+		return healthPartial
+	}
+}
+
 // Stats aggregates decrypt outcomes in memory and reports them through an
 // observable counter.
 //
@@ -66,7 +106,8 @@ type user struct {
 // Series are retired when the last session drops the user, because a voice
 // channel sees an unbounded number of distinct speakers over the life of the
 // process and nothing else would ever remove them — the counters would
-// accumulate in memory and as billed series for as long as the bot runs.
+// accumulate in memory for as long as the bot runs. (Billed series no longer
+// grow with speakers: the export is aggregated.)
 // Retirement is deferred by one collection so the final values are still
 // exported; a user who rejoins before that keeps their counters, and one who
 // rejoins later starts a new series from zero, which reads as an ordinary
@@ -82,7 +123,11 @@ type Stats struct {
 	counters map[key]*atomic.Int64
 	holders  map[user]int
 	retiring map[user]struct{}
-	metrics  *telemetry.DaveMetrics
+	// retired holds the final counts of evicted senders. The exported counter
+	// sums over live and retired alike, or dropping a sender's counters would
+	// move a monotonic series downwards and read as a counter reset.
+	retired map[aggKey]int64
+	metrics *telemetry.DaveMetrics
 }
 
 func NewStats() *Stats {
@@ -90,6 +135,7 @@ func NewStats() *Stats {
 		counters: make(map[key]*atomic.Int64),
 		holders:  make(map[user]int),
 		retiring: make(map[user]struct{}),
+		retired:  make(map[aggKey]int64),
 	}
 }
 
@@ -188,10 +234,43 @@ func (s *Stats) counter(k key) *atomic.Int64 {
 
 func (s *Stats) observe(_ context.Context, o metric.Observer) error {
 	s.mu.RLock()
+	m := s.metrics
+	totals := make(map[aggKey]int64, len(s.retired))
+	for k, v := range s.retired {
+		totals[k] = v
+	}
+	senders := make(map[user]tally)
 	for k, c := range s.counters {
-		s.metrics.ObserveDecrypt(o, k.botUserID, k.userID, k.outcome, k.reason, c.Load())
+		v := c.Load()
+		totals[aggKey{botUserID: k.botUserID, outcome: k.outcome, reason: k.reason}] += v
+
+		// UnknownUserID is disgo's bucket for an SSRC with no SPEAKING op yet,
+		// not a person, so it would inflate any count of distinct senders.
+		if k.userID == UnknownUserID {
+			continue
+		}
+		u := user{botUserID: k.botUserID, userID: k.userID}
+		t := senders[u]
+		if k.outcome == outcomeSuccess {
+			t.success += v
+		} else {
+			t.other += v
+		}
+		senders[u] = t
 	}
 	s.mu.RUnlock()
+
+	for k, v := range totals {
+		m.ObserveDecrypt(o, k.botUserID, k.outcome, k.reason, v)
+	}
+
+	buckets := make(map[healthKey]int64, len(senders))
+	for u, t := range senders {
+		buckets[healthKey{botUserID: u.botUserID, health: t.health()}]++
+	}
+	for k, n := range buckets {
+		m.ObserveSenders(o, k.botUserID, k.health, n)
+	}
 
 	s.evictRetired()
 	return nil
@@ -206,8 +285,9 @@ func (s *Stats) evictRetired() {
 	if len(s.retiring) == 0 {
 		return
 	}
-	for k := range s.counters {
+	for k, c := range s.counters {
 		if _, ok := s.retiring[user{botUserID: k.botUserID, userID: k.userID}]; ok {
+			s.retired[aggKey{botUserID: k.botUserID, outcome: k.outcome, reason: k.reason}] += c.Load()
 			delete(s.counters, k)
 		}
 	}

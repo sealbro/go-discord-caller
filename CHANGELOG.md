@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-10-03
+
+### Added
+- **Privacy policy and terms of service**: published on the project site, as required for bot listings and Discord app verification.
+- **Voice region on the dashboard**: the region each connection landed on is shown, and latency can be filtered by it.
+
+### Changed
+- **Decrypt metrics no longer identify speakers**: the per-speaker breakdown is replaced by counts of how many speakers decrypt cleanly, partly, or not at all.
+- **OpenTelemetry dependencies updated**.
+
 ## [0.11.0] - 2026-09-29
 
 ### Added

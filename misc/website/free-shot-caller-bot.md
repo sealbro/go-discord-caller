@@ -16,6 +16,8 @@ keywords: >-
 Most Discord shot-caller bots are paid, hosted services — a "speak once, reach every squad" workflow gated behind a monthly subscription, with tiers that cap how many servers and parties you can use. **go-discord-caller** gives you the same workflow for free: it's open source and self-hosted, so you run it with your own Discord bot tokens with no plan tiers, no party limits, and end-to-end encrypted audio.
 
 [:simple-discord: Try the hosted bot (demo)](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565771282752){ .md-button .md-button--primary }
+
+*The hosted demo is free to use today and intended for evaluation; see the [terms](terms.md). The software itself is free under Apache-2.0 — self-hosting has no fee, now or later.*
 [:material-github: Self-host it (GitHub)](https://github.com/sealbro/go-discord-caller){ .md-button }
 
 ## Comparison

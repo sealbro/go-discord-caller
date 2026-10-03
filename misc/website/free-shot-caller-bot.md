@@ -30,7 +30,7 @@ Most Discord shot-caller bots are paid, hosted services — a "speak once, reach
 | **Hosting** | ✅ Self-hosted — you own the data | ☁️ Managed SaaS |
 | **Caller modes** | ✅ One-caller, hub-and-spoke, full conference (mix-minus) | ➖ Typically one-way broadcast |
 | **Encryption** | ✅ DAVE end-to-end encrypted voice | ❓ Varies / often unstated |
-| **Localization** | ✅ 7 languages | ❌ Often English only |
+| **Localization** | ✅ 8 languages | ❌ Often English only |
 | **Source code** | ✅ Open on GitHub | 🔒 Closed |
 
 > Capabilities of paid services vary by provider and plan; check each vendor for current details.

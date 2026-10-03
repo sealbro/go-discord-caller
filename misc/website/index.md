@@ -25,7 +25,7 @@ description: >-
 - **Three caller modes** — one-caller broadcast, hub-and-spoke, or full conference with mix-minus echo prevention.
 - **End-to-end encrypted audio** — uses Discord's DAVE E2EE voice protocol via [godave / libdave](https://github.com/disgoorg/godave).
 - **Self-hosted & private** — runs in Docker; bindings persist in a YAML store you control.
-- **Localized** — slash commands and setup UI in 7 languages (English, Español, Deutsch, Français, Português, Polski, Русский).
+- **Localized** — slash commands and setup UI in 8 languages (English, Español, Deutsch, Français, Português, Polski, Русский, Türkçe).
 
 ## How it works
 

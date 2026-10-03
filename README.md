@@ -116,7 +116,7 @@ flowchart TB
 - **Role-based access control** – a dedicated manager role controls who can start/stop raids without granting full admin
 - **Auto-seeding** – speaker bots already in a guild are automatically registered on startup or when they join later
 - **Speaker gateway watchdog** – reconnects any speaker gateway that failed at startup; logs health every 30 s
-- **Localization** – slash-command descriptions and the setup UI are translated into 7 languages (English, Español, Deutsch, Français, Português, Polski, Русский); the language is auto-detected from each user's Discord client locale and can be pinned per guild from `/setup`
+- **Localization** – slash-command descriptions and the setup UI are translated into 8 languages (English, Español, Deutsch, Français, Português, Polski, Русский, Türkçe); the language is auto-detected from each user's Discord client locale and can be pinned per guild from `/setup`
 
 ## Slash commands
 

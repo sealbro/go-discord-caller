@@ -139,12 +139,75 @@ func points(t *testing.T, reader *metric.ManualReader) []metricdata.DataPoint[in
 	return nil
 }
 
-func find(t *testing.T, points []metricdata.DataPoint[int64], userID, outcome string) int64 {
+func find(t *testing.T, points []metricdata.DataPoint[int64], outcome string) int64 {
 	t.Helper()
 	for _, p := range points {
-		u, _ := p.Attributes.Value("user_id")
-		o, _ := p.Attributes.Value("outcome")
-		if u.AsString() == userID && o.AsString() == outcome {
+		if o, _ := p.Attributes.Value("outcome"); o.AsString() == outcome {
+			return p.Value
+		}
+	}
+	return -1
+}
+
+// collectOnce runs ONE collection and returns both instruments' points.
+// Reading them with two calls would put eviction between them.
+func collectOnce(t *testing.T, reader *metric.ManualReader) (counts, gauge []metricdata.DataPoint[int64]) {
+	t.Helper()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	for _, sm := range rm.ScopeMetrics {
+		for _, md := range sm.Metrics {
+			switch md.Name {
+			case "gdc.dave.decrypt.total":
+				sum, ok := md.Data.(metricdata.Sum[int64])
+				if !ok {
+					t.Fatalf("gdc.dave.decrypt.total is %T, want Sum[int64]", md.Data)
+				}
+				counts = sum.DataPoints
+			case "gdc.dave.decrypt.senders":
+				g, ok := md.Data.(metricdata.Gauge[int64])
+				if !ok {
+					t.Fatalf("gdc.dave.decrypt.senders is %T, want Gauge[int64]", md.Data)
+				}
+				gauge = g.DataPoints
+			}
+		}
+	}
+	return counts, gauge
+}
+
+// senders runs one collection on reader and returns the sender gauge points.
+func senders(t *testing.T, reader *metric.ManualReader) []metricdata.DataPoint[int64] {
+	t.Helper()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	for _, sm := range rm.ScopeMetrics {
+		for _, md := range sm.Metrics {
+			if md.Name != "gdc.dave.decrypt.senders" {
+				continue
+			}
+			g, ok := md.Data.(metricdata.Gauge[int64])
+			if !ok {
+				t.Fatalf("gdc.dave.decrypt.senders is %T, want Gauge[int64]", md.Data)
+			}
+			return g.DataPoints
+		}
+	}
+	return nil
+}
+
+func findHealth(t *testing.T, points []metricdata.DataPoint[int64], health string) int64 {
+	t.Helper()
+	for _, p := range points {
+		if h, _ := p.Attributes.Value("health"); h.AsString() == health {
 			return p.Value
 		}
 	}
@@ -152,8 +215,9 @@ func find(t *testing.T, points []metricdata.DataPoint[int64], userID, outcome st
 }
 
 // The whole point of the instrument: tell one permanently failing sender apart
-// from every sender losing a fraction of frames. disgo's log line cannot.
-func TestDecryptFailuresAreAttributedToTheSendingUser(t *testing.T) {
+// from every sender losing a fraction of frames. disgo's log line cannot, and
+// since identities are no longer exported, the sender gauge has to carry it.
+func TestOneFailingSenderIsDistinguishableFromHealthyOnes(t *testing.T) {
 	stats := NewStats()
 	broken, _ := knownSession(t, stats, "bot-1", errors.New("failed to decrypt frame"), "user-a")
 	working, _ := knownSession(t, stats, "bot-1", nil, "user-b")
@@ -169,15 +233,72 @@ func TestDecryptFailuresAreAttributedToTheSendingUser(t *testing.T) {
 		}
 	}
 
-	points := collect(t, stats)
-	if got := find(t, points, "user-a", "failure"); got != 3 {
-		t.Errorf("user-a failures = %d, want 3", got)
+	reader, _ := newReader(t, stats)
+	pts, sp := collectOnce(t, reader)
+	if got := find(t, pts, outcomeFailure); got != 3 {
+		t.Errorf("failures = %d, want 3", got)
 	}
-	if got := find(t, points, "user-b", "success"); got != 5 {
-		t.Errorf("user-b successes = %d, want 5", got)
+	if got := find(t, pts, outcomeSuccess); got != 5 {
+		t.Errorf("successes = %d, want 5", got)
 	}
-	if got := find(t, points, "user-a", "success"); got != -1 {
-		t.Errorf("user-a should have no successes, got %d", got)
+
+	// One sender fully broken, one fully healthy — the shape the aggregate
+	// counter alone cannot show.
+	if got := findHealth(t, sp, healthFailing); got != 1 {
+		t.Errorf("failing senders = %d, want 1", got)
+	}
+	if got := findHealth(t, sp, healthClean); got != 1 {
+		t.Errorf("clean senders = %d, want 1", got)
+	}
+	if got := findHealth(t, sp, healthPartial); got != -1 {
+		t.Errorf("no sender is partially failing, got %d", got)
+	}
+}
+
+// The other half of the same question: every sender losing a fraction of
+// frames, which must not look like one broken sender.
+func TestPartialLossAcrossSendersReportsPartial(t *testing.T) {
+	stats := NewStats()
+	for _, id := range []string{"user-a", "user-b"} {
+		ok, _ := knownSession(t, stats, "bot-1", nil, id)
+		if _, err := ok.Decrypt(godave.UserID(id), nil, make([]byte, 64)); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		bad, _ := knownSession(t, stats, "bot-1", errors.New("invalid nonce"), id)
+		if _, err := bad.Decrypt(godave.UserID(id), nil, nil); err == nil {
+			t.Fatal("expected the backend error to pass through")
+		}
+	}
+
+	reader, _ := newReader(t, stats)
+	_ = points(t, reader)
+	if got := findHealth(t, senders(t, reader), healthPartial); got != 2 {
+		t.Errorf("partial senders = %d, want 2", got)
+	}
+}
+
+// The reason the user_id label was removed: a sender identity must never leave
+// the process, on either instrument.
+func TestNoSenderIdentityIsExported(t *testing.T) {
+	stats := NewStats()
+	session, _ := knownSession(t, stats, "bot-1", nil, "user-a")
+	if _, err := session.Decrypt("user-a", nil, make([]byte, 64)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	reader, _ := newReader(t, stats)
+	counts, gauge := collectOnce(t, reader)
+	for _, pts := range [][]metricdata.DataPoint[int64]{counts, gauge} {
+		for _, p := range pts {
+			for _, kv := range p.Attributes.ToSlice() {
+				if kv.Key == "user_id" {
+					t.Errorf("a sender identity is exported: %s=%s", kv.Key, kv.Value.AsString())
+				}
+				if kv.Value.AsString() == "user-a" {
+					t.Errorf("a sender identity leaked through label %q", kv.Key)
+				}
+			}
+		}
 	}
 }
 
@@ -193,10 +314,10 @@ func TestUnknownUserIsNotCountedAsSuccess(t *testing.T) {
 	}
 
 	points := collect(t, stats)
-	if got := find(t, points, UnknownUserID, outcomePassthrough); got != 1 {
+	if got := find(t, points, outcomePassthrough); got != 1 {
 		t.Errorf("passthrough count = %d, want 1", got)
 	}
-	if got := find(t, points, UnknownUserID, outcomeSuccess); got != -1 {
+	if got := find(t, points, outcomeSuccess); got != -1 {
 		t.Errorf("passthrough must not be counted as success, got %d", got)
 	}
 }
@@ -240,9 +361,10 @@ func TestUnknownUserFrameIsCopiedNotSilenced(t *testing.T) {
 }
 
 // A voice channel sees an unbounded number of distinct speakers over the life
-// of the process; without eviction their counters accumulate forever, in memory
-// and as billed series.
-func TestRetiredUserSeriesAreEvictedAfterOneCollection(t *testing.T) {
+// of the process; without eviction their counters accumulate in memory forever.
+// Eviction must not move the exported total, though: it is monotonic, and
+// subtracting a departed sender's frames would read as a counter reset.
+func TestRetiredSenderIsEvictedWithoutMovingTheTotal(t *testing.T) {
 	stats := NewStats()
 	session, _ := knownSession(t, stats, "bot-1", nil, "user-a")
 
@@ -253,13 +375,30 @@ func TestRetiredUserSeriesAreEvictedAfterOneCollection(t *testing.T) {
 
 	reader, _ := newReader(t, stats)
 
-	// First collection still reports the final value.
-	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != 1 {
+	// First collection reports the final value and still sees the sender.
+	pts, sp := collectOnce(t, reader)
+	if got := find(t, pts, outcomeSuccess); got != 1 {
 		t.Errorf("final value = %d, want 1 exported before eviction", got)
 	}
-	// Second collection no longer carries the series.
-	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != -1 {
-		t.Errorf("series should be evicted, still got %d", got)
+	if got := findHealth(t, sp, healthClean); got != 1 {
+		t.Errorf("clean senders = %d, want 1 before eviction", got)
+	}
+
+	// Second collection has dropped the sender but kept their frames in the
+	// total.
+	pts, sp = collectOnce(t, reader)
+	if got := find(t, pts, outcomeSuccess); got != 1 {
+		t.Errorf("total = %d after eviction, want 1 — the counter must not move backwards", got)
+	}
+	if got := findHealth(t, sp, healthClean); got != -1 {
+		t.Errorf("sender should be evicted from the gauge, still got %d", got)
+	}
+
+	stats.mu.RLock()
+	live := len(stats.counters)
+	stats.mu.RUnlock()
+	if live != 0 {
+		t.Errorf("%d per-sender counters still held in memory, want 0", live)
 	}
 }
 
@@ -278,7 +417,7 @@ func TestRejoinBeforeCollectionKeepsTheSeries(t *testing.T) {
 	reader, _ := newReader(t, stats)
 	_ = points(t, reader)
 
-	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != 1 {
+	if got := find(t, points(t, reader), outcomeSuccess); got != 1 {
 		t.Errorf("count after rejoin = %d, want the original 1", got)
 	}
 }
@@ -321,7 +460,7 @@ func TestRecordIsConcurrencySafe(t *testing.T) {
 	}
 	wg.Wait()
 
-	if got := find(t, collect(t, stats), "user-a", "success"); got != 800 {
+	if got := find(t, collect(t, stats), outcomeSuccess); got != 800 {
 		t.Errorf("success count = %d, want 800", got)
 	}
 }
@@ -353,10 +492,10 @@ func TestUnknownUserFrameIsDroppedWhileEncrypted(t *testing.T) {
 	}
 
 	points := collect(t, stats)
-	if got := find(t, points, UnknownUserID, outcomeDropped); got != 1 {
+	if got := find(t, points, outcomeDropped); got != 1 {
 		t.Errorf("dropped count = %d, want 1", got)
 	}
-	if got := find(t, points, UnknownUserID, outcomePassthrough); got != -1 {
+	if got := find(t, points, outcomePassthrough); got != -1 {
 		t.Errorf("an encrypted drop must not be counted as passthrough, got %d", got)
 	}
 }
@@ -380,7 +519,7 @@ func TestFrameArrivingDuringAddUserDoesNotReachTheBackend(t *testing.T) {
 	if backend.decryptCalls() != 0 {
 		t.Errorf("backend Decrypt was called %d times during the AddUser window; it has no decryptor yet", backend.decryptCalls())
 	}
-	if got := find(t, collect(t, stats), "user-a", outcomeSuccess); got != -1 {
+	if got := find(t, collect(t, stats), outcomeSuccess); got != -1 {
 		t.Errorf("a frame the backend could not decrypt was counted as success (%d)", got)
 	}
 }
@@ -402,13 +541,24 @@ func TestUserLeavingOneSessionKeepsCountersOfAnother(t *testing.T) {
 
 	reader, _ := newReader(t, stats)
 	_ = points(t, reader) // the collection that would export final values
-	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != 1 {
+	if got := find(t, points(t, reader), outcomeSuccess); got != 1 {
 		t.Errorf("count = %d, want 1 kept while the host session is still live", got)
 	}
 
 	host.RemoveUser("user-a")
 	_ = points(t, reader)
-	if got := find(t, points(t, reader), "user-a", outcomeSuccess); got != -1 {
-		t.Errorf("series should be evicted once the last session drops the user, still got %d", got)
+	pts, sp := collectOnce(t, reader)
+	if got := findHealth(t, sp, healthClean); got != -1 {
+		t.Errorf("sender should leave the gauge once the last session drops them, still got %d", got)
+	}
+	if got := find(t, pts, outcomeSuccess); got != 1 {
+		t.Errorf("total = %d, want the retired sender's frames kept at 1", got)
+	}
+
+	stats.mu.RLock()
+	live := len(stats.counters)
+	stats.mu.RUnlock()
+	if live != 0 {
+		t.Errorf("%d per-sender counters still held in memory, want 0", live)
 	}
 }

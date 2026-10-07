@@ -25,6 +25,12 @@ type channelKey struct {
 	guildID snowflake.ID
 }
 
+// speakerKey identifies a speaker bot within a guild.
+type speakerKey struct {
+	userID  snowflake.ID
+	guildID snowflake.ID
+}
+
 // roleKey is the composite key for a role binding.
 type roleKey struct {
 	guildID  snowflake.ID
@@ -54,6 +60,12 @@ type Store interface {
 	UnbindLocale(guildID snowflake.ID)
 	// GetLocale returns the pinned locale for guildID, or "" if none is set.
 	GetLocale(guildID snowflake.ID) (string, bool)
+
+	// SetSpeakerEnabled records whether a speaker bot takes part in raids in guildID.
+	SetSpeakerEnabled(guildID, userID snowflake.ID, enabled bool)
+	// IsSpeakerEnabled reports whether a speaker bot takes part in raids in
+	// guildID. Speakers are enabled unless explicitly disabled.
+	IsSpeakerEnabled(guildID, userID snowflake.ID) bool
 
 	// Close flushes any pending writes and releases resources.
 	Close()
@@ -88,6 +100,7 @@ type InMemoryStore struct {
 	roles      map[roleKey]snowflake.ID    // (guildID, roleType) -> roleID
 	relayCodes map[snowflake.ID]string     // guildID -> relay code
 	locales    map[snowflake.ID]string     // guildID -> pinned bot locale
+	disabled   map[speakerKey]struct{}     // speakers excluded from raids
 }
 
 func NewInMemoryStore() *InMemoryStore {
@@ -96,6 +109,7 @@ func NewInMemoryStore() *InMemoryStore {
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
 		locales:    make(map[snowflake.ID]string),
+		disabled:   make(map[speakerKey]struct{}),
 	}
 }
 
@@ -176,6 +190,23 @@ func (s *InMemoryStore) GetLocale(guildID snowflake.ID) (string, bool) {
 	defer s.mu.RUnlock()
 	loc, ok := s.locales[guildID]
 	return loc, ok
+}
+
+func (s *InMemoryStore) SetSpeakerEnabled(guildID, userID snowflake.ID, enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if enabled {
+		delete(s.disabled, speakerKey{userID, guildID})
+		return
+	}
+	s.disabled[speakerKey{userID, guildID}] = struct{}{}
+}
+
+func (s *InMemoryStore) IsSpeakerEnabled(guildID, userID snowflake.ID) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, disabled := s.disabled[speakerKey{userID, guildID}]
+	return !disabled
 }
 
 func (s *InMemoryStore) Close() {}

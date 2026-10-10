@@ -29,6 +29,12 @@ The router decides between two modes for the owner source:
 The diagram below shows **copy mode** (the common case for OneCaller).
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TD
     subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A (owner)"]
@@ -88,6 +94,12 @@ Each `Mixer` receives audio from all sources **except its own channel** (mix-min
 The §1.1 multi-source rule means that with N≥3 captured channels the relay mixer is always fed by 2+ sources, which cascades back to force every source into mix mode regardless of per-channel C. With N=2 mix-minus, copy mode applies while both channels are at C=1 and the cascade lifts the whole graph to mix when either reaches C≥2.
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TD
     subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A"]
@@ -195,6 +207,12 @@ guild's channel mixers so incoming relay audio is mixed alongside local sources.
 The relay bridge is the **only remaining decode goroutine** in the pipeline. It reads packets off `relayOpusIn` (a buffered chan because relay frames arrive from another guild rather than via inline `ReceiveOpusFrame`), decodes once per packet, and `Feed`s a `Frame` into one `SourceBuffer` per destination mixer.
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TD
     subgraph HOST["Host Guild"]
         subgraph HChA["Channel A (owner)"]
@@ -327,6 +345,12 @@ Star topology: the owner is the central hub. Only **one** channel `Mixer` is cre
 Speaker sources decode + `Feed` into the hub mixer when in mix mode (and write raw to the hub `chOwnerOut` in copy mode). Speakers cannot hear each other — they only hear the owner.
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TD
     subgraph HOST_GUILD["Host Guild"]
         subgraph ChA["Discord Channel A (owner = hub)"]
@@ -428,6 +452,12 @@ Both guilds use the star topology. The host owner is the central hub across guil
 - **Guest**: all captures `Feed` only the relay mixer (no local cross-channel mixing). **Channel mixers are not created.** Host relay packets arrive on `relayOpusIn` and are written directly to speaker `chOut`s as raw Opus via `ally.Session.AddGuild` (no bridge, no mixer) — same delivery path as `AllyListener`.
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TD
     subgraph HOST["Host Guild"]
         subgraph HChA["Channel A (owner = hub)"]

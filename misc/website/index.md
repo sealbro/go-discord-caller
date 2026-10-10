@@ -32,6 +32,12 @@ description: >-
 One **owner / caller bot** listens in a voice channel and captures audio from users with a configured role, then fans it out to a pool of **speaker bots**, each playing back in its own channel — in the same server or in allied servers via a relay code.
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 graph TB
     subgraph Discord Guild
         CR["🎙️ Capture Role - 'caller'"]
@@ -65,6 +71,12 @@ See the [detailed voice flow](voice-flow.md) and [end-to-end latency breakdown](
 Who hears who depends on the mode (🟢 solid = can hear, 🔇 red dashed = cannot hear).
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TB
     subgraph M1["1️⃣ One caller — /start mode:one"]
         direction LR

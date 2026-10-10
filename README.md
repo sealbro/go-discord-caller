@@ -20,6 +20,12 @@ Want to see it in action without hosting anything? Click the **Try the bot** bad
 [Voice Flow](docs/VOICE_FLOW.md) – detailed signal flow and component interaction diagrams
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 graph TB
     subgraph Discord Guild
         CR["🎙️ Capture Role - 'caller'"]
@@ -63,6 +69,12 @@ All speaker gateways are pre-connected at startup. When a voice raid is started,
 Who hears who depends on the mode (🟢 solid = can hear, 🔇 red dashed = cannot hear).
 
 ```mermaid
+---
+config:
+  theme: default
+  look: classic
+  layout: dagre
+---
 flowchart TB
     subgraph M1["1️⃣ One caller — /start mode:one"]
         direction LR

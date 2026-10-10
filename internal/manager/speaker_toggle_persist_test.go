@@ -15,9 +15,7 @@ import (
 // A speaker disabled in /setup must stay disabled across a restart. Seeding
 // re-registers every pool bot in the guild as enabled, so a toggle held only in
 // memory is undone by the next process start, and the raid then waits out the
-// full join budget on a bot the operator switched off. Observed in production:
-// GoSpeaker09 was disabled, the process restarted 2026-10-05T16:20Z, and the
-// owner bot joined 20 s late in every raid after that.
+// full join budget on a bot the operator switched off.
 func TestToggleSpeaker_DisabledSurvivesRestart(t *testing.T) {
 	const speakerID = snowflake.ID(500)
 	path := filepath.Join(t.TempDir(), "store.yaml")

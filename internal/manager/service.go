@@ -247,7 +247,7 @@ func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
 		if !m.isGuildMember(guildID, botUserID) {
 			continue
 		}
-		newSpeaker, err := m.newSpeaker(botUserID)
+		newSpeaker, err := m.newSpeaker(guildID, botUserID)
 		speakers = append(speakers, initSpeaker{botUserID, newSpeaker, err})
 	}
 
@@ -544,7 +544,7 @@ func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) 
 	return ChannelAccessWarning{}, false
 }
 
-func (m *Service) newSpeaker(botUserID snowflake.ID) (*guild.Speaker, error) {
+func (m *Service) newSpeaker(guildID, botUserID snowflake.ID) (*guild.Speaker, error) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok {
 		return nil, fmt.Errorf("new speaker: no client for bot %s", botUserID)
@@ -557,6 +557,6 @@ func (m *Service) newSpeaker(botUserID snowflake.ID) (*guild.Speaker, error) {
 	return &guild.Speaker{
 		ID:       user.ID,
 		Username: user.Username,
-		Enabled:  true,
+		Enabled:  m.store.IsSpeakerEnabled(guildID, user.ID),
 	}, nil
 }

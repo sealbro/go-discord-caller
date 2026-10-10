@@ -261,6 +261,43 @@ func TestYAMLStore_LocaleUnbindPersisted(t *testing.T) {
 	}
 }
 
+// TestYAMLStore_SpeakerEnabledPersisted verifies that disabling a speaker is
+// persisted per guild and that re-enabling clears it.
+func TestYAMLStore_SpeakerEnabledPersisted(t *testing.T) {
+	s := newTestStore(t)
+
+	if !s.IsSpeakerEnabled(guild1, user1) {
+		t.Error("speakers must be enabled unless explicitly disabled")
+	}
+
+	s.BindChannel(guild1, user1, chan1)
+	s.SetSpeakerEnabled(guild1, user1, false)
+	s.SetSpeakerEnabled(guild2, user2, false)
+	s.SetSpeakerEnabled(guild1, user2, false)
+	s.SetSpeakerEnabled(guild1, user2, true)
+
+	s2 := reopen(t, s)
+
+	if s2.IsSpeakerEnabled(guild1, user1) {
+		t.Error("disabled speaker should be persisted")
+	}
+	if ch, ok := s2.GetBoundChannel(guild1, user1); !ok || ch != chan1 {
+		t.Errorf("disabled speaker's channel = %v,%v; want %v,true", ch, ok, chan1)
+	}
+	if s2.IsSpeakerEnabled(guild2, user2) {
+		t.Error("disabled speaker without a channel should be persisted")
+	}
+	if _, ok := s2.GetBoundChannel(guild2, user2); ok {
+		t.Error("disabled speaker without a channel must not load as bound")
+	}
+	if !s2.IsSpeakerEnabled(guild1, user2) {
+		t.Error("re-enabled speaker should not be persisted as disabled")
+	}
+	if !s2.IsSpeakerEnabled(guild2, user1) {
+		t.Error("disabling a speaker in one guild must not disable it in another")
+	}
+}
+
 // TestYAMLStore_PersistenceUnbind verifies that unbinds are persisted too.
 func TestYAMLStore_PersistenceUnbind(t *testing.T) {
 	s := newTestStore(t)
@@ -345,10 +382,11 @@ func TestYAMLStore_DebounceFlush(t *testing.T) {
 		if err == nil && len(data) > 0 {
 			probe := &YAMLStore{
 				path:       path,
-				channels:   make(map[channelKey]snowflake.ID),
+				channels:   make(map[botKey]snowflake.ID),
 				roles:      make(map[roleKey]snowflake.ID),
 				relayCodes: make(map[snowflake.ID]string),
 				locales:    make(map[snowflake.ID]string),
+				disabled:   make(map[botKey]struct{}),
 			}
 			if probe.load() == nil {
 				if _, ok := probe.GetBoundChannel(guild1, user1); ok {
@@ -374,10 +412,11 @@ func unmarshalYAML(data []byte) error {
 	tmp.Close()
 	ts := &YAMLStore{
 		path:       tmp.Name(),
-		channels:   make(map[channelKey]snowflake.ID),
+		channels:   make(map[botKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
 		locales:    make(map[snowflake.ID]string),
+		disabled:   make(map[botKey]struct{}),
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		flushed:    make(chan struct{}),

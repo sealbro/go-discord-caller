@@ -8,7 +8,7 @@ description: >-
 
 # Privacy Policy
 
-**Last updated: 1 October 2026**
+**Last updated: 10 October 2026**
 
 This policy covers the **hosted demo instance** of go-discord-caller — the bot
 you invite from this site. If you run the software yourself, you are the
@@ -41,7 +41,8 @@ if you do not wish to be relayed.
 The bot keeps a small configuration file per Discord server. It contains:
 
 - the server (guild) ID
-- the voice channel IDs bound to each speaker bot, and those bots' user IDs
+- the speaker bots' user IDs, the voice channel bound to each, and whether each
+  is enabled
 - the role IDs chosen as the capture role and the manager role
 - the server's relay code
 - the server's pinned language, if one was set

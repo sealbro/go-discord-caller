@@ -36,7 +36,7 @@ func (m *Service) SpeakersWithMissingChannel(guildID snowflake.ID) []ChannelAcce
 		if !bound {
 			continue
 		}
-		if _, live := m.liveBoundChannel(guildID, sp.ID); !live {
+		if _, exists := m.ownerClient.Caches.Channel(channelID); !exists {
 			missing = append(missing, ChannelAccessWarning{BotID: sp.ID, ChannelID: channelID})
 		}
 	}

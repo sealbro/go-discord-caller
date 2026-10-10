@@ -48,11 +48,11 @@ const saveDebounce = 500 * time.Millisecond
 type YAMLStore struct {
 	mu         sync.RWMutex
 	path       string
-	channels   map[channelKey]snowflake.ID
+	channels   map[botKey]snowflake.ID
 	roles      map[roleKey]snowflake.ID
 	relayCodes map[snowflake.ID]string
 	locales    map[snowflake.ID]string
-	disabled   map[speakerKey]struct{}
+	disabled   map[botKey]struct{}
 
 	dirtyCh chan struct{} // signals the flush goroutine
 	done    chan struct{} // closed by Close to stop the flush goroutine
@@ -63,11 +63,11 @@ type YAMLStore struct {
 func NewYAMLStore(path string) (*YAMLStore, error) {
 	s := &YAMLStore{
 		path:       path,
-		channels:   make(map[channelKey]snowflake.ID),
+		channels:   make(map[botKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
 		locales:    make(map[snowflake.ID]string),
-		disabled:   make(map[speakerKey]struct{}),
+		disabled:   make(map[botKey]struct{}),
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		flushed:    make(chan struct{}),
@@ -156,10 +156,10 @@ func (s *YAMLStore) load() error {
 		guildID := snowflake.ID(g.GuildID)
 		for _, c := range g.Channels {
 			if c.ChannelID != 0 {
-				s.channels[channelKey{snowflake.ID(c.UserID), guildID}] = snowflake.ID(c.ChannelID)
+				s.channels[botKey{snowflake.ID(c.UserID), guildID}] = snowflake.ID(c.ChannelID)
 			}
 			if c.Disabled {
-				s.disabled[speakerKey{snowflake.ID(c.UserID), guildID}] = struct{}{}
+				s.disabled[botKey{snowflake.ID(c.UserID), guildID}] = struct{}{}
 			}
 		}
 		for _, r := range g.Roles {
@@ -190,7 +190,7 @@ func (s *YAMLStore) save() error {
 	}
 
 	for k, v := range s.channels {
-		_, disabled := s.disabled[speakerKey(k)]
+		_, disabled := s.disabled[k]
 		g := ensureGuild(k.guildID)
 		g.Channels = append(g.Channels, yamlChannelEntry{
 			UserID:    uint64(k.userID),
@@ -214,7 +214,7 @@ func (s *YAMLStore) save() error {
 		g.Locale = locale
 	}
 	for k := range s.disabled {
-		if _, bound := s.channels[channelKey(k)]; bound {
+		if _, bound := s.channels[k]; bound {
 			continue
 		}
 		g := ensureGuild(k.guildID)
@@ -275,21 +275,21 @@ func (s *YAMLStore) save() error {
 func (s *YAMLStore) BindChannel(guildID, userID, channelID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.channels[channelKey{userID, guildID}] = channelID
+	s.channels[botKey{userID, guildID}] = channelID
 	s.markDirty()
 }
 
 func (s *YAMLStore) UnbindChannel(guildID, userID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.channels, channelKey{userID, guildID})
+	delete(s.channels, botKey{userID, guildID})
 	s.markDirty()
 }
 
 func (s *YAMLStore) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	ch, ok := s.channels[channelKey{userID, guildID}]
+	ch, ok := s.channels[botKey{userID, guildID}]
 	return ch, ok
 }
 
@@ -362,9 +362,9 @@ func (s *YAMLStore) SetSpeakerEnabled(guildID, userID snowflake.ID, enabled bool
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if enabled {
-		delete(s.disabled, speakerKey{userID, guildID})
+		delete(s.disabled, botKey{userID, guildID})
 	} else {
-		s.disabled[speakerKey{userID, guildID}] = struct{}{}
+		s.disabled[botKey{userID, guildID}] = struct{}{}
 	}
 	s.markDirty()
 }
@@ -372,6 +372,6 @@ func (s *YAMLStore) SetSpeakerEnabled(guildID, userID snowflake.ID, enabled bool
 func (s *YAMLStore) IsSpeakerEnabled(guildID, userID snowflake.ID) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, disabled := s.disabled[speakerKey{userID, guildID}]
+	_, disabled := s.disabled[botKey{userID, guildID}]
 	return !disabled
 }

@@ -382,7 +382,7 @@ func TestYAMLStore_DebounceFlush(t *testing.T) {
 		if err == nil && len(data) > 0 {
 			probe := &YAMLStore{
 				path:       path,
-				channels:   make(map[channelKey]snowflake.ID),
+				channels:   make(map[botKey]snowflake.ID),
 				roles:      make(map[roleKey]snowflake.ID),
 				relayCodes: make(map[snowflake.ID]string),
 				locales:    make(map[snowflake.ID]string),
@@ -411,7 +411,7 @@ func unmarshalYAML(data []byte) error {
 	tmp.Close()
 	ts := &YAMLStore{
 		path:       tmp.Name(),
-		channels:   make(map[channelKey]snowflake.ID),
+		channels:   make(map[botKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
 		locales:    make(map[snowflake.ID]string),

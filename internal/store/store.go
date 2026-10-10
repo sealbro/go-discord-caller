@@ -19,14 +19,8 @@ const (
 	RoleTypeManager RoleType = "manager"
 )
 
-// channelKey is the composite key for a voice-channel binding.
-type channelKey struct {
-	userID  snowflake.ID
-	guildID snowflake.ID
-}
-
-// speakerKey identifies a speaker bot within a guild.
-type speakerKey struct {
+// botKey identifies a bot within a guild.
+type botKey struct {
 	userID  snowflake.ID
 	guildID snowflake.ID
 }
@@ -96,39 +90,39 @@ func uniqueAllyCode(existing map[snowflake.ID]string) string {
 // InMemoryStore is a thread-safe in-memory implementation of Store.
 type InMemoryStore struct {
 	mu         sync.RWMutex
-	channels   map[channelKey]snowflake.ID // (userID, guildID) -> channelID
-	roles      map[roleKey]snowflake.ID    // (guildID, roleType) -> roleID
-	relayCodes map[snowflake.ID]string     // guildID -> relay code
-	locales    map[snowflake.ID]string     // guildID -> pinned bot locale
-	disabled   map[speakerKey]struct{}     // speakers excluded from raids
+	channels   map[botKey]snowflake.ID  // (userID, guildID) -> channelID
+	roles      map[roleKey]snowflake.ID // (guildID, roleType) -> roleID
+	relayCodes map[snowflake.ID]string  // guildID -> relay code
+	locales    map[snowflake.ID]string  // guildID -> pinned bot locale
+	disabled   map[botKey]struct{}      // speakers excluded from raids
 }
 
 func NewInMemoryStore() *InMemoryStore {
 	return &InMemoryStore{
-		channels:   make(map[channelKey]snowflake.ID),
+		channels:   make(map[botKey]snowflake.ID),
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
 		locales:    make(map[snowflake.ID]string),
-		disabled:   make(map[speakerKey]struct{}),
+		disabled:   make(map[botKey]struct{}),
 	}
 }
 
 func (s *InMemoryStore) BindChannel(guildID, userID, channelID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.channels[channelKey{userID, guildID}] = channelID
+	s.channels[botKey{userID, guildID}] = channelID
 }
 
 func (s *InMemoryStore) UnbindChannel(guildID, userID snowflake.ID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.channels, channelKey{userID, guildID})
+	delete(s.channels, botKey{userID, guildID})
 }
 
 func (s *InMemoryStore) GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	ch, ok := s.channels[channelKey{userID, guildID}]
+	ch, ok := s.channels[botKey{userID, guildID}]
 	return ch, ok
 }
 
@@ -196,16 +190,16 @@ func (s *InMemoryStore) SetSpeakerEnabled(guildID, userID snowflake.ID, enabled 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if enabled {
-		delete(s.disabled, speakerKey{userID, guildID})
+		delete(s.disabled, botKey{userID, guildID})
 		return
 	}
-	s.disabled[speakerKey{userID, guildID}] = struct{}{}
+	s.disabled[botKey{userID, guildID}] = struct{}{}
 }
 
 func (s *InMemoryStore) IsSpeakerEnabled(guildID, userID snowflake.ID) bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, disabled := s.disabled[speakerKey{userID, guildID}]
+	_, disabled := s.disabled[botKey{userID, guildID}]
 	return !disabled
 }
 

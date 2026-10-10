@@ -11,9 +11,11 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+	"go.opentelemetry.io/otel/metric/noop"
 
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // channelsRest answers the guild-channel fetch warmGuildCache makes.
@@ -140,4 +142,29 @@ func TestSpeakersWithMissingChannel(t *testing.T) {
 	if len(got) != 1 || got[0] != want {
 		t.Errorf("got %+v, want [%+v]", got, want)
 	}
+}
+
+// When the owner bot's channel is deleted mid-raid, Discord also disconnects
+// the bot, and the reconnect that follows can run before the binding is removed.
+// It must give up on the gone channel rather than apply audio to a connection
+// that was never opened.
+func TestReconnectBotChannel_GivesUpWhenOwnerChannelIsGone(t *testing.T) {
+	st := store.NewInMemoryStore()
+	st.BindChannel(testGuildID, testBotID, deletedChannel)
+
+	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("channel_bindings_test"))
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+	m := bindingsService(st, &bot.Client{VoiceManager: &recordingVoiceManager{}, Caches: cachesWithChannels(t, testGuildID, keptChannel)})
+	m.metrics = metrics
+	m.statuses[testGuildID] = &guild.Status{GuildID: testGuildID, Session: &guild.Session{GuildID: testGuildID}}
+	m.storeApplier(testGuildID, testBotID, m.buildApplier(testGuildID, testBotID, nil, nil, nil))
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("reconnect to a deleted owner channel panicked: %v", r)
+		}
+	}()
+	m.ReconnectBotChannel(context.Background(), testGuildID, testBotID)
 }

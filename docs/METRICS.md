@@ -26,7 +26,7 @@ and type suffixes enabled — the defaults):
 | unit `s` | `_seconds` suffix |
 | monotonic counter | `_total` suffix (not doubled if the name already ends in `total`) |
 | `Float64Histogram` | `_bucket` / `_sum` / `_count` series |
-| `UpDownCounter`, `Gauge`, `ObservableGauge` | gauge, no suffix |
+| `UpDownCounter`, `ObservableUpDownCounter`, `Gauge`, `ObservableGauge` | gauge, no suffix |
 
 > Names vary if the exporter is configured with `without_units` /
 > `without_type_suffix`, or if Prometheus is run with
@@ -43,7 +43,7 @@ All instruments carry the resource attribute `service.name="go-discord-caller"`.
 |-----------------|------|-------------------|------------|-------------|
 | `gdc.discord.guild`  | ObservableGauge | `gdc_discord_guild`  | `guild_id`, `guild_name` | Info gauge (always `1`) for known guilds. Emitted from `internal/manager/service.go`. |
 | `gdc.bot.online`     | ObservableGauge | `gdc_bot_online`     | `user_id`, `guild_id`    | `1` while a bot is a registered member of the guild; absent otherwise. From `internal/manager/service.go`. |
-| `gdc.voice.callers`  | UpDownCounter   | `gdc_voice_callers`  | `guild_id`, `channel_id` | Users with the caller role currently in a voice channel. From `internal/bot/handlers.go`. |
+| `gdc.voice.callers`  | ObservableUpDownCounter | `gdc_voice_callers`  | `guild_id`, `channel_id` | Non-bot users with the caller role currently in a voice channel, recounted from the owner bot's cache on each collection; channels with none are absent. From `internal/manager/service.go`. |
 | `gdc.command.started.total` | Counter | `gdc_command_started_total` | `command`, `guild_id` ⚠️ | Slash command invocations **entering** the handler. Recorded before the handler runs, so a handler that never returns is still counted. From `internal/bot/middleware.go`. |
 | `gdc.command.total`  | Counter         | `gdc_command_total`  | `command`, `guild_id` ⚠️ | Slash command invocations that **completed**. A sustained `gdc_command_started_total - gdc_command_total` means handlers went in and never came out. From `internal/bot/middleware.go`. |
 | `gdc.command.duration` | Histogram (`s`) | `gdc_command_duration_seconds` (`_bucket`/`_sum`/`_count`) | `command`, `guild_id` ⚠️ | Slash command execution duration. From `internal/bot/middleware.go`. |

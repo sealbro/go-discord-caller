@@ -10,10 +10,10 @@ import (
 // BotMetrics tracks Discord entity info, bot presence, voice caller counts,
 // and slash command observability.
 type BotMetrics struct {
-	meter        metric.Meter // retained for RegisterBotOnline, RegisterGuildInfo
+	meter        metric.Meter // retained for the Register* callbacks
 	guildInfo    metric.Int64ObservableGauge
 	botOnline    metric.Int64ObservableGauge
-	voiceCallers metric.Int64UpDownCounter
+	voiceCallers metric.Int64ObservableUpDownCounter
 	cmdStarted   metric.Int64Counter
 	cmdCount     metric.Int64Counter
 	cmdDuration  metric.Float64Histogram
@@ -31,7 +31,7 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
-	if b.voiceCallers, err = meter.Int64UpDownCounter("gdc.voice.callers",
+	if b.voiceCallers, err = meter.Int64ObservableUpDownCounter("gdc.voice.callers",
 		metric.WithDescription("Number of users with the caller role currently in a voice channel, per guild."),
 	); err != nil {
 		return
@@ -91,9 +91,17 @@ func (b *BotMetrics) ObserveGuildInfo(o metric.Observer, guildID, guildName stri
 	)
 }
 
-// VoiceCallerAdd adjusts the voice caller counter for a guild/channel by delta.
-func (b *BotMetrics) VoiceCallerAdd(ctx context.Context, delta int64, guildID, channelID string) {
-	b.voiceCallers.Add(ctx, delta,
+// RegisterVoiceCallers registers cb as the observable callback for the voice
+// callers gauge.
+func (b *BotMetrics) RegisterVoiceCallers(cb metric.Callback) error {
+	_, err := b.meter.RegisterCallback(cb, b.voiceCallers)
+	return err
+}
+
+// ObserveVoiceCallers emits the number of callers in a guild's voice channel via o.
+// Call inside the callback registered with RegisterVoiceCallers.
+func (b *BotMetrics) ObserveVoiceCallers(o metric.Observer, count int64, guildID, channelID string) {
+	o.ObserveInt64(b.voiceCallers, count,
 		metric.WithAttributes(
 			attribute.String("guild_id", guildID),
 			attribute.String("channel_id", channelID),

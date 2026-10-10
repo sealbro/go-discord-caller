@@ -16,10 +16,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric/noop"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // fakeManager implements ManagerService and records calls relevant to the
@@ -190,45 +187,6 @@ func newTestBotMetrics(t *testing.T) *telemetry.BotMetrics {
 	return &m.Bot
 }
 
-// newRecordingBotMetrics constructs BotMetrics backed by an SDK meter with a
-// manual reader, so tests can assert the actual value recorded for
-// gdc.voice.callers rather than merely that the call did not panic.
-// The returned func collects and sums the counter's data points per channel_id.
-func newRecordingBotMetrics(t *testing.T) (*telemetry.BotMetrics, func() map[string]int64) {
-	t.Helper()
-	reader := sdkmetric.NewManualReader()
-	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	m, err := telemetry.NewMetrics(provider.Meter("handlers_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
-	collect := func() map[string]int64 {
-		t.Helper()
-		var rm metricdata.ResourceMetrics
-		if err := reader.Collect(context.Background(), &rm); err != nil {
-			t.Fatalf("Collect: %v", err)
-		}
-		out := map[string]int64{}
-		for _, sm := range rm.ScopeMetrics {
-			for _, md := range sm.Metrics {
-				if md.Name != "gdc.voice.callers" {
-					continue
-				}
-				sum, ok := md.Data.(metricdata.Sum[int64])
-				if !ok {
-					t.Fatalf("gdc.voice.callers: unexpected data type %T", md.Data)
-				}
-				for _, dp := range sum.DataPoints {
-					ch, _ := dp.Attributes.Value(attribute.Key("channel_id"))
-					out[ch.AsString()] += dp.Value
-				}
-			}
-		}
-		return out
-	}
-	return &m.Bot, collect
-}
-
 // waitFor polls until cond returns true or the deadline elapses. Used to
 // rendezvous with handler goroutines spawned via `go m.X(...)`.
 func waitFor(t *testing.T, cond func() bool, msg string) {
@@ -396,7 +354,7 @@ func TestOnGuildMemberLeave_BotOnly(t *testing.T) {
 func TestOnVoiceLeave_BotReconnectsWhenSessionActive(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }}
-	h := onVoiceLeave(f, newTestBotMetrics(t))
+	h := onVoiceLeave(f)
 
 	guildID := snowflake.ID(50)
 	botID := snowflake.ID(99)
@@ -424,7 +382,7 @@ func TestOnVoiceLeave_BotReconnectsWhenSessionActive(t *testing.T) {
 func TestOnVoiceLeave_BotIgnoredWithoutSession(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{} // HasActiveSession defaults to false
-	h := onVoiceLeave(f, newTestBotMetrics(t))
+	h := onVoiceLeave(f)
 
 	chID := snowflake.ID(1001)
 	h(&events.GuildVoiceLeave{
@@ -458,7 +416,7 @@ func TestOnVoiceLeave_HumanUpdatesMixerAndCallerCount(t *testing.T) {
 			f := &fakeManager{
 				hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return tc.hasCallerRole },
 			}
-			h := onVoiceLeave(f, newTestBotMetrics(t))
+			h := onVoiceLeave(f)
 
 			guildID := snowflake.ID(50)
 			userID := snowflake.ID(123)
@@ -486,123 +444,13 @@ func TestOnVoiceLeave_HumanUpdatesMixerAndCallerCount(t *testing.T) {
 	}
 }
 
-// TestOnVoiceMove_CallerCountFollowsUser pins the bookkeeping a move must do:
-// the origin channel loses the caller and the destination gains them.
-func TestOnVoiceMove_CallerCountFollowsUser(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true }}
-	metrics, collect := newRecordingBotMetrics(t)
-	h := onVoiceMove(f, metrics)
-
-	guildID := snowflake.ID(50)
-	userID := snowflake.ID(123)
-	oldCh := snowflake.ID(1001)
-	newCh := snowflake.ID(2002)
-	h(&events.GuildVoiceMove{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &newCh},
-			Member:       discord.Member{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}},
-		},
-		OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &oldCh},
-	})
-
-	got := collect()
-	if got[oldCh.String()] != -1 {
-		t.Errorf("origin channel %s: want -1 got %d", oldCh, got[oldCh.String()])
-	}
-	if got[newCh.String()] != 1 {
-		t.Errorf("destination channel %s: want 1 got %d", newCh, got[newCh.String()])
-	}
-}
-
-// TestOnVoiceMove_NonCallerNotCounted verifies the role gate applies to moves
-// just as it does to joins and leaves.
-func TestOnVoiceMove_NonCallerNotCounted(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return false }}
-	metrics, collect := newRecordingBotMetrics(t)
-	h := onVoiceMove(f, metrics)
-
-	oldCh := snowflake.ID(1001)
-	newCh := snowflake.ID(2002)
-	h(&events.GuildVoiceMove{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: 50, UserID: 123, ChannelID: &newCh},
-			Member:       discord.Member{User: discord.User{ID: 123}},
-		},
-		OldVoiceState: discord.VoiceState{GuildID: 50, UserID: 123, ChannelID: &oldCh},
-	})
-
-	if got := collect(); len(got) != 0 {
-		t.Errorf("non-caller must not be counted; got %v", got)
-	}
-}
-
-// TestVoiceCallerCount_JoinMoveLeaveNetsToZero is the regression test for the
-// production bug: a caller who joins, moves, then leaves must leave the counter
-// at zero. Before onVoiceMove did any bookkeeping the destination channel was
-// never incremented but was still decremented on leave, so this netted to -1
-// per move and the gauge drifted permanently negative.
-func TestVoiceCallerCount_JoinMoveLeaveNetsToZero(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true }}
-	metrics, collect := newRecordingBotMetrics(t)
-
-	guildID := snowflake.ID(50)
-	userID := snowflake.ID(123)
-	oldCh := snowflake.ID(1001)
-	newCh := snowflake.ID(2002)
-	member := discord.Member{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}}
-
-	onVoiceJoin(f, metrics)(&events.GuildVoiceJoin{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &oldCh},
-			Member:       member,
-		},
-	})
-	onVoiceMove(f, metrics)(&events.GuildVoiceMove{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &newCh},
-			Member:       member,
-		},
-		OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &oldCh},
-	})
-	onVoiceLeave(f, metrics)(&events.GuildVoiceLeave{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: nil},
-			Member:       member,
-		},
-		OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &newCh},
-	})
-
-	got := collect()
-	var total int64
-	for _, v := range got {
-		total += v
-	}
-	if total != 0 {
-		t.Errorf("join+move+leave must net to zero; got %d (per-channel %v)", total, got)
-	}
-	for ch, v := range got {
-		if v < 0 {
-			t.Errorf("channel %s went negative (%d); caller counter must never drop below zero", ch, v)
-		}
-	}
-}
-
 // TestOnVoiceLeave_NilOldChannelDoesNotPanic covers the guard on
-// OldVoiceState.ChannelID: a caller-role user whose old channel is absent must
-// not dereference a nil pointer.
+// OldVoiceState.ChannelID: a leave whose old channel is absent must not
+// dereference a nil pointer.
 func TestOnVoiceLeave_NilOldChannelDoesNotPanic(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true }}
-	metrics, collect := newRecordingBotMetrics(t)
-	h := onVoiceLeave(f, metrics)
+	h := onVoiceLeave(f)
 
 	h(&events.GuildVoiceLeave{
 		GenericGuildVoiceState: &events.GenericGuildVoiceState{
@@ -613,15 +461,15 @@ func TestOnVoiceLeave_NilOldChannelDoesNotPanic(t *testing.T) {
 		OldVoiceState: discord.VoiceState{GuildID: 50, UserID: 123, ChannelID: nil},
 	})
 
-	if got := collect(); len(got) != 0 {
-		t.Errorf("no channel to attribute the leave to; want no data points, got %v", got)
+	if got := f.snapshotCalls().autoRouteCalls; len(got) != 0 {
+		t.Errorf("no channel to recompute after the leave; want no AutoRoute calls, got %v", got)
 	}
 }
 
 func TestOnVoiceMove_BotDelegatesToManager(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{}
-	h := onVoiceMove(f, newTestBotMetrics(t))
+	h := onVoiceMove(f)
 
 	guildID := snowflake.ID(50)
 	botID := snowflake.ID(99)
@@ -653,7 +501,7 @@ func TestOnVoiceMove_BotDelegatesToManager(t *testing.T) {
 func TestOnVoiceMove_HumanTriggersAutoRoute(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{}
-	h := onVoiceMove(f, newTestBotMetrics(t))
+	h := onVoiceMove(f)
 
 	guildID := snowflake.ID(50)
 	newCh := snowflake.ID(2002)
@@ -681,7 +529,7 @@ func TestOnVoiceJoin_HumanUpdatesPauseAndNotifies(t *testing.T) {
 	f := &fakeManager{
 		hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true },
 	}
-	h := onVoiceJoin(f, newTestBotMetrics(t))
+	h := onVoiceJoin(f)
 
 	guildID := snowflake.ID(50)
 	userID := snowflake.ID(123)
@@ -706,64 +554,12 @@ func TestOnVoiceJoin_HumanUpdatesPauseAndNotifies(t *testing.T) {
 	}
 }
 
-func TestOnGuildAvailable_MemberCacheMissThenLeave_NetsToZero(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true }}
-	metrics, collect := newRecordingBotMetrics(t)
-
-	guildID := snowflake.ID(50)
-	userID := snowflake.ID(123)
-	chID := snowflake.ID(1001)
-
-	client := newTestClient()
-
-	onGuildAvailable(f, metrics)(&events.GuildAvailable{
-		GenericGuild: &events.GenericGuild{
-			GenericEvent: events.NewGenericEvent(client, 0, 0),
-			GuildID:      guildID,
-		},
-		Guild: discord.GatewayGuild{
-			RestGuild: discord.RestGuild{Guild: discord.Guild{ID: guildID}},
-			VoiceStates: []discord.VoiceState{
-				{GuildID: guildID, UserID: userID, ChannelID: &chID},
-			},
-			Members: []discord.Member{
-				{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}},
-			},
-		},
-	})
-
-	if got := collect(); got[chID.String()] != 1 {
-		t.Fatalf("seed should count the caller already in the channel from Guild.Members; got %v", got)
-	}
-
-	// The user leaves later; the leave event carries a full Member with
-	// RoleIDs regardless of what the cache had, so this always fires.
-	onVoiceLeave(f, metrics)(&events.GuildVoiceLeave{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(client, 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: nil},
-			Member:       discord.Member{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}},
-		},
-		OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &chID},
-	})
-
-	got := collect()
-	var total int64
-	for _, v := range got {
-		total += v
-	}
-	if total != 0 {
-		t.Errorf("seed-then-leave must net to zero; got %d (per-channel %v) — a member-cache miss during onGuildAvailable let this caller leave uncounted, driving gdc.voice.callers negative", total, got)
-	}
-}
-
 func TestOnVoiceJoin_BotIsSkipped(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{
 		isBotFn: func(u discord.User) bool { return u.Bot },
 	}
-	h := onVoiceJoin(f, newTestBotMetrics(t))
+	h := onVoiceJoin(f)
 
 	chID := snowflake.ID(1001)
 	h(&events.GuildVoiceJoin{

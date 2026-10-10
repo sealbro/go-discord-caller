@@ -45,8 +45,8 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 	if !m.HasActiveSession(guildID) {
 		return
 	}
-	channelID, ok := m.store.GetBoundChannel(guildID, botUserID)
-	if !ok || channelID == 0 {
+	channelID, ok := m.liveBoundChannel(guildID, botUserID)
+	if !ok {
 		return
 	}
 	var gv pool.GuildVoice
@@ -110,6 +110,9 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 			)
 			return
 		}
+	}
+	if conn == nil {
+		return // the channel was deleted after the check above
 	}
 	// Re-apply voice provider/receiver to the new conn so audio flows again.
 	// Pass ctx (the reconnect context) so the applier's FrameDroppers use a live,

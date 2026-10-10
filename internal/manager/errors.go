@@ -34,4 +34,8 @@ var (
 	// first: it skips speakers with no bound channel, so an entirely unbound
 	// guild passes the permission pre-flight cleanly.
 	ErrNoBoundSpeakers = errors.New("no speaker bots are configured in this server: run /setup → Bind Speakers to enable a speaker and pick its voice channel")
+
+	// ErrNoOwnerChannel is returned when starting a raid while the owner bot has
+	// no voice channel, either never bound or bound to one that was deleted.
+	ErrNoOwnerChannel = errors.New("the owner bot has no voice channel: run /setup and pick one")
 )

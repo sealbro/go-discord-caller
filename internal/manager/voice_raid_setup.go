@@ -41,6 +41,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	if len(candidates) == 0 {
 		return nil, ErrNoBoundSpeakers
 	}
+	candidates = m.withLiveChannel(guildID, candidates)
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.candidates", len(candidates)))
 
 	deaf := newDeafController(m, guildID)
@@ -90,6 +91,22 @@ func boundSpeakers(st store.Store, guildID snowflake.ID, speakers []guild.Speake
 		candidates = append(candidates, sp)
 	}
 	return candidates
+}
+
+// withLiveChannel drops the candidates whose bound channel no longer exists.
+func (m *Service) withLiveChannel(guildID snowflake.ID, candidates []guild.Speaker) []guild.Speaker {
+	live := make([]guild.Speaker, 0, len(candidates))
+	for _, sp := range candidates {
+		if _, ok := m.liveBoundChannel(guildID, sp.ID); ok {
+			live = append(live, sp)
+			continue
+		}
+		slog.Warn("speaker skipped: bound channel no longer exists",
+			slog.String("speakerID", sp.ID.String()),
+			slog.String("guildID", guildID.String()),
+		)
+	}
+	return live
 }
 
 // joinSpeakers joins the given candidate speakers in parallel; callers filter

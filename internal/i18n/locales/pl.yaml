@@ -31,16 +31,18 @@ raid.join_blocked_permissions: "❌ Nie można dołączyć do sesji relay: najpi
 raid.start_blocked_permissions: "❌ Nie można rozpocząć voice raidu: najpierw napraw uprawnienia botów."
 raid.join_failed: "❌ Nie udało się dołączyć do sesji relay `{{.Code}}`: {{.Err}}"
 raid.no_bound_speakers: "⚠️ Na tym serwerze nie skonfigurowano żadnych botów-głośników. Uruchom `/setup` → **Przypisz głośniki**, włącz głośnik i wybierz jego kanał głosowy, a następnie spróbuj ponownie.\n_Przypisania są osobne dla każdego serwera — kod relay nie przenosi konfiguracji z drugiego serwera._"
+raid.no_owner_channel: "⚠️ Bot główny nie ma kanału głosowego — mógł zostać usunięty. Uruchom `/setup`, wybierz kanał i spróbuj ponownie."
 raid.start_failed: "❌ Nie udało się rozpocząć voice raidu: {{.Err}}"
 raid.stop_failed: "❌ Nie udało się zatrzymać voice raidu: {{.Err}}"
 raid.joined: "🔴 **Dołączono do sesji relay** `{{.Code}}` jako {{.Mode}}. Speakerzy łączą się ze swoimi kanałami."
-raid.started: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów."
-raid.started_with_code: "🔴 **Voice raid rozpoczęty.** Wszyscy włączeni speakerzy dołączyli do swoich kanałów. Kod relay: `{{.Code}}`"
+raid.started: "🔴 **Voice raid rozpoczęty.** Speakerzy dołączyli do swoich kanałów."
+raid.started_with_code: "🔴 **Voice raid rozpoczęty.** Speakerzy dołączyli do swoich kanałów. Kod relay: `{{.Code}}`"
 raid.deafen_unavailable: "⚠️ Wskazówka: nadaj botowi uprawnienie **Wyciszaj słuch członków** i przenieś jego rolę nad boty głośnikowe, aby zmniejszyć obciążenie i ryzyko zakłóceń dźwięku."
 raid.stopped: "⚫ **Voice raid zatrzymany.** Wszyscy speakerzy opuścili swoje kanały."
 
 # ── Permissions warning ───────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Niektóre boty nie mogą uzyskać dostępu do swojego kanału (brak uprawnień Connect/Speak):**"
+raid.skipped_missing_channel: "\n\n⚠️ **Pominięte — ich kanał głosowy już nie istnieje (wybierz nowy w `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
 setup.main_title: "**Konfiguracja speakerów**"

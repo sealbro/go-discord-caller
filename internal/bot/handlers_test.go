@@ -117,6 +117,10 @@ func (f *fakeManager) CheckDeafenReadiness(snowflake.ID) manager.DeafenReadiness
 func (f *fakeManager) JoinSession(context.Context, snowflake.ID, context.CancelFunc, guild.RaidMode, ally.Code) (guild.RaidMode, error) {
 	return "", nil
 }
+func (f *fakeManager) SpeakersWithMissingChannel(snowflake.ID) []manager.ChannelAccessWarning {
+	return nil
+}
+func (f *fakeManager) ChannelDeleted(snowflake.ID, snowflake.ID) {}
 func (f *fakeManager) CheckGuildChannelAccess(snowflake.ID) []manager.ChannelAccessWarning {
 	return nil
 }

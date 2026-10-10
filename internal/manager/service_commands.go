@@ -82,6 +82,7 @@ func (m *Service) ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) e
 		return fmt.Errorf("toggle speaker: speaker %s not registered in guild %s", speakerID, guildID)
 	}
 	sp.Enabled = enabled
+	m.store.SetSpeakerEnabled(guildID, speakerID, enabled)
 	return nil
 }
 
@@ -104,7 +105,7 @@ func (m *Service) RemoveSpeaker(guildID, userID snowflake.ID) {
 // TrySeedMember checks whether a newly-joined guild member is an unregistered
 // pool speaker bot and registers it if so.
 func (m *Service) TrySeedMember(guildID, newUserID snowflake.ID) {
-	newSpeaker, err := m.newSpeaker(newUserID)
+	newSpeaker, err := m.newSpeaker(guildID, newUserID)
 	if err != nil {
 		return // not a pool bot or user unresolvable
 	}

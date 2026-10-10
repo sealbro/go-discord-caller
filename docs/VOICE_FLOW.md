@@ -31,7 +31,6 @@ The diagram below shows **copy mode** (the common case for OneCaller).
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---
@@ -96,7 +95,6 @@ The §1.1 multi-source rule means that with N≥3 captured channels the relay mi
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---
@@ -209,7 +207,6 @@ The relay bridge is the **only remaining decode goroutine** in the pipeline. It 
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---
@@ -347,7 +344,6 @@ Speaker sources decode + `Feed` into the hub mixer when in mix mode (and write r
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---
@@ -454,7 +450,6 @@ Both guilds use the star topology. The host owner is the central hub across guil
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---

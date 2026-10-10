@@ -34,7 +34,6 @@ One **owner / caller bot** listens in a voice channel and captures audio from us
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---
@@ -73,7 +72,6 @@ Who hears who depends on the mode (🟢 solid = can hear, 🔇 red dashed = cann
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---

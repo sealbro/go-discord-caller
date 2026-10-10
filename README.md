@@ -22,7 +22,6 @@ Want to see it in action without hosting anything? Click the **Try the bot** bad
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---
@@ -71,7 +70,6 @@ Who hears who depends on the mode (🟢 solid = can hear, 🔇 red dashed = cann
 ```mermaid
 ---
 config:
-  theme: default
   look: classic
   layout: dagre
 ---

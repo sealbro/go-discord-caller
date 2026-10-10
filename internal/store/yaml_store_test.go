@@ -386,6 +386,7 @@ func TestYAMLStore_DebounceFlush(t *testing.T) {
 				roles:      make(map[roleKey]snowflake.ID),
 				relayCodes: make(map[snowflake.ID]string),
 				locales:    make(map[snowflake.ID]string),
+				disabled:   make(map[botKey]struct{}),
 			}
 			if probe.load() == nil {
 				if _, ok := probe.GetBoundChannel(guild1, user1); ok {
@@ -415,6 +416,7 @@ func unmarshalYAML(data []byte) error {
 		roles:      make(map[roleKey]snowflake.ID),
 		relayCodes: make(map[snowflake.ID]string),
 		locales:    make(map[snowflake.ID]string),
+		disabled:   make(map[botKey]struct{}),
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		flushed:    make(chan struct{}),

@@ -31,6 +31,7 @@ raid.join_blocked_permissions: "❌ Impossible de rejoindre la session relay : c
 raid.start_blocked_permissions: "❌ Impossible de démarrer le voice raid : corrigez d'abord les permissions des bots."
 raid.join_failed: "❌ Échec de la connexion à la session relay `{{.Code}}` : {{.Err}}"
 raid.no_bound_speakers: "⚠️ Aucun bot haut-parleur n'est configuré sur ce serveur. Lancez `/setup` → **Lier les haut-parleurs**, activez un haut-parleur et choisissez son salon vocal, puis réessayez.\n_Les liaisons sont propres à chaque serveur : un code relay ne reprend pas la configuration de l'autre serveur._"
+raid.no_owner_channel: "⚠️ Le bot principal n'a pas de salon vocal — il a peut-être été supprimé. Lancez `/setup`, choisissez-en un, puis réessayez."
 raid.start_failed: "❌ Échec du démarrage du voice raid : {{.Err}}"
 raid.stop_failed: "❌ Échec de l'arrêt du voice raid : {{.Err}}"
 raid.joined: "🔴 **Connecté à la session relay** `{{.Code}}` en tant que {{.Mode}}. Les speakers se connectent à leurs salons."
@@ -41,6 +42,7 @@ raid.stopped: "⚫ **Voice raid arrêté.** Tous les speakers ont quitté leurs 
 
 # ── Permissions warning ───────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Certains bots ne peuvent pas accéder à leur salon (permission Connect/Speak manquante) :**"
+raid.skipped_missing_channel: "\n\n⚠️ **Ignorés — leur salon vocal n'existe plus (choisissez-en un nouveau dans `/setup`) :**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
 setup.main_title: "**Configuration des speakers**"

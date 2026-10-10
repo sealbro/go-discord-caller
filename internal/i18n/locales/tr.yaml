@@ -31,6 +31,7 @@ raid.join_blocked_permissions: "❌ Aktarım oturumuna katılınamıyor: önce b
 raid.start_blocked_permissions: "❌ Ses baskını başlatılamıyor: önce bot izinlerini düzeltin."
 raid.join_failed: "❌ `{{.Code}}` aktarım oturumuna katılma başarısız oldu: {{.Err}}"
 raid.no_bound_speakers: "⚠️ Bu sunucuda yapılandırılmış hoparlör botu yok. `/setup` → **Hoparlörleri Bağla** menüsünü açın, bir hoparlörü etkinleştirip ses kanalını seçin ve tekrar deneyin.\n_Bağlantılar sunucuya özeldir — aktarım kodu diğer sunucunun yapılandırmasını taşımaz._"
+raid.no_owner_channel: "⚠️ Ana botun ses kanalı yok — silinmiş olabilir. `/setup` ile bir kanal seçip tekrar deneyin."
 raid.start_failed: "❌ Ses baskını başlatılamadı: {{.Err}}"
 raid.stop_failed: "❌ Ses baskını durdurulamadı: {{.Err}}"
 raid.joined: "🔴 **Aktarım oturumuna katılındı:** `{{.Code}}`, mod: {{.Mode}}. Hoparlörler bağlı oldukları kanallara bağlanıyor."
@@ -41,6 +42,7 @@ raid.stopped: "⚫ **Ses baskını durduruldu.** Tüm hoparlörler kanallarında
 
 # ── İzin uyarısı ──────────────────────────────────────────────────────────────
 permissions.warning_header: "\n\n⚠️ **Bazı botlar kanallarına erişemiyor (Bağlan/Konuş izni eksik):**"
+raid.skipped_missing_channel: "\n\n⚠️ **Atlandı — ses kanalları artık mevcut değil (`/setup` ile yenisini seçin):**"
 
 # ── Kurulum arayüzü ───────────────────────────────────────────────────────────
 setup.main_title: "**Hoparlör Kurulumu**"

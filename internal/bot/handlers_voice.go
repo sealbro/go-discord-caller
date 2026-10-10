@@ -65,6 +65,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				h.followUp(e, loc.T("raid.join_blocked_permissions")+formatAccessWarnings(loc, warnings))
 				return
 			}
+			skipped := formatSkippedSpeakers(loc, h.manager.SpeakersWithMissingChannel(guildID))
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
 				cancelFunc()
@@ -80,10 +81,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.already_active"))
 					return
 				}
-				h.followUp(e, loc.T("raid.join_failed", "Code", code, "Err", err.Error()))
+				h.followUp(e, loc.T("raid.join_failed", "Code", code, "Err", err.Error())+skipped)
 				return
 			}
-			h.followUp(e, loc.T("raid.joined", "Code", code, "Mode", effectiveMode.Pretty(loc)))
+			h.followUp(e, loc.T("raid.joined", "Code", code, "Mode", effectiveMode.Pretty(loc))+skipped)
 		}()
 		return nil
 	}
@@ -107,6 +108,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			h.followUp(e, loc.T("raid.start_blocked_permissions")+formatAccessWarnings(loc, warnings))
 			return
 		}
+		skipped := formatSkippedSpeakers(loc, h.manager.SpeakersWithMissingChannel(guildID))
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
@@ -120,7 +122,11 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				h.followUp(e, loc.T("raid.already_active"))
 				return
 			}
-			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error()))
+			if errors.Is(err, manager.ErrNoOwnerChannel) {
+				h.followUp(e, loc.T("raid.no_owner_channel"))
+				return
+			}
+			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error())+skipped)
 			return
 		}
 		var msg string
@@ -135,6 +141,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		if readiness := h.manager.CheckDeafenReadiness(guildID); !readiness.OK() {
 			msg += "\n\n" + loc.T("raid.deafen_unavailable")
 		}
+		msg += skipped
 		slog.InfoContext(cmdCtx, "voice raid started", slog.String("relayCode", relayCode))
 		h.followUp(e, msg)
 	}()

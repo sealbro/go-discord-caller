@@ -230,9 +230,10 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 }
 
 // ownerVoice returns a GuildVoice for the owner bot in guildID, bound to its
-// configured channel. Use Join/Leave on the result to manage the connection.
+// configured channel, or to none when that channel no longer exists. Use
+// Join/Leave on the result to manage the connection.
 func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
-	channelID, _ := m.store.GetBoundChannel(guildID, m.ownerBotID)
+	channelID, _ := m.liveBoundChannel(guildID, m.ownerBotID)
 	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID).ForBot(m.ownerBotID)
 }
 
@@ -499,9 +500,17 @@ func (m *Service) warmGuildCache(guildID snowflake.ID) {
 			slog.Any("err", err),
 		)
 	} else {
+		existing := make(map[snowflake.ID]struct{}, len(channels))
 		for _, ch := range channels {
 			m.ownerClient.Caches.AddChannel(ch)
+			existing[ch.ID()] = struct{}{}
 		}
+		// The fetched list is authoritative, so a binding missing from it is
+		// stale. A failed fetch proves nothing and leaves bindings alone.
+		m.unbindChannels(guildID, func(channelID snowflake.ID) bool {
+			_, ok := existing[channelID]
+			return !ok
+		})
 		slog.Debug("warmGuildCache: populated channel cache",
 			slog.String("guildID", guildID.String()),
 			slog.Int("count", len(channels)),

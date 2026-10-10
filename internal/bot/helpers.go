@@ -31,10 +31,20 @@ func statusEmoji(enabled bool) string {
 // formatAccessWarnings builds a Discord-formatted warning block from the access check
 // results. Returns "" when there are no warnings.
 func formatAccessWarnings(loc *i18n.Localizer, warnings []manager.ChannelAccessWarning) string {
+	return formatBotChannels(loc.T("permissions.warning_header"), warnings)
+}
+
+// formatSkippedSpeakers lists the speakers a raid skipped because their bound
+// channel no longer exists. Returns "" when none were skipped.
+func formatSkippedSpeakers(loc *i18n.Localizer, skipped []manager.ChannelAccessWarning) string {
+	return formatBotChannels(loc.T("raid.skipped_missing_channel"), skipped)
+}
+
+func formatBotChannels(header string, warnings []manager.ChannelAccessWarning) string {
 	if len(warnings) == 0 {
 		return ""
 	}
-	msg := loc.T("permissions.warning_header")
+	msg := header
 	for _, w := range warnings {
 		msg += fmt.Sprintf("\n- <@%s> → <#%s>", w.BotID, w.ChannelID)
 	}

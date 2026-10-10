@@ -61,7 +61,7 @@ func TestStopVoiceRaid_AbortsAStartStillInFlight(t *testing.T) {
 		},
 		store:       st,
 		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: speakerVM, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{VoiceManager: ownerVM, Caches: cache.New(), Rest: stubRest{}},
+		ownerClient: &bot.Client{VoiceManager: ownerVM, Caches: cachesWithChannels(t, testGuildID, ownerChannelID, speakerChannelID), Rest: stubRest{}},
 		ownerBotID:  testBotID,
 		sessions:    ally.NewManager(),
 		metrics:     metrics,

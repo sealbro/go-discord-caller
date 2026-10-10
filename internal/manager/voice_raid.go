@@ -277,6 +277,11 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	setupCtx, endSetup := startPhase(ctx, "voice.session.setup")
 	defer func() { endSetup(err) }()
 
+	if _, ok := m.liveBoundChannel(guildID, m.ownerBotID); !ok {
+		endSpanErr(span, ErrNoOwnerChannel)
+		return "", ErrNoOwnerChannel
+	}
+
 	gm := m.metrics.ForGuild(ctx, guildID)
 	allowUser := m.buildAllowUserFilter(guildID)
 	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm)

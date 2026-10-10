@@ -42,6 +42,7 @@ type SessionManager interface {
 	HasActiveSession(guildID snowflake.ID) bool
 	AutoRoute(guildID, channelID snowflake.ID)
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
+	SpeakersWithMissingChannel(guildID snowflake.ID) []manager.ChannelAccessWarning
 	EnsureGuildReady(guildID snowflake.ID)
 	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 	OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID)
@@ -55,6 +56,7 @@ type BindingManager interface {
 	BindChannel(guildID, userID, channelID snowflake.ID)
 	UnbindChannel(guildID, userID snowflake.ID)
 	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
+	ChannelDeleted(guildID, channelID snowflake.ID)
 	OwnerBotID() snowflake.ID
 	BindLocale(guildID snowflake.ID, locale string)
 	UnbindLocale(guildID snowflake.ID)

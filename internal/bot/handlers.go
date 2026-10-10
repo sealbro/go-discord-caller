@@ -27,6 +27,7 @@ func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics, sy
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate(managerSvc)),
+		bot.NewListenerFunc(onGuildChannelDelete(managerSvc)),
 		bot.NewListenerFunc(onVoiceJoin(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
 		bot.NewListenerFunc(onVoiceMove(managerSvc, metrics)),
@@ -119,6 +120,14 @@ func onGuildMemberLeave(m ManagerService) func(leave *events.GuildMemberLeave) {
 		}
 
 		go m.RemoveSpeaker(e.GuildID, e.User.ID)
+	}
+}
+
+// onGuildChannelDelete unbinds the bots bound to a deleted channel, so a raid
+// never waits out a join to a channel that no longer exists.
+func onGuildChannelDelete(m ManagerService) func(*events.GuildChannelDelete) {
+	return func(e *events.GuildChannelDelete) {
+		go m.ChannelDeleted(e.GuildID, e.ChannelID)
 	}
 }
 

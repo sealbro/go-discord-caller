@@ -28,6 +28,17 @@ func voiceChannel(t *testing.T, guildID, channelID snowflake.ID) discord.GuildVo
 	return ch
 }
 
+// cachesWithChannels returns owner-bot caches in which guildID has exactly the
+// given voice channels.
+func cachesWithChannels(t *testing.T, guildID snowflake.ID, channelIDs ...snowflake.ID) cache.Caches {
+	t.Helper()
+	caches := cache.New(cache.WithCaches(cache.FlagsAll))
+	for _, channelID := range channelIDs {
+		caches.AddChannel(voiceChannel(t, guildID, channelID))
+	}
+	return caches
+}
+
 // speakerJoinAttempted runs setupSpeakers for one speaker bound to boundChannel,
 // with existingChannel the only voice channel the guild has, and reports whether
 // the speaker tried to join.
@@ -37,9 +48,6 @@ func speakerJoinAttempted(t *testing.T, boundChannel, existingChannel snowflake.
 
 	st := store.NewInMemoryStore()
 	st.BindChannel(testGuildID, speakerID, boundChannel)
-
-	ownerCaches := cache.New(cache.WithCaches(cache.FlagsAll))
-	ownerCaches.AddChannel(voiceChannel(t, testGuildID, existingChannel))
 
 	var joined atomic.Bool
 	speakerVM := &fakeVoiceManager{
@@ -61,7 +69,7 @@ func speakerJoinAttempted(t *testing.T, boundChannel, existingChannel snowflake.
 		},
 		store:       st,
 		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: speakerVM, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{Caches: ownerCaches, Rest: stubRest{}},
+		ownerClient: &bot.Client{Caches: cachesWithChannels(t, testGuildID, existingChannel), Rest: stubRest{}},
 		ownerBotID:  testBotID,
 		metrics:     metrics,
 		reconnect:   newReconnectState(),

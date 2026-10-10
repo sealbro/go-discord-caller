@@ -2,14 +2,17 @@ package bot
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/bot/handlers"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
@@ -777,5 +780,53 @@ func TestOnVoiceJoin_BotIsSkipped(t *testing.T) {
 	if len(snap.notifyMemberCalls) != 0 || len(snap.autoRouteCalls) != 0 {
 		t.Errorf("bot join must short-circuit: notify=%d autoRoute=%d",
 			len(snap.notifyMemberCalls), len(snap.autoRouteCalls))
+	}
+}
+
+// TestVoiceCallerCount_CallerPresentAtStartup drives the events through disgo's
+// own gateway handlers rather than calling ours directly, because the bug lives
+// in which event disgo picks: on startup a GUILD_CREATE for a guild listed in
+// READY dispatches GuildReady, not GuildAvailable, so a caller already in voice
+// when the bot boots is never counted and their later leave drives the gauge
+// below zero.
+func TestVoiceCallerCount_CallerPresentAtStartup(t *testing.T) {
+	t.Parallel()
+	f := &fakeManager{hasCallerRoleFn: func(snowflake.ID, []snowflake.ID) bool { return true }}
+	metrics, collect := newRecordingBotMetrics(t)
+
+	guildID := snowflake.ID(50)
+	userID := snowflake.ID(123)
+	chID := snowflake.ID(1001)
+	member := discord.Member{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{1}}
+
+	client := newTestClient()
+	client.EventManager = bot.NewEventManager(client,
+		bot.WithListeners(EventListeners(f, metrics, nil)...),
+		bot.WithGatewayHandlers(handlers.GetGatewayHandlers()),
+	)
+	client.MemberChunkingManager = bot.NewMemberChunkingManager(client, slog.Default(), bot.MemberChunkingFilterNone)
+	dispatch := func(eventType gateway.EventType, event gateway.EventData) {
+		handlers.GetGatewayHandlers()[eventType].HandleGatewayEvent(client, 0, 0, event)
+	}
+
+	// READY lists every guild as unavailable, which disgo records as unready.
+	client.Caches.SetGuildUnready(guildID, true)
+	dispatch(gateway.EventTypeGuildCreate, gateway.EventGuildCreate{GatewayGuild: discord.GatewayGuild{
+		RestGuild:   discord.RestGuild{Guild: discord.Guild{ID: guildID}},
+		Members:     []discord.Member{member},
+		VoiceStates: []discord.VoiceState{{GuildID: guildID, UserID: userID, ChannelID: &chID}},
+	}})
+
+	if got := collect()[chID.String()]; got != 1 {
+		t.Errorf("after startup with one caller in channel %s: want 1 got %d", chID, got)
+	}
+
+	dispatch(gateway.EventTypeVoiceStateUpdate, gateway.EventVoiceStateUpdate{
+		VoiceState: discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: nil},
+		Member:     member,
+	})
+
+	if got := collect()[chID.String()]; got != 0 {
+		t.Errorf("after that caller leaves channel %s: want 0 got %d", chID, got)
 	}
 }

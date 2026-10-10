@@ -180,6 +180,9 @@ func (m *Service) StartMetrics() {
 	if err := m.metrics.Bot.RegisterGuildInfo(m.observeGuildInfo); err != nil {
 		slog.Error("manager: failed to register guild_info metric callback", slog.Any("err", err))
 	}
+	if err := m.metrics.Bot.RegisterVoiceCallers(m.observeVoiceCallers); err != nil {
+		slog.Error("manager: failed to register voice_callers metric callback", slog.Any("err", err))
+	}
 }
 
 // observeGuildInfo is an OTel observable callback that emits gdc_discord_guild
@@ -188,6 +191,32 @@ func (m *Service) StartMetrics() {
 func (m *Service) observeGuildInfo(_ context.Context, o metric.Observer) error {
 	for g := range m.ownerClient.Caches.Guilds() {
 		m.metrics.Bot.ObserveGuildInfo(o, g.ID.String(), g.Name)
+	}
+	return nil
+}
+
+// observeVoiceCallers is an OTel observable callback that emits gdc_voice_callers
+// per voice channel, recounted from the owner bot's cache on every collection.
+// A running count kept from join/leave events drifts for good on any event it
+// misses — callers already in voice at startup, a role granted or revoked
+// mid-call — while the cache stays correct by construction.
+func (m *Service) observeVoiceCallers(_ context.Context, o metric.Observer) error {
+	caches := m.ownerClient.Caches
+	for g := range caches.Guilds() {
+		perChannel := make(map[snowflake.ID]int64)
+		for vs := range caches.VoiceStates(g.ID) {
+			if vs.ChannelID == nil {
+				continue
+			}
+			member, ok := caches.Member(g.ID, vs.UserID)
+			if !ok || m.IsBot(member.User) || !m.HasCallerRole(g.ID, member.RoleIDs) {
+				continue
+			}
+			perChannel[*vs.ChannelID]++
+		}
+		for channelID, count := range perChannel {
+			m.metrics.Bot.ObserveVoiceCallers(o, count, g.ID.String(), channelID.String())
+		}
 	}
 	return nil
 }

@@ -5,10 +5,8 @@ import (
 	"log/slog"
 
 	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // GuildCommandSyncer registers the owner bot's slash commands for one guild.
@@ -19,18 +17,17 @@ type GuildCommandSyncer func(ctx context.Context, guildID snowflake.ID)
 
 // EventListeners returns all event listeners to register with the owner bot client.
 // Called by the production bot and by the E2E harness so both use identical handler logic.
-func EventListeners(managerSvc ManagerService, metrics *telemetry.BotMetrics, syncGuild GuildCommandSyncer) []bot.EventListener {
+func EventListeners(managerSvc ManagerService, syncGuild GuildCommandSyncer) []bot.EventListener {
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
-		bot.NewListenerFunc(onGuildAvailable(managerSvc, metrics)),
 		bot.NewListenerFunc(onGuildJoin(managerSvc, syncGuild)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate(managerSvc)),
 		bot.NewListenerFunc(onGuildChannelDelete(managerSvc)),
-		bot.NewListenerFunc(onVoiceJoin(managerSvc, metrics)),
-		bot.NewListenerFunc(onVoiceLeave(managerSvc, metrics)),
-		bot.NewListenerFunc(onVoiceMove(managerSvc, metrics)),
+		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
+		bot.NewListenerFunc(onVoiceLeave(managerSvc)),
+		bot.NewListenerFunc(onVoiceMove(managerSvc)),
 	}
 }
 
@@ -46,37 +43,6 @@ func onReady(m ManagerService) func(*events.Ready) {
 		}
 
 		go m.SeedExistingSpeakers(guildIDs)
-	}
-}
-
-// onGuildAvailable is called for each guild that becomes available after the
-// initial Ready handshake. It initialises VoiceCallers from the current voice
-// states so the counter is accurate after a bot restart (users already in
-// voice channels emit no new join events).
-func onGuildAvailable(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildAvailable) {
-	return func(e *events.GuildAvailable) {
-		membersByID := make(map[snowflake.ID]discord.Member, len(e.Guild.Members))
-		for _, member := range e.Guild.Members {
-			membersByID[member.User.ID] = member
-		}
-
-		// Seed VoiceCallers from voice states present in the GUILD_CREATE payload.
-		counts := make(map[snowflake.ID]int64) // channelID → caller count
-		for _, vs := range e.Guild.VoiceStates {
-			if vs.ChannelID == nil {
-				continue
-			}
-			member, ok := membersByID[vs.UserID]
-			if !ok || member.User.Bot {
-				continue
-			}
-			if m.HasCallerRole(e.GuildID, member.RoleIDs) {
-				counts[*vs.ChannelID]++
-			}
-		}
-		for channelID, count := range counts {
-			metrics.VoiceCallerAdd(context.Background(), count, e.GuildID.String(), channelID.String())
-		}
 	}
 }
 
@@ -148,7 +114,7 @@ func onGuildMemberUpdate(m ManagerService) func(*events.GuildMemberUpdate) {
 // It refreshes the member cache with the full member object from the event
 // (VOICE_STATE_UPDATE payloads can carry partial members without RoleIDs, so
 // we overwrite whatever disgo stored with the authoritative data from this event).
-func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceJoin) {
+func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 	return func(e *events.GuildVoiceJoin) {
 		if m.IsBot(e.Member.User) {
 			return
@@ -167,10 +133,6 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 			slog.Bool("allowedToSpeak", allowed),
 		)
 
-		if allowed {
-			metrics.VoiceCallerAdd(context.Background(), 1, guildID.String(), e.VoiceState.ChannelID.String())
-		}
-
 		// Trigger an auto-route recompute on the channel the user joined.
 		// The router owns both source-mode routing AND mixer pause state
 		// (cascade ∧ listener check folded together — Plan §3.6 final).
@@ -181,7 +143,7 @@ func onVoiceJoin(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 }
 
 // onVoiceLeave is called whenever a user leaves a voice channel.
-func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceLeave) {
+func onVoiceLeave(m ManagerService) func(*events.GuildVoiceLeave) {
 	return func(e *events.GuildVoiceLeave) {
 		guildID := e.VoiceState.GuildID
 
@@ -198,13 +160,6 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 			slog.String("guildID", guildID.String()),
 		)
 
-		// Guard the channel pointer: OldVoiceState.ChannelID is nil for a state
-		// change that was not a real channel exit, and dereferencing it here
-		// would panic before the nil check further down.
-		if e.OldVoiceState.ChannelID != nil && m.HasCallerRole(guildID, e.Member.RoleIDs) {
-			metrics.VoiceCallerAdd(context.Background(), -1, guildID.String(), e.OldVoiceState.ChannelID.String())
-		}
-
 		// Trigger an auto-route recompute on the channel the user vacated.
 		// e.VoiceState.ChannelID is nil after a leave (no channel); the
 		// pre-event channel lives on e.OldVoiceState. The router pauses the
@@ -216,7 +171,7 @@ func onVoiceLeave(m ManagerService, metrics *telemetry.BotMetrics) func(*events.
 }
 
 // onVoiceMove is called whenever a user moves between voice channels.
-func onVoiceMove(m ManagerService, metrics *telemetry.BotMetrics) func(*events.GuildVoiceMove) {
+func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 	return func(e *events.GuildVoiceMove) {
 		guildID := e.VoiceState.GuildID
 
@@ -225,21 +180,6 @@ func onVoiceMove(m ManagerService, metrics *telemetry.BotMetrics) func(*events.G
 			// bot was displaced from its bound channel and reconnects if needed.
 			m.OnBotVoiceMove(context.Background(), guildID, e.Member.User.ID, e.VoiceState.ChannelID)
 			return
-		}
-
-		// A move emits neither a join nor a leave, so the caller counter has to be
-		// carried across here by hand: without this the user is decremented from
-		// the destination on their eventual leave having never been counted into
-		// it, driving gdc.voice.callers permanently negative (it is an UpDown
-		// counter, so the skew never resets until the process restarts).
-		if m.HasCallerRole(guildID, e.Member.RoleIDs) {
-			ctx := context.Background()
-			if e.OldVoiceState.ChannelID != nil {
-				metrics.VoiceCallerAdd(ctx, -1, guildID.String(), e.OldVoiceState.ChannelID.String())
-			}
-			if e.VoiceState.ChannelID != nil {
-				metrics.VoiceCallerAdd(ctx, 1, guildID.String(), e.VoiceState.ChannelID.String())
-			}
 		}
 
 		// Auto-route both channels: the source channel loses a caller, the

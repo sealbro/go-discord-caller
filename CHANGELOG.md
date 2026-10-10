@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.2] - 2026-10-10
+
+### Changed
+- **Dependencies updated**: Google API libraries refreshed.
+
+### Fixed
+- **Voice caller count drifting**: the dashboard's caller count no longer climbs or goes negative over time.
+- **Disabled speakers re-enabled on restart**: disabling a speaker in `/setup` now persists across restarts.
+- **Raids stalled by deleted channels**: speakers bound to a deleted voice channel are skipped and unbound instead of delaying every raid.
+
 ## [0.11.1] - 2026-10-03
 
 ### Added

@@ -40,7 +40,7 @@ type Harness struct {
 func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	h := &Harness{Cfg: cfg}
 
-	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
+	// Owner bot — full intents + DAVE + owner cache, no slash-command router.
 	daveStats := dave.NewStats()
 	h.daveStalls = dave.NewEncryptStalls()
 

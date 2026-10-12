@@ -565,7 +565,7 @@ func (m *Service) warmGuildCache(guildID snowflake.ID) {
 }
 
 // botChannelWarning checks whether botUserID has ViewChannel+Connect+Speak in channelID using
-// the owner bot's cache (it has full guild data via IntentGuilds + FlagsAll).
+// the owner bot's cache (it has guild, channel and role data via IntentGuilds).
 // Both channel and member caches are pre-warmed at startup by warmGuildCache.
 func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) (ChannelAccessWarning, bool) {
 	channel, ok := m.ownerClient.Caches.Channel(channelID)

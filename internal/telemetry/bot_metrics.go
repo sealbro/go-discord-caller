@@ -32,7 +32,7 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if b.voiceCallers, err = meter.Int64ObservableUpDownCounter("gdc.voice.callers",
-		metric.WithDescription("Number of users with the caller role currently in a voice channel, per guild."),
+		metric.WithDescription("Number of users with the caller role currently in a voice channel of a guild with an active raid."),
 	); err != nil {
 		return
 	}

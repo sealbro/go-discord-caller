@@ -29,6 +29,7 @@ const (
 // owner client's cache, as production does, and collects gdc.voice.callers.
 type callersHarness struct {
 	t       *testing.T
+	svc     *Service
 	client  *bot.Client
 	reader  *sdkmetric.ManualReader
 	members map[snowflake.ID]discord.Member
@@ -59,7 +60,19 @@ func newCallersHarness(t *testing.T) *callersHarness {
 	if err := metrics.Bot.RegisterVoiceCallers(m.observeVoiceCallers); err != nil {
 		t.Fatalf("RegisterVoiceCallers: %v", err)
 	}
-	return &callersHarness{t: t, client: client, reader: reader, members: map[snowflake.ID]discord.Member{}}
+	h := &callersHarness{t: t, svc: m, client: client, reader: reader, members: map[snowflake.ID]discord.Member{}}
+	h.setRaid(true)
+	return h
+}
+
+func (h *callersHarness) setRaid(active bool) {
+	st := guild.NewStatus(testGuildID, testBotID)
+	if active {
+		st.Session = &guild.Session{GuildID: testGuildID}
+	}
+	h.svc.mu.Lock()
+	h.svc.statuses[testGuildID] = st
+	h.svc.mu.Unlock()
 }
 
 func (h *callersHarness) dispatch(eventType gateway.EventType, event gateway.EventData) {
@@ -198,4 +211,23 @@ func TestVoiceCallers_FollowsMoveAndSkipsBotsAndNonCallers(t *testing.T) {
 		h.voiceState(id, nil)
 	}
 	h.expect("all left", nil)
+}
+
+// TestVoiceCallers_OnlyDuringActiveRaid: people sitting in voice in a guild
+// with no raid running are not callers, yet they inflated the dashboard total.
+func TestVoiceCallers_OnlyDuringActiveRaid(t *testing.T) {
+	t.Parallel()
+	h := newCallersHarness(t)
+	h.setRaid(false)
+	h.startup(nil, nil)
+	h.member(123, false, callerRoleID)
+
+	h.voiceState(123, ptr(callerChannel))
+	h.expect("in voice with no raid", nil)
+
+	h.setRaid(true)
+	h.expect("raid started", map[snowflake.ID]int64{callerChannel: 1})
+
+	h.setRaid(false)
+	h.expect("raid stopped", nil)
 }

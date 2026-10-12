@@ -45,3 +45,6 @@ CLAUDE.md
 
 # MkDocs build output (site_dir: misc/www)
 misc/www/
+
+# Internal notes, not published
+docs/internal/

@@ -129,9 +129,11 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	// Shared by the owner client and the speaker pool. Created here because the
 	// clients are built before the meter exists; StartMetrics attaches it later.
 	daveStats := dave.NewStats()
+	// Same reason: the manager that acts on a stall is built after the clients.
+	daveStalls := dave.NewEncryptStalls()
 
 	// Manager (owner) bot client — production adds GuildMessages intent and the command router.
-	client, err := NewOwnerClient(cfg.OwnerBotToken, daveStats,
+	client, err := NewOwnerClient(cfg.OwnerBotToken, daveStats, daveStalls,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -171,8 +173,9 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	// built after the client — same reason as the Ready listener above.
 	client.AddEventListeners(pool.VoiceRegionListeners(ownerBotID, &metrics.Voice)...)
 
-	poolSvc := pool.NewService(&metrics.Pool, &metrics.Voice, daveStats)
+	poolSvc := pool.NewService(&metrics.Pool, &metrics.Voice, daveStats, daveStalls)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
+	daveStalls.SetHandler(managerSvc.OnEncryptStall)
 	managerSvc.SetSessionIdleTimeout(cfg.SessionIdleTimeout)
 
 	bundle, err := i18n.NewBundle()
@@ -322,13 +325,14 @@ func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, comman
 // their own intents and any extra options (e.g. event listeners, extra intents).
 // daveStats counts decrypt outcomes per sending user; pass the same one given
 // to the speaker pool so owner and speakers report into a single series.
-func NewOwnerClient(token string, daveStats *dave.Stats, opts ...bot.ConfigOpt) (*bot.Client, error) {
+// daveStalls receives the bot's stalled-encryptor reports.
+func NewOwnerClient(token string, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, opts ...bot.ConfigOpt) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
 	base := []bot.ConfigOpt{
 		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats)),
+			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
 			pool.SafeUDPConnOpt(),
 			pool.SafeAudioSenderOpt(),
 			pool.SafeGatewayOpt(),

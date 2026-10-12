@@ -59,6 +59,9 @@ const EncryptStallFrames = 500
 // not established at that moment the encryptor is left with none. Every frame
 // then fails with "missing key ratchet" until the next membership change in
 // the channel happens to repair it — observed lasting an hour in production.
+//
+// UPSTREAM(golibdave v0.3.0): executing a transition before the MLS group is
+// established leaves the encryptor with no key ratchet.
 func WithEncryptStall(frames int, notify EncryptStallFunc) Option {
 	return func(o *options) {
 		o.stallFrames = frames

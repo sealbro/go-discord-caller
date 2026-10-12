@@ -47,7 +47,11 @@ func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks
 }
 
 // encryptStallTarget resolves a stall report to the bot and guild it concerns.
-// disgo passes the voice.Conn as the DAVE session's callbacks.
+// disgo passes the voice.Conn as the DAVE session's callbacks; a report whose
+// callbacks are anything else resolves to nothing, so no rejoin happens.
+//
+// UPSTREAM(disgo v0.19.3): the DAVE session factory receives the conn itself
+// as its callbacks (voice/conn.go:80).
 func encryptStallTarget(selfUserID godave.UserID, conn godave.Callbacks) (guildID, botUserID snowflake.ID, ok bool) {
 	vc, isConn := conn.(voice.Conn)
 	if !isConn {

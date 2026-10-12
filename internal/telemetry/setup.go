@@ -152,6 +152,10 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 		metric.WithResource(res),
 	)
 	otel.SetMeterProvider(mp)
+	if err := startProcessMetrics(mp); err != nil {
+		setupErr = err
+		return nil, err
+	}
 
 	// Logs
 	logExporter, err := otlploggrpc.New(ctx, otlploggrpc.WithGRPCConn(conn))

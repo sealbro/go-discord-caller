@@ -104,6 +104,18 @@ pre-baked `OpusRecorder` (`Metrics.ForGuild`) — zero-alloc per frame.
 
 ---
 
+## 🖥️ Process & Go runtime (`internal/telemetry/process_metrics.go`)
+
+The process's own resource use, for capacity planning against the container limit. Compare `gdc_process_memory_usage_bytes` with `go_memory_used_bytes`: the gap is memory libdave and libopus allocate outside the Go heap, which `GOMEMLIMIT` does not cover.
+
+| OTel instrument | Type | Prometheus series | Attributes | Description |
+|-----------------|------|-------------------|------------|-------------|
+| `gdc.process.cpu.time`     | ObservableCounter (`s`) | `gdc_process_cpu_time_seconds_total` | — | CPU time consumed by the process, user plus system. `rate()` of it is the fraction of one core in use. |
+| `gdc.process.memory.usage` | ObservableGauge (`By`)  | `gdc_process_memory_usage_bytes`     | — | Resident set size, including C allocations. Linux only — absent elsewhere. |
+| `go.memory.used`, `go.memory.limit`, `go.memory.gc.goal`, `go.goroutine.count`, … | ObservableGauge / Counter | `go_memory_used_bytes`, `go_memory_limit_bytes`, `go_goroutine_count`, … | `go.memory.type` on `go.memory.used` | Go runtime metrics from `go.opentelemetry.io/contrib/instrumentation/runtime`, sampled at most every 15 s. |
+
+---
+
 ## Implementation
 
 Instruments are defined in `internal/telemetry/`, split by subsystem:

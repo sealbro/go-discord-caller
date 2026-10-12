@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -573,5 +574,18 @@ func TestOnVoiceJoin_BotIsSkipped(t *testing.T) {
 	if len(snap.notifyMemberCalls) != 0 || len(snap.autoRouteCalls) != 0 {
 		t.Errorf("bot join must short-circuit: notify=%d autoRoute=%d",
 			len(snap.notifyMemberCalls), len(snap.autoRouteCalls))
+	}
+}
+
+func TestVoiceLogLevelIsDebugOutsideARaid(t *testing.T) {
+	t.Parallel()
+	const raiding, idle snowflake.ID = 1, 2
+	m := &fakeManager{hasActiveFn: func(g snowflake.ID) bool { return g == raiding }}
+
+	if got := voiceLogLevel(m, raiding); got != slog.LevelInfo {
+		t.Errorf("guild with a raid: level = %v, want INFO", got)
+	}
+	if got := voiceLogLevel(m, idle); got != slog.LevelDebug {
+		t.Errorf("guild without a raid: level = %v, want DEBUG", got)
 	}
 }

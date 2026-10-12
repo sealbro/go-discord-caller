@@ -132,13 +132,12 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	// Same reason: the manager that acts on a stall is built after the clients.
 	daveStalls := dave.NewEncryptStalls()
 
-	// Manager (owner) bot client — production adds GuildMessages intent and the command router.
+	// Manager (owner) bot client — production adds the command router.
 	client, err := NewOwnerClient(cfg.OwnerBotToken, daveStats, daveStalls,
 		bot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
 			gateway.IntentGuildVoiceStates,
-			gateway.IntentGuildMessages,
 		)),
 		bot.WithEventListeners(r),
 	)
@@ -321,7 +320,7 @@ func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, comman
 }
 
 // NewOwnerClient builds a disgo client for the owner (manager) bot.
-// Base config covers DAVE E2EE voice and FlagsAll cache. Callers supply
+// Base config covers DAVE E2EE voice and the owner cache. Callers supply
 // their own intents and any extra options (e.g. event listeners, extra intents).
 // daveStats counts decrypt outcomes per sending user; pass the same one given
 // to the speaker pool so owner and speakers report into a single series.
@@ -329,8 +328,10 @@ func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, comman
 func NewOwnerClient(token string, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, opts ...bot.ConfigOpt) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
+	var caches cache.Caches
 	base := []bot.ConfigOpt{
-		bot.WithCacheConfigOpts(cache.WithCaches(cache.FlagsAll)),
+		bot.WithCacheConfigOpts(ownerCacheOpts(&caches)...),
+		bot.WithEventListeners(ownerCacheListeners()...),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
 			pool.SafeUDPConnOpt(),
@@ -339,7 +340,12 @@ func NewOwnerClient(token string, daveStats *dave.Stats, daveStalls *dave.Encryp
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	}
-	return disgo.New(token, append(base, opts...)...)
+	client, err := disgo.New(token, append(base, opts...)...)
+	if err != nil {
+		return nil, err
+	}
+	caches = client.Caches
+	return client, nil
 }
 
 // connectPool opens one gateway per speaker token and fails if any are not connected.

@@ -51,7 +51,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "expr": "sum(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) or vector(0)",
                         "instant": true,
                         "legendFormat": "Active",
                         "range": false
@@ -60,13 +60,69 @@
                     },
                     "refId": "A"
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "count(count by (guild_id, origin_prometheus) (gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})) or vector(0)",
+                        "instant": true,
+                        "legendFormat": "Guilds",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
                 }
               ],
               "queryOptions": {},
-              "transformations": []
+              "transformations": [
+                {
+                  "id": "reduce",
+                  "options": {
+                    "mode": "reduceFields",
+                    "reducers": [
+                      "lastNotNull"
+                    ]
+                  }
+                },
+                {
+                  "id": "concatenate",
+                  "options": {
+                    "frameNameMode": "drop"
+                  }
+                },
+                {
+                  "id": "calculateField",
+                  "options": {
+                    "alias": "Sessions",
+                    "mode": "reduceRow",
+                    "reduce": {
+                      "reducer": "allValues"
+                    },
+                    "replaceFields": true
+                  }
+                },
+                {
+                  "id": "convertFieldType",
+                  "options": {
+                    "conversions": [
+                      {
+                        "destinationType": "string",
+                        "targetField": "Sessions"
+                      }
+                    ]
+                  }
+                }
+              ]
             }
           },
-          "description": "",
+          "description": "Active voice sessions out of the guilds currently selected",
           "id": 1,
           "links": [],
           "title": "Active Voice Sessions",
@@ -77,44 +133,39 @@
               "fieldConfig": {
                 "defaults": {
                   "color": {
-                    "mode": "thresholds"
+                    "mode": "fixed",
+                    "fixedColor": "green"
                   },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "yellow",
-                        "value": 1
-                      },
-                      {
-                        "color": "red",
-                        "value": 5
+                  "unit": "short",
+                  "mappings": [
+                    {
+                      "type": "regex",
+                      "options": {
+                        "pattern": "\\D*(\\d+)\\D+(\\d+)\\D*",
+                        "result": {
+                          "text": "$1 / $2"
+                        }
                       }
-                    ]
-                  },
-                  "unit": "short"
+                    }
+                  ]
                 },
                 "overrides": []
               },
               "options": {
-                "colorMode": "background",
+                "colorMode": "value",
                 "graphMode": "none",
                 "justifyMode": "center",
-                "orientation": "auto",
+                "orientation": "vertical",
                 "percentChangeColorMode": "standard",
                 "reduceOptions": {
                   "calcs": [
                     "lastNotNull"
                   ],
-                  "fields": "",
+                  "fields": "/^Sessions$/",
                   "values": false
                 },
                 "showPercentChange": false,
-                "textMode": "auto",
+                "textMode": "value",
                 "wideLayout": true
               }
             },

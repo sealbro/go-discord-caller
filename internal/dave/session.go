@@ -3,6 +3,7 @@ package dave
 import (
 	"log/slog"
 	"sync"
+	"sync/atomic"
 
 	"github.com/disgoorg/godave"
 )
@@ -14,15 +15,81 @@ import (
 // Every other method is the backend's own. Pass the result wherever the raw
 // backend factory would go — the choice of backend stays a one-line decision at
 // the call site.
-func Instrument(inner godave.SessionCreateFunc, stats *Stats) godave.SessionCreateFunc {
+func Instrument(inner godave.SessionCreateFunc, stats *Stats, opts ...Option) godave.SessionCreateFunc {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	return func(logger *slog.Logger, selfUserID godave.UserID, callbacks godave.Callbacks) godave.Session {
 		return &countingSession{
-			Session:   inner(logger, selfUserID, callbacks),
-			stats:     stats,
-			botUserID: string(selfUserID),
-			known:     make(map[godave.UserID]struct{}),
+			Session:     inner(logger, selfUserID, callbacks),
+			stats:       stats,
+			botUserID:   string(selfUserID),
+			selfUserID:  selfUserID,
+			callbacks:   callbacks,
+			stallFrames: int64(o.stallFrames),
+			onStall:     o.onStall,
+			known:       make(map[godave.UserID]struct{}),
 		}
 	}
+}
+
+// Option configures Instrument.
+type Option func(*options)
+
+type options struct {
+	stallFrames int
+	onStall     EncryptStallFunc
+}
+
+// EncryptStallFunc is told which bot's session has stopped encrypting, and the
+// callbacks value disgo created that session with — the bot's voice.Conn. It
+// runs on disgo's audio send goroutine and must not block.
+type EncryptStallFunc func(selfUserID godave.UserID, conn godave.Callbacks)
+
+// EncryptStallFrames is 10 s of outbound speech at 20 ms per frame.
+const EncryptStallFrames = 500
+
+// WithEncryptStall reports a session each time another frames consecutive
+// outbound frames have failed to encrypt, so a repair that did not take is
+// retried. A frame that encrypts resets the count.
+//
+// The failure this exists for: golibdave v0.3.0 copies the bot's own key
+// ratchet from the MLS session when a transition executes, and if the group is
+// not established at that moment the encryptor is left with none. Every frame
+// then fails with "missing key ratchet" until the next membership change in
+// the channel happens to repair it — observed lasting an hour in production.
+//
+// UPSTREAM(golibdave v0.3.0): executing a transition before the MLS group is
+// established leaves the encryptor with no key ratchet.
+func WithEncryptStall(frames int, notify EncryptStallFunc) Option {
+	return func(o *options) {
+		o.stallFrames = frames
+		o.onStall = notify
+	}
+}
+
+// EncryptStalls forwards stall reports to a handler installed after the voice
+// clients are built, since the clients exist before whatever acts on a stall.
+// Reports arriving before SetHandler are dropped.
+type EncryptStalls struct {
+	handler atomic.Pointer[EncryptStallFunc]
+}
+
+func NewEncryptStalls() *EncryptStalls { return &EncryptStalls{} }
+
+func (s *EncryptStalls) SetHandler(f EncryptStallFunc) { s.handler.Store(&f) }
+
+// Notify is an EncryptStallFunc.
+func (s *EncryptStalls) Notify(selfUserID godave.UserID, conn godave.Callbacks) {
+	if f := s.handler.Load(); f != nil {
+		(*f)(selfUserID, conn)
+	}
+}
+
+// Option returns the WithEncryptStall option that reports into s.
+func (s *EncryptStalls) Option() Option {
+	return WithEncryptStall(EncryptStallFrames, s.Notify)
 }
 
 // countingSession counts decrypt outcomes and mirrors the backend's set of
@@ -40,6 +107,12 @@ type countingSession struct {
 	godave.Session
 	stats     *Stats
 	botUserID string
+
+	selfUserID   godave.UserID
+	callbacks    godave.Callbacks
+	stallFrames  int64
+	onStall      EncryptStallFunc
+	encryptFails atomic.Int64
 
 	mu    sync.RWMutex
 	known map[godave.UserID]struct{}
@@ -78,6 +151,20 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 
 	n, err := s.Session.Decrypt(userID, frame, decryptedFrame)
 	s.stats.Record(s.botUserID, string(userID), err)
+	return n, err
+}
+
+// Encrypt reports the session through onStall once outbound encryption has
+// been failing long enough to mean the bot is silent; see WithEncryptStall.
+func (s *countingSession) Encrypt(ssrc uint32, frame []byte, encryptedFrame []byte) (int, error) {
+	n, err := s.Session.Encrypt(ssrc, frame, encryptedFrame)
+	if err == nil {
+		s.encryptFails.Store(0)
+		return n, nil
+	}
+	if s.onStall != nil && s.stallFrames > 0 && s.encryptFails.Add(1)%s.stallFrames == 0 {
+		s.onStall(s.selfUserID, s.callbacks)
+	}
 	return n, err
 }
 

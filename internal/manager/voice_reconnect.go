@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
@@ -27,6 +28,40 @@ func (m *Service) OnBotVoiceMove(ctx context.Context, guildID, botUserID snowfla
 		return // already in the right channel
 	}
 	go m.ReconnectBotChannel(ctx, guildID, botUserID)
+}
+
+// OnEncryptStall rejoins a bot whose DAVE session has stopped encrypting its
+// outbound audio (see dave.WithEncryptStall). The bot looks connected but is
+// silent; a fresh voice connection gets a fresh DAVE session. It runs on
+// disgo's audio send goroutine, so the rejoin happens in the background.
+func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks) {
+	guildID, botUserID, ok := encryptStallTarget(selfUserID, conn)
+	if !ok {
+		return
+	}
+	slog.Warn("voice: outbound encryption stalled, rejoining",
+		slog.String("guildID", guildID.String()),
+		slog.String("botUserID", botUserID.String()),
+	)
+	go m.ReconnectBotChannel(context.Background(), guildID, botUserID)
+}
+
+// encryptStallTarget resolves a stall report to the bot and guild it concerns.
+// disgo passes the voice.Conn as the DAVE session's callbacks; a report whose
+// callbacks are anything else resolves to nothing, so no rejoin happens.
+//
+// UPSTREAM(disgo v0.19.3): the DAVE session factory receives the conn itself
+// as its callbacks (voice/conn.go:80).
+func encryptStallTarget(selfUserID godave.UserID, conn godave.Callbacks) (guildID, botUserID snowflake.ID, ok bool) {
+	vc, isConn := conn.(voice.Conn)
+	if !isConn {
+		return 0, 0, false
+	}
+	botUserID, err := snowflake.Parse(string(selfUserID))
+	if err != nil {
+		return 0, 0, false
+	}
+	return vc.GuildID(), botUserID, true
 }
 
 // ReconnectBotChannel reconnects a bot to its bound voice channel in the given guild.

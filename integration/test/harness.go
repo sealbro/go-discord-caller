@@ -33,6 +33,7 @@ type Harness struct {
 	Speaker         *Speaker
 	Speaker2        *Speaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
 	Listener        *Listener
+	daveStalls      *dave.EncryptStalls // routed to the newest manager, like activeListeners
 	activeListeners []disgobot.EventListener // current per-test listeners; swapped in newManagerForGuild
 }
 
@@ -41,9 +42,10 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 
 	// Owner bot — full intents + DAVE + FlagsAll cache, no slash-command router.
 	daveStats := dave.NewStats()
+	h.daveStalls = dave.NewEncryptStalls()
 
 	var err error
-	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken, daveStats,
+	h.Owner, err = internalbot.NewOwnerClient(cfg.OwnerBotToken, daveStats, h.daveStalls,
 		disgobot.WithGatewayConfigOpts(gateway.WithIntents(
 			gateway.IntentGuilds,
 			gateway.IntentGuildMembers,
@@ -63,7 +65,7 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 	if err != nil {
 		return nil, fmt.Errorf("build metrics: %w", err)
 	}
-	h.Pool = pool.NewService(&metrics.Pool, &metrics.Voice, daveStats)
+	h.Pool = pool.NewService(&metrics.Pool, &metrics.Voice, daveStats, h.daveStalls)
 	poolCtx, poolCancel := context.WithTimeout(ctx, 30*time.Second)
 	h.Pool.ConnectPool(poolCtx, cfg.SpeakerTokens)
 	poolCancel()
@@ -99,6 +101,7 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	st := store.NewInMemoryStore()
 	metrics, _ := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
 	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics)
+	h.daveStalls.SetHandler(svc.OnEncryptStall)
 
 	st.BindChannel(guildID, h.OwnerID, ownerChannelID)
 	st.BindRole(guildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)

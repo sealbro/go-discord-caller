@@ -38,6 +38,7 @@ type Service struct {
 	metrics     *telemetry.PoolMetrics
 	voiceRegion *telemetry.VoiceRegionMetrics
 	daveStats   *dave.Stats
+	daveStalls  *dave.EncryptStalls
 }
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
@@ -48,13 +49,14 @@ type extraBot struct {
 }
 
 // NewService creates a new speaker Service.
-func NewService(metrics *telemetry.PoolMetrics, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats) *Service {
+func NewService(metrics *telemetry.PoolMetrics, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls) *Service {
 	return &Service{
 		poolClients: make(map[snowflake.ID]*bot.Client),
 		extraBots:   make(map[snowflake.ID]extraBot),
 		metrics:     metrics,
 		voiceRegion: voiceRegion,
 		daveStats:   daveStats,
+		daveStalls:  daveStalls,
 	}
 }
 
@@ -69,7 +71,7 @@ func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) 
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats) (*bot.Client, error) {
+func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
 	return disgo.New(token,
@@ -78,7 +80,7 @@ func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, dave
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
 		bot.WithVoiceManagerConfigOpts(
-			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats)),
+			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
 			SafeUDPConnOpt(),
 			SafeAudioSenderOpt(),
 			SafeGatewayOpt(),
@@ -112,7 +114,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			client, err := newPoolClient(token, s.voiceRegion, s.daveStats)
+			client, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls)
 			if err != nil {
 				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
@@ -226,7 +228,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	s.metrics.ReconnectAttempt(ctx, botUserID)
 
-	newClient, err := newPoolClient(token, s.voiceRegion, s.daveStats)
+	newClient, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),

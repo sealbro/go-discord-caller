@@ -196,13 +196,17 @@ func (m *Service) observeGuildInfo(_ context.Context, o metric.Observer) error {
 }
 
 // observeVoiceCallers is an OTel observable callback that emits gdc_voice_callers
-// per voice channel, recounted from the owner bot's cache on every collection.
+// per voice channel for guilds with an active raid, recounted from the owner
+// bot's cache on every collection.
 // A running count kept from join/leave events drifts for good on any event it
 // misses — callers already in voice at startup, a role granted or revoked
 // mid-call — while the cache stays correct by construction.
 func (m *Service) observeVoiceCallers(_ context.Context, o metric.Observer) error {
 	caches := m.ownerClient.Caches
 	for g := range caches.Guilds() {
+		if !m.HasActiveSession(g.ID) {
+			continue
+		}
 		perChannel := make(map[snowflake.ID]int64)
 		for vs := range caches.VoiceStates(g.ID) {
 			if vs.ChannelID == nil {

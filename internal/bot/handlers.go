@@ -127,7 +127,7 @@ func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 		m.NotifyMemberUpdate(guildID, e.Member)
 
 		allowed := m.HasCallerRole(guildID, e.Member.RoleIDs)
-		slog.Info("user joined voice channel",
+		slog.Log(context.Background(), voiceLogLevel(m, guildID), "user joined voice channel",
 			slog.String("userID", e.Member.User.ID.String()),
 			slog.String("channelID", e.VoiceState.ChannelID.String()),
 			slog.Bool("allowedToSpeak", allowed),
@@ -155,7 +155,7 @@ func onVoiceLeave(m ManagerService) func(*events.GuildVoiceLeave) {
 			return
 		}
 
-		slog.Info("user left voice channel",
+		slog.Log(context.Background(), voiceLogLevel(m, guildID), "user left voice channel",
 			slog.String("userID", e.Member.User.ID.String()),
 			slog.String("guildID", guildID.String()),
 		)
@@ -194,4 +194,13 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 			m.AutoRoute(guildID, *e.VoiceState.ChannelID)
 		}
 	}
+}
+
+// voiceLogLevel keeps voice traffic from guilds without a raid out of the INFO
+// log, whose volume would otherwise grow with every guild the bot is in.
+func voiceLogLevel(m ManagerService, guildID snowflake.ID) slog.Level {
+	if m.HasActiveSession(guildID) {
+		return slog.LevelInfo
+	}
+	return slog.LevelDebug
 }

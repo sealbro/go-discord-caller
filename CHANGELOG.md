@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.3] - 2026-10-14
+
+### Added
+- **Process and runtime metrics**: the bot now reports its own CPU, memory (including audio libraries) and Go runtime stats.
+
+### Changed
+- **Much lower memory per server**: the bot no longer receives or keeps chat messages and caches only what it uses, so idle servers cost almost nothing.
+- **Quieter voice logs**: voice joins and leaves are logged only in servers with an active raid.
+
+### Fixed
+- **Speaker bot silent until someone left**: a bot whose outgoing audio stops encrypting now rejoins its channel automatically.
+- **Caller count outside raids**: the dashboard counts callers only in servers with an active raid.
+
 ## [0.11.2] - 2026-10-10
 
 ### Changed

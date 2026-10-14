@@ -31,6 +31,7 @@ type fakeManager struct {
 	isBotFn         func(discord.User) bool
 	hasCallerRoleFn func(snowflake.ID, []snowflake.ID) bool
 	hasActiveFn     func(snowflake.ID) bool
+	hasManagerFn    func(snowflake.ID, []snowflake.ID) bool
 
 	seedCalls           [][]snowflake.ID
 	trySeedCalls        []snowflakePair
@@ -139,9 +140,14 @@ func (f *fakeManager) ToggleSpeaker(snowflake.ID, snowflake.ID, bool) error { re
 func (f *fakeManager) NextSpeakerID(snowflake.ID) (snowflake.ID, bool)      { return 0, false }
 func (f *fakeManager) HasAvailableToken(snowflake.ID) bool                  { return false }
 func (f *fakeManager) GetStatus(snowflake.ID) guild.Status                  { return guild.Status{} }
-func (f *fakeManager) HasManagerRole(snowflake.ID, []snowflake.ID) bool     { return false }
-func (f *fakeManager) StartMetrics()                                        {}
-func (f *fakeManager) Shutdown(context.Context)                             {}
+func (f *fakeManager) HasManagerRole(g snowflake.ID, r []snowflake.ID) bool {
+	if f.hasManagerFn != nil {
+		return f.hasManagerFn(g, r)
+	}
+	return false
+}
+func (f *fakeManager) StartMetrics()            {}
+func (f *fakeManager) Shutdown(context.Context) {}
 
 // snapshotCalls returns a defensive copy of recorded call slices, holding the
 // mutex once to avoid racing with goroutine-spawned handler bodies.

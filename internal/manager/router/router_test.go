@@ -463,3 +463,17 @@ func TestRouter_RelayFeedTogglesDestPause(t *testing.T) {
 		t.Error("relay feed gone: mixer should pause again")
 	}
 }
+
+func TestRouteModeString(t *testing.T) {
+	tests := map[RouteMode]string{
+		RouteOff:      "off",
+		RouteCopy:     "copy",
+		RouteMix:      "mix",
+		RouteMode(99): "unknown",
+	}
+	for mode, want := range tests {
+		if got := mode.String(); got != want {
+			t.Errorf("RouteMode(%d).String() = %q, want %q", int(mode), got, want)
+		}
+	}
+}

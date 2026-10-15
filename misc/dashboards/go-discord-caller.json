@@ -83,40 +83,52 @@
               "queryOptions": {},
               "transformations": [
                 {
-                  "id": "reduce",
-                  "options": {
-                    "mode": "reduceFields",
-                    "reducers": [
-                      "lastNotNull"
-                    ]
+                  "group": "reduce",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "mode": "reduceFields",
+                      "reducers": [
+                        "lastNotNull"
+                      ]
+                    }
                   }
                 },
                 {
-                  "id": "concatenate",
-                  "options": {
-                    "frameNameMode": "drop"
+                  "group": "concatenate",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "frameNameMode": "drop"
+                    }
                   }
                 },
                 {
-                  "id": "calculateField",
-                  "options": {
-                    "alias": "Sessions",
-                    "mode": "reduceRow",
-                    "reduce": {
-                      "reducer": "allValues"
-                    },
-                    "replaceFields": true
+                  "group": "calculateField",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "alias": "Sessions",
+                      "mode": "reduceRow",
+                      "reduce": {
+                        "reducer": "allValues"
+                      },
+                      "replaceFields": true
+                    }
                   }
                 },
                 {
-                  "id": "convertFieldType",
-                  "options": {
-                    "conversions": [
-                      {
-                        "destinationType": "string",
-                        "targetField": "Sessions"
-                      }
-                    ]
+                  "group": "convertFieldType",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "conversions": [
+                        {
+                          "destinationType": "string",
+                          "targetField": "Sessions"
+                        }
+                      ]
+                    }
                   }
                 }
               ]
@@ -1361,7 +1373,28 @@
                   },
                   "unit": "short"
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byValue",
+                      "options": {
+                        "op": "lte",
+                        "reducer": "max",
+                        "value": 0
+                      }
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.hideFrom",
+                        "value": {
+                          "legend": true,
+                          "tooltip": false,
+                          "viz": false
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "options": {
                 "annotations": {
@@ -1560,7 +1593,28 @@
                   },
                   "unit": "short"
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byValue",
+                      "options": {
+                        "op": "lte",
+                        "reducer": "max",
+                        "value": 0
+                      }
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.hideFrom",
+                        "value": {
+                          "legend": true,
+                          "tooltip": false,
+                          "viz": false
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "options": {
                 "annotations": {
@@ -1904,7 +1958,28 @@
                   },
                   "unit": "short"
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byValue",
+                      "options": {
+                        "op": "lte",
+                        "reducer": "max",
+                        "value": 0
+                      }
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.hideFrom",
+                        "value": {
+                          "legend": true,
+                          "tooltip": false,
+                          "viz": false
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "options": {
                 "annotations": {
@@ -3740,59 +3815,65 @@
               "queryOptions": {},
               "transformations": [
                 {
-                  "id": "joinByField",
-                  "options": {
-                    "byField": "guild_id",
-                    "mode": "outer"
+                  "group": "joinByField",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "byField": "guild_id",
+                      "mode": "outer"
+                    }
                   }
                 },
                 {
-                  "id": "organize",
-                  "options": {
-                    "excludeByName": {
-                      "Time 2": true,
-                      "Time 3": true,
-                      "Time 4": true,
-                      "Time 5": true,
-                      "guild_id": false,
-                      "origin_prometheus 1": true,
-                      "origin_prometheus 2": true,
-                      "origin_prometheus 3": true,
-                      "origin_prometheus 4": true,
-                      "origin_prometheus 5": true,
-                      "__name__ 1": true,
-                      "__name__ 2": true,
-                      "__name__ 3": true,
-                      "__name__ 4": true,
-                      "__name__ 5": true,
-                      "job 1": true,
-                      "job 2": true,
-                      "job 3": true,
-                      "job 4": true,
-                      "job 5": true,
-                      "Value #A": true,
-                      "Value #D": true,
-                      "session_mode_src": true
-                    },
-                    "indexByName": {
-                      "guild_name": 0,
-                      "origin_prometheus": 1,
-                      "Value #B": 2,
-                      "Value #C": 3,
-                      "Value #F": 4,
-                      "session_label": 5,
-                      "Time 1": 6,
-                      "guild_id": 7
-                    },
-                    "renameByName": {
-                      "Value #B": "Speakers",
-                      "Value #C": "Bots Active",
-                      "session_label": "Active Session",
-                      "Value #F": "Callers",
-                      "guild_id": "Guild ID",
-                      "guild_name": "Guild",
-                      "Time 1": "Time",
-                      "origin_prometheus": "Source"
+                  "group": "organize",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "excludeByName": {
+                        "Time 2": true,
+                        "Time 3": true,
+                        "Time 4": true,
+                        "Time 5": true,
+                        "Value #A": true,
+                        "Value #D": true,
+                        "__name__ 1": true,
+                        "__name__ 2": true,
+                        "__name__ 3": true,
+                        "__name__ 4": true,
+                        "__name__ 5": true,
+                        "guild_id": false,
+                        "job 1": true,
+                        "job 2": true,
+                        "job 3": true,
+                        "job 4": true,
+                        "job 5": true,
+                        "origin_prometheus 1": true,
+                        "origin_prometheus 2": true,
+                        "origin_prometheus 3": true,
+                        "origin_prometheus 4": true,
+                        "origin_prometheus 5": true,
+                        "session_mode_src": true
+                      },
+                      "indexByName": {
+                        "Time 1": 6,
+                        "Value #B": 2,
+                        "Value #C": 3,
+                        "Value #F": 4,
+                        "guild_id": 7,
+                        "guild_name": 0,
+                        "origin_prometheus": 1,
+                        "session_label": 5
+                      },
+                      "renameByName": {
+                        "Time 1": "Time",
+                        "Value #B": "Speakers",
+                        "Value #C": "Bots Active",
+                        "Value #F": "Callers",
+                        "guild_id": "Guild ID",
+                        "guild_name": "Guild",
+                        "origin_prometheus": "Source",
+                        "session_label": "Active Session"
+                      }
                     }
                   }
                 }
@@ -4083,7 +4164,8 @@
                         "expr": "sum(increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[1d]))",
                         "instant": false,
                         "legendFormat": "Session starts",
-                        "range": true
+                        "range": true,
+                        "interval": "1d"
                       },
                       "version": "v0"
                     },
@@ -4092,7 +4174,6 @@
                 }
               ],
               "queryOptions": {
-                "interval": "1d",
                 "timeFrom": "30d"
               },
               "transformations": []
@@ -4209,22 +4290,25 @@
               "queryOptions": {},
               "transformations": [
                 {
-                  "id": "organize",
-                  "options": {
-                    "excludeByName": {
-                      "Time": true,
-                      "__name__": true,
-                      "job": true,
-                      "origin_prometheus": true,
-                      "guild_id": true
-                    },
-                    "indexByName": {
-                      "guild_name": 0,
-                      "Value": 1
-                    },
-                    "renameByName": {
-                      "guild_name": "Guild",
-                      "Value": "Sessions (7d)"
+                  "group": "organize",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "excludeByName": {
+                        "Time": true,
+                        "__name__": true,
+                        "guild_id": true,
+                        "job": true,
+                        "origin_prometheus": true
+                      },
+                      "indexByName": {
+                        "Value": 1,
+                        "guild_name": 0
+                      },
+                      "renameByName": {
+                        "Value": "Sessions (7d)",
+                        "guild_name": "Guild"
+                      }
                     }
                   }
                 }
@@ -4500,6 +4584,986 @@
                   "hideZeros": false,
                   "mode": "single",
                   "sort": "none"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-39": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "gdc_process_memory_usage_bytes{origin_prometheus=~\"$origin_prometheus\"}",
+                        "instant": false,
+                        "legendFormat": "RSS",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(go_memory_used_bytes{origin_prometheus=~\"$origin_prometheus\"})",
+                        "instant": false,
+                        "legendFormat": "Go memory used",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "go_memory_gc_goal_bytes{origin_prometheus=~\"$origin_prometheus\"}",
+                        "instant": false,
+                        "legendFormat": "GC goal",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "go_memory_limit_bytes{origin_prometheus=~\"$origin_prometheus\"}",
+                        "instant": false,
+                        "legendFormat": "Go memory limit",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "D"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Resident memory (RSS) against the Go runtime's own view and its limit. RSS includes what libdave and libopus allocate outside the Go heap, so it is the figure to compare with the container limit.",
+          "id": 39,
+          "links": [],
+          "title": "Process Memory",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "bytes"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-40": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "rate(gdc_process_cpu_time_seconds_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval])",
+                        "instant": false,
+                        "legendFormat": "CPU",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "CPU time consumed per second, user plus system; 100% is one core.",
+          "id": 40,
+          "links": [],
+          "title": "Process CPU",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "percentunit"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-41": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "go_goroutine_count{origin_prometheus=~\"$origin_prometheus\"}",
+                        "instant": false,
+                        "legendFormat": "Goroutines",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Live goroutines. A steady climb across raids that end means goroutines are leaking.",
+          "id": 41,
+          "links": [],
+          "title": "Goroutines",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-42": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "rate(go_memory_allocated_bytes_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval])",
+                        "instant": false,
+                        "legendFormat": "Allocated",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Bytes allocated on the Go heap per second.",
+          "id": 42,
+          "links": [],
+          "title": "Go Allocation Rate",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "Bps"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-43": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (outcome) (rate(gdc_dave_decrypt_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "{{outcome}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Inbound frames per second by DAVE decrypt outcome, summed over every bot.",
+          "id": 43,
+          "links": [],
+          "title": "DAVE Decrypt Outcomes",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-44": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(rate(gdc_dave_decrypt_total{origin_prometheus=~\"$origin_prometheus\", outcome=\"failure\"}[$__rate_interval])) / sum(rate(gdc_dave_decrypt_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Failed share",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Share of inbound frames that failed to decrypt and were dropped.",
+          "id": 44,
+          "links": [],
+          "title": "DAVE Decrypt Failure Share",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "percentunit",
+                  "max": 1
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-45": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (health) (gdc_dave_decrypt_senders{origin_prometheus=~\"$origin_prometheus\"})",
+                        "instant": false,
+                        "legendFormat": "{{health}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Distinct senders per health bucket: clean (every frame decrypted), partial, failing (nothing decrypted). One failing sender among clean ones points at that sender, not the session.",
+          "id": 45,
+          "links": [],
+          "title": "DAVE Sender Health",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-46": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (command) (gdc_command_started_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) - sum by (command) (gdc_command_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "instant": false,
+                        "legendFormat": "{{command}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Slash commands that entered their handler and never returned since the process started. Anything above 0 that stays there is a wedged handler.",
+          "id": 46,
+          "links": [],
+          "title": "Commands Started but Not Completed",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 1
+                      }
+                    ]
+                  },
+                  "unit": "short",
+                  "decimals": 0
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
                 }
               }
             },
@@ -5004,6 +6068,110 @@
               "width": 24,
               "x": 0,
               "y": 120
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-39"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 0,
+              "y": 128
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-40"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 12,
+              "y": 128
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-41"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 0,
+              "y": 136
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-42"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 12,
+              "y": 136
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-43"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 0,
+              "y": 144
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-44"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 8,
+              "y": 144
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-45"
+              },
+              "height": 8,
+              "width": 8,
+              "x": 16,
+              "y": 144
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-46"
+              },
+              "height": 8,
+              "width": 24,
+              "x": 0,
+              "y": 152
             }
           }
         ]

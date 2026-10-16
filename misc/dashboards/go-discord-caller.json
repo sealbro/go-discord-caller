@@ -2231,7 +2231,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max by (user_id) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) * on(user_id) group_left(bot_name) label_replace(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}, \"user_id\", \"$1\", \"bot_id\", \"(.+)\")",
+                        "expr": "count by (user_id) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) * on(user_id) group_left(bot_name) label_replace(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}, \"user_id\", \"$1\", \"bot_id\", \"(.+)\")",
                         "instant": false,
                         "legendFormat": "{{bot_name}}",
                         "range": true
@@ -2246,10 +2246,10 @@
               "transformations": []
             }
           },
-          "description": "1 when a bot is a registered member of the guild; emitted only for bots present in the guild",
+          "description": "Number of guilds each bot is a member of",
           "id": 26,
           "links": [],
-          "title": "Bots Online per Guild",
+          "title": "Guilds per Bot",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -2293,7 +2293,6 @@
                       "mode": "off"
                     }
                   },
-                  "max": 1,
                   "min": 0,
                   "thresholds": {
                     "mode": "absolute",
@@ -2308,7 +2307,8 @@
                       }
                     ]
                   },
-                  "unit": "short"
+                  "unit": "short",
+                  "decimals": 0
                 },
                 "overrides": []
               },
@@ -2321,9 +2321,11 @@
                   "calcs": [
                     "lastNotNull"
                   ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
+                  "displayMode": "table",
+                  "placement": "right",
+                  "showLegend": true,
+                  "sortBy": "Last *",
+                  "sortDesc": true
                 },
                 "tooltip": {
                   "hideZeros": false,

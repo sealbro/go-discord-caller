@@ -5,16 +5,20 @@ import (
 	"context"
 	"errors"
 	"os"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/sealbro/go-discord-caller/internal/buildinfo"
 	otelruntime "go.opentelemetry.io/contrib/instrumentation/runtime"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
 // startProcessMetrics exports the Go runtime metrics (go.memory.*,
-// go.goroutine.count, …) plus the process's CPU time and resident memory.
+// go.goroutine.count, …), the build the process runs, and its CPU time and
+// resident memory.
 // RSS is the figure to watch against the container limit: libdave and libopus
 // allocate outside the Go heap, so go.memory.used alone undercounts.
 func startProcessMetrics(mp metric.MeterProvider) error {
@@ -41,7 +45,21 @@ func startProcessMetrics(mp metric.MeterProvider) error {
 		return err
 	}
 
+	buildInfo, err := meter.Int64ObservableGauge("gdc.build.info",
+		metric.WithDescription("Info gauge, always 1, labelled with what the running binary was built from."),
+	)
+	if err != nil {
+		return err
+	}
+	buildAttrs := metric.WithAttributes(
+		attribute.String("version", buildinfo.Version),
+		attribute.String("revision", buildinfo.Revision()),
+		attribute.String("go_version", runtime.Version()),
+		attribute.String("libdave_version", buildinfo.LibdaveVersion),
+	)
+
 	_, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+		o.ObserveInt64(buildInfo, 1, buildAttrs)
 		var ru syscall.Rusage
 		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err == nil {
 			o.ObserveFloat64(cpuTime, time.Duration(ru.Utime.Nano()+ru.Stime.Nano()).Seconds())
@@ -52,7 +70,7 @@ func startProcessMetrics(mp metric.MeterProvider) error {
 			}
 		}
 		return nil
-	}, cpuTime, rss)
+	}, buildInfo, cpuTime, rss)
 	return err
 }
 

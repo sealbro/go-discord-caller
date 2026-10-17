@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/buildinfo"
 	"go.opentelemetry.io/contrib/bridges/otelslog"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
@@ -122,7 +123,7 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 	}()
 
 	res, err := resource.New(ctx,
-		resource.WithAttributes(semconv.ServiceName(ServiceName)),
+		resource.WithAttributes(semconv.ServiceName(ServiceName), semconv.ServiceVersion(buildinfo.Version)),
 	)
 	if err != nil {
 		setupErr = err

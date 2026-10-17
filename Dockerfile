@@ -4,6 +4,7 @@ ARG LIBDAVE_VERSION=v1.1.1
 FROM golang:${GO_VERSION} AS builder
 
 ARG LIBDAVE_VERSION
+ARG VERSION=dev
 
 WORKDIR /src
 COPY . .
@@ -19,6 +20,7 @@ RUN apt-get update \
 ENV PKG_CONFIG_PATH="/root/.local/lib/pkgconfig"
 
 RUN CGO_ENABLED=1 go build \
+    -ldflags "-X github.com/sealbro/go-discord-caller/internal/buildinfo.Version=${VERSION} -X github.com/sealbro/go-discord-caller/internal/buildinfo.LibdaveVersion=${LIBDAVE_VERSION}" \
     -o /bin/runner
 
 # Collect all shared library dependencies of the binary

@@ -5572,6 +5572,224 @@
             "version": "13.1.0-24779284961"
           }
         }
+      },
+      "panel-47": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum by (bot_user_id) (rate(gdc_dave_encrypt_total{origin_prometheus=~\"$origin_prometheus\", outcome=\"failure\"}[$__rate_interval])) * on(bot_user_id) group_left(bot_name) label_replace(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}, \"bot_user_id\", \"$1\", \"bot_id\", \"(.+)\")",
+                        "instant": false,
+                        "legendFormat": "{{bot_name}}",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Outbound frames per second that each bot failed to encrypt. A bot with a sustained line here is silent in its channel while looking connected; it rejoins on its own after ~10 s of failures.",
+          "id": 47,
+          "links": [],
+          "title": "DAVE Encrypt Failures",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 1
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byValue",
+                      "options": {
+                        "op": "lte",
+                        "reducer": "max",
+                        "value": 0
+                      }
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.hideFrom",
+                        "value": {
+                          "legend": true,
+                          "tooltip": false,
+                          "viz": false
+                        }
+                      }
+                    ]
+                  }
+                ]
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-48": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max by (version, revision, go_version, libdave_version) (gdc_build_info{origin_prometheus=~\"$origin_prometheus\"})",
+                        "instant": true,
+                        "legendFormat": "{{version}} ({{revision}}) · {{go_version}} · libdave {{libdave_version}}"
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "The build the bot is running: release tag, commit, Go version and libdave version. \"dev\" means an untagged build; two entries mean two builds reported at once, e.g. mid-deploy.",
+          "id": 48,
+          "links": [],
+          "title": "Running Build",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "fixed",
+                    "fixedColor": "text"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "text",
+                        "value": 0
+                      }
+                    ]
+                  },
+                  "unit": "short"
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "none",
+                "graphMode": "none",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "name",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
       }
     },
     "layout": {
@@ -6082,7 +6300,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 128
+              "y": 131
             }
           },
           {
@@ -6095,7 +6313,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 128
+              "y": 131
             }
           },
           {
@@ -6108,7 +6326,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 136
+              "y": 139
             }
           },
           {
@@ -6121,7 +6339,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 136
+              "y": 139
             }
           },
           {
@@ -6134,7 +6352,7 @@
               "height": 8,
               "width": 8,
               "x": 0,
-              "y": 144
+              "y": 147
             }
           },
           {
@@ -6147,7 +6365,7 @@
               "height": 8,
               "width": 8,
               "x": 8,
-              "y": 144
+              "y": 147
             }
           },
           {
@@ -6160,7 +6378,7 @@
               "height": 8,
               "width": 8,
               "x": 16,
-              "y": 144
+              "y": 147
             }
           },
           {
@@ -6171,9 +6389,35 @@
                 "name": "panel-46"
               },
               "height": 8,
+              "width": 12,
+              "x": 12,
+              "y": 155
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-47"
+              },
+              "height": 8,
+              "width": 12,
+              "x": 0,
+              "y": 155
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-48"
+              },
+              "height": 3,
               "width": 24,
               "x": 0,
-              "y": 152
+              "y": 128
             }
           }
         ]

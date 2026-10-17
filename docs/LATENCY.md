@@ -26,7 +26,7 @@ User mic
   ▼
 [Listener's Discord client]  Opus decode → speakers
 
-Total: ~185ms (single guild, many-callers/mix mode; copy mode skips the mixer queue and is lower)
+Total: ~185ms (single guild, many-callers/mix mode; copy mode skips the mixer queue and is lower — see `gdc.opus.copy.queue_depth`)
 ```
 
 ---
@@ -54,7 +54,7 @@ Total: ~185ms (single guild, many-callers/mix mode; copy mode skips the mixer qu
 ### `RaidModeOneCaller` auto-switches between copy and mix mode
 `RaidModeOneCaller` no longer statically bypasses the pipeline. As of the auto-switch pipeline (commit #37), `OneCallerPipeline` (`internal/manager/pipeline/one_caller.go`) builds an **always-on mixer graph** — per-speaker-channel mixers plus the relay mixer, created up-front and started paused — and a `router` (`internal/manager/router`) flips the owner source between two modes based on the live caller count in the owner channel:
 
-- **Copy mode** (single caller): the owner's `FanoutHandle` is installed with raw `OpusTargets` per speaker `chOut` plus an `OpusCallback` that calls `ally.Session.BroadcastFromGuild` — all inline on disgo's UDP goroutine. No decode, no mix, no re-encode, no fanout goroutine. Mixers stay paused. **End-to-end ≈185ms typical** — the fast path.
+- **Copy mode** (single caller): the owner's `FanoutHandle` is installed with raw `OpusTargets` per speaker `chOut` plus an `OpusCallback` that calls `ally.Session.BroadcastFromGuild` — all inline on disgo's UDP goroutine. No decode, no mix, no re-encode, no fanout goroutine. Mixers stay paused, so the mixer queue wait above does not apply — the fast path. Its only in-process wait is the speaker's output queue, which disgo drains one frame per 20 ms; `gdc.opus.copy.queue_depth` (Prom: `gdc_opus_copy_queue_depth`) records how many frames were already queued ahead of each copied frame, so 0 / 1 / 2 ahead ≈ under 20 / 20–40 / 40–60 ms.
 - **Mix mode** (multiple callers): the source decodes into the per-channel and relay mixers via `SourceBuffer`, picking up the full mixer budget above (~185ms).
 
 The `FanoutHandle` is wired by `routerInstallBuilder` (`internal/manager/pipeline/install.go`), not the old `installFanoutDirect` — that function no longer exists. `router.Recompute` decides the mode at session start (`start` closure) and on every caller join/leave, so the latency profile of a OneCaller session is dynamic, not fixed. The same copy/mix split applies to the `RaidModeOneManyGuildCaller` / `StarCaller` topologies.

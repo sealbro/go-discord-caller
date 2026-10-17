@@ -20,6 +20,7 @@ type DaveMetrics struct {
 	decryptTotal metric.Int64ObservableCounter
 	senders      metric.Int64ObservableGauge
 	encryptTotal metric.Int64ObservableCounter
+	positions    metric.Int64ObservableCounter
 }
 
 func (d *DaveMetrics) init(meter metric.Meter) (err error) {
@@ -39,13 +40,18 @@ func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	if d.positions, err = meter.Int64ObservableCounter("gdc.dave.decrypt.position.total",
+		metric.WithDescription("DAVE frame decryptions by position in the sender's talk spurt. Labels: bot_user_id, outcome (success|failure), position (first|early = frames 1-9|mid)."),
+	); err != nil {
+		return
+	}
 	return nil
 }
 
 // RegisterObservers registers cb as the observable callback for every DAVE
 // instrument.
 func (d *DaveMetrics) RegisterObservers(cb metric.Callback) error {
-	_, err := d.meter.RegisterCallback(cb, d.decryptTotal, d.senders, d.encryptTotal)
+	_, err := d.meter.RegisterCallback(cb, d.decryptTotal, d.senders, d.encryptTotal, d.positions)
 	return err
 }
 
@@ -80,6 +86,18 @@ func (d *DaveMetrics) ObserveEncrypt(o metric.Observer, botUserID, outcome, reas
 			attribute.String("bot_user_id", botUserID),
 			attribute.String("outcome", outcome),
 			attribute.String("reason", reason),
+		),
+	)
+}
+
+// ObserveDecryptPosition emits one decrypt-position counter sample. Call
+// inside the callback registered with RegisterObservers.
+func (d *DaveMetrics) ObserveDecryptPosition(o metric.Observer, botUserID, outcome, position string, count int64) {
+	o.ObserveInt64(d.positions, count,
+		metric.WithAttributes(
+			attribute.String("bot_user_id", botUserID),
+			attribute.String("outcome", outcome),
+			attribute.String("position", position),
 		),
 	)
 }

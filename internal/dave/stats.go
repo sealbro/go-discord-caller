@@ -77,6 +77,14 @@ type encKey struct {
 	reason    string
 }
 
+// posKey identifies one decrypt-position counter series. No sender identity:
+// the set is bounded by bots × outcomes × positions.
+type posKey struct {
+	botUserID string
+	outcome   string
+	position  string
+}
+
 // healthKey identifies one exported sender-gauge series.
 type healthKey struct {
 	botUserID string
@@ -135,18 +143,20 @@ type Stats struct {
 	// retired holds the final counts of evicted senders. The exported counter
 	// sums over live and retired alike, or dropping a sender's counters would
 	// move a monotonic series downwards and read as a counter reset.
-	retired  map[aggKey]int64
-	encrypts map[encKey]*atomic.Int64
-	metrics  *telemetry.DaveMetrics
+	retired   map[aggKey]int64
+	encrypts  map[encKey]*atomic.Int64
+	positions map[posKey]*atomic.Int64
+	metrics   *telemetry.DaveMetrics
 }
 
 func NewStats() *Stats {
 	return &Stats{
-		counters: make(map[key]*atomic.Int64),
-		holders:  make(map[user]int),
-		retiring: make(map[user]struct{}),
-		retired:  make(map[aggKey]int64),
-		encrypts: make(map[encKey]*atomic.Int64),
+		counters:  make(map[key]*atomic.Int64),
+		holders:   make(map[user]int),
+		retiring:  make(map[user]struct{}),
+		retired:   make(map[aggKey]int64),
+		encrypts:  make(map[encKey]*atomic.Int64),
+		positions: make(map[posKey]*atomic.Int64),
 	}
 }
 
@@ -204,6 +214,17 @@ func (s *Stats) RecordEncrypt(botUserID string, err error) {
 		botUserID: botUserID,
 		outcome:   outcome(err),
 		reason:    reason(err),
+	}).Add(1)
+}
+
+// RecordPosition counts one Decrypt that reached the backend by where the
+// frame fell in its sender's talk spurt, to tell failures concentrated at the
+// start of speech from failures spread through it.
+func (s *Stats) RecordPosition(botUserID, position string, err error) {
+	lookup(&s.mu, s.positions, posKey{
+		botUserID: botUserID,
+		outcome:   outcome(err),
+		position:  position,
 	}).Add(1)
 }
 
@@ -290,7 +311,15 @@ func (s *Stats) observe(_ context.Context, o metric.Observer) error {
 	for k, c := range s.encrypts {
 		encrypts[k] = c.Load()
 	}
+	positions := make(map[posKey]int64, len(s.positions))
+	for k, c := range s.positions {
+		positions[k] = c.Load()
+	}
 	s.mu.RUnlock()
+
+	for k, v := range positions {
+		m.ObserveDecryptPosition(o, k.botUserID, k.outcome, k.position, v)
+	}
 
 	for k, v := range encrypts {
 		m.ObserveEncrypt(o, k.botUserID, k.outcome, k.reason, v)

@@ -68,6 +68,15 @@ type aggKey struct {
 	reason    string
 }
 
+// encKey identifies one encrypt counter series. The sender is always the bot
+// itself, so unlike decrypt there is no per-user dimension to retire: the set
+// is bounded by bots × outcomes × reasons.
+type encKey struct {
+	botUserID string
+	outcome   string
+	reason    string
+}
+
 // healthKey identifies one exported sender-gauge series.
 type healthKey struct {
 	botUserID string
@@ -126,8 +135,9 @@ type Stats struct {
 	// retired holds the final counts of evicted senders. The exported counter
 	// sums over live and retired alike, or dropping a sender's counters would
 	// move a monotonic series downwards and read as a counter reset.
-	retired map[aggKey]int64
-	metrics *telemetry.DaveMetrics
+	retired  map[aggKey]int64
+	encrypts map[encKey]*atomic.Int64
+	metrics  *telemetry.DaveMetrics
 }
 
 func NewStats() *Stats {
@@ -136,6 +146,7 @@ func NewStats() *Stats {
 		holders:  make(map[user]int),
 		retiring: make(map[user]struct{}),
 		retired:  make(map[aggKey]int64),
+		encrypts: make(map[encKey]*atomic.Int64),
 	}
 }
 
@@ -185,6 +196,17 @@ func (s *Stats) RecordDropped(botUserID, userID string) {
 	}).Add(1)
 }
 
+// RecordEncrypt counts one outbound Encrypt call. err is the error it returned,
+// or nil. A bot whose encryptor has lost its key ratchet fails every frame
+// while looking connected, so this is the only signal that it is silent.
+func (s *Stats) RecordEncrypt(botUserID string, err error) {
+	lookup(&s.mu, s.encrypts, encKey{
+		botUserID: botUserID,
+		outcome:   outcome(err),
+		reason:    reason(err),
+	}).Add(1)
+}
+
 // Retire releases one session's hold on a user and, once none are left, marks
 // their series for removal after the next collection exports the final values.
 // Call when a session drops the user, exactly once per Keep.
@@ -215,20 +237,26 @@ func (s *Stats) Keep(botUserID, userID string) {
 }
 
 func (s *Stats) counter(k key) *atomic.Int64 {
-	s.mu.RLock()
-	c, ok := s.counters[k]
-	s.mu.RUnlock()
+	return lookup(&s.mu, s.counters, k)
+}
+
+// lookup returns the counter for k in m, creating it on first use. m is
+// guarded by mu.
+func lookup[K comparable](mu *sync.RWMutex, m map[K]*atomic.Int64, k K) *atomic.Int64 {
+	mu.RLock()
+	c, ok := m[k]
+	mu.RUnlock()
 	if ok {
 		return c
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if c, ok = s.counters[k]; ok {
+	mu.Lock()
+	defer mu.Unlock()
+	if c, ok = m[k]; ok {
 		return c
 	}
 	c = new(atomic.Int64)
-	s.counters[k] = c
+	m[k] = c
 	return c
 }
 
@@ -258,7 +286,15 @@ func (s *Stats) observe(_ context.Context, o metric.Observer) error {
 		}
 		senders[u] = t
 	}
+	encrypts := make(map[encKey]int64, len(s.encrypts))
+	for k, c := range s.encrypts {
+		encrypts[k] = c.Load()
+	}
 	s.mu.RUnlock()
+
+	for k, v := range encrypts {
+		m.ObserveEncrypt(o, k.botUserID, k.outcome, k.reason, v)
+	}
 
 	for k, v := range totals {
 		m.ObserveDecrypt(o, k.botUserID, k.outcome, k.reason, v)
@@ -301,7 +337,7 @@ func outcome(err error) string {
 	return outcomeSuccess
 }
 
-// reason maps a libdave decrypt error to a stable label value.
+// reason maps a libdave encrypt or decrypt error to a stable label value.
 //
 // The comparison is on the message rather than the sentinel errors, because
 // those live in the libdave package and importing it here would make this
@@ -325,6 +361,8 @@ func reason(err error) string {
 		{"invalid nonce", "invalid_nonce"},
 		{"missing cryptor", "missing_cryptor"},
 		{"failed to decrypt frame", "decrypt_failure"},
+		{"failed to encrypt frame", "encrypt_failure"},
+		{"too many attempts", "too_many_attempts"},
 	} {
 		if strings.Contains(msg, r.substr) {
 			return r.label

@@ -1,12 +1,15 @@
 package dave
 
 import (
+	"context"
 	"errors"
 	"log/slog"
 	"sync"
 	"testing"
 
 	"github.com/disgoorg/godave"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 // errMissingKeyRatchet matches libdave's ErrMissingKeyRatchet by text; the CGO
@@ -129,5 +132,81 @@ func TestEncryptStallsForwardsToTheInstalledHandler(t *testing.T) {
 
 	if len(rec.calls) != 1 {
 		t.Fatalf("handler calls = %d, want 1", len(rec.calls))
+	}
+}
+
+// encryptPoints runs one collection and returns the encrypt counter's points.
+func encryptPoints(t *testing.T, reader *metric.ManualReader) []metricdata.DataPoint[int64] {
+	t.Helper()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, md := range sm.Metrics {
+			if md.Name != "gdc.dave.encrypt.total" {
+				continue
+			}
+			sum, ok := md.Data.(metricdata.Sum[int64])
+			if !ok {
+				t.Fatalf("gdc.dave.encrypt.total is %T, want Sum[int64]", md.Data)
+			}
+			return sum.DataPoints
+		}
+	}
+	return nil
+}
+
+func encryptCount(points []metricdata.DataPoint[int64], botUserID, outcome, reason string) int64 {
+	for _, p := range points {
+		b, _ := p.Attributes.Value("bot_user_id")
+		o, _ := p.Attributes.Value("outcome")
+		r, _ := p.Attributes.Value("reason")
+		if b.AsString() == botUserID && o.AsString() == outcome && r.AsString() == reason {
+			return p.Value
+		}
+	}
+	return -1
+}
+
+// A bot that cannot encrypt is silent while looking connected, and disgo's
+// per-frame log line is off by default, so the counter is the only way to see
+// it — per bot, with the reason.
+func TestEncryptOutcomesAreCountedPerBot(t *testing.T) {
+	stats := NewStats()
+	backend := &encryptingSession{}
+	inner := func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return backend }
+	session := Instrument(inner, stats)(slog.Default(), "speaker-1", &fakeConn{})
+
+	encryptN(session, 3)
+	backend.err = errMissingKeyRatchet
+	encryptN(session, 2)
+
+	reader, _ := newReader(t, stats)
+	pts := encryptPoints(t, reader)
+	if got := encryptCount(pts, "speaker-1", outcomeSuccess, reasonNone); got != 3 {
+		t.Errorf("successful encrypts = %d, want 3", got)
+	}
+	if got := encryptCount(pts, "speaker-1", outcomeFailure, "missing_key_ratchet"); got != 2 {
+		t.Errorf("missing-key-ratchet encrypts = %d, want 2", got)
+	}
+}
+
+// The bot is the only sender of its own frames: encrypt outcomes must not be
+// counted as a decrypt sender, or a silent bot would show up as a "failing"
+// participant in the sender-health gauge.
+func TestEncryptDoesNotCountAsADecryptSender(t *testing.T) {
+	stats := NewStats()
+	backend := &encryptingSession{err: errMissingKeyRatchet}
+	inner := func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return backend }
+	session := Instrument(inner, stats)(slog.Default(), "speaker-1", &fakeConn{})
+
+	encryptN(session, 5)
+
+	reader, _ := newReader(t, stats)
+	counts, gauge := collectOnce(t, reader)
+	if len(counts) != 0 || len(gauge) != 0 {
+		t.Errorf("decrypt series after encrypts only: %d counter points, %d sender points; want none", len(counts), len(gauge))
 	}
 }

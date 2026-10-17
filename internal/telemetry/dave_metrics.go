@@ -5,7 +5,8 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// DaveMetrics reports the outcome of every DAVE frame decryption.
+// DaveMetrics reports the outcome of every DAVE frame decryption and
+// encryption.
 //
 // disgo logs a decrypt failure per packet with no SSRC or user ID attached, so
 // the logs cannot distinguish one permanently undecryptable sender from every
@@ -18,6 +19,7 @@ type DaveMetrics struct {
 	meter        metric.Meter // retained for RegisterObservers
 	decryptTotal metric.Int64ObservableCounter
 	senders      metric.Int64ObservableGauge
+	encryptTotal metric.Int64ObservableCounter
 }
 
 func (d *DaveMetrics) init(meter metric.Meter) (err error) {
@@ -32,13 +34,18 @@ func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	if d.encryptTotal, err = meter.Int64ObservableCounter("gdc.dave.encrypt.total",
+		metric.WithDescription("DAVE outbound frame encryption outcomes. Labels: bot_user_id, outcome (success|failure), reason (failure detail, else none)."),
+	); err != nil {
+		return
+	}
 	return nil
 }
 
-// RegisterObservers registers cb as the observable callback for both decrypt
-// instruments.
+// RegisterObservers registers cb as the observable callback for every DAVE
+// instrument.
 func (d *DaveMetrics) RegisterObservers(cb metric.Callback) error {
-	_, err := d.meter.RegisterCallback(cb, d.decryptTotal, d.senders)
+	_, err := d.meter.RegisterCallback(cb, d.decryptTotal, d.senders, d.encryptTotal)
 	return err
 }
 
@@ -61,6 +68,18 @@ func (d *DaveMetrics) ObserveSenders(o metric.Observer, botUserID, health string
 		metric.WithAttributes(
 			attribute.String("bot_user_id", botUserID),
 			attribute.String("health", health),
+		),
+	)
+}
+
+// ObserveEncrypt emits one encrypt counter sample. Call inside the callback
+// registered with RegisterObservers.
+func (d *DaveMetrics) ObserveEncrypt(o metric.Observer, botUserID, outcome, reason string, count int64) {
+	o.ObserveInt64(d.encryptTotal, count,
+		metric.WithAttributes(
+			attribute.String("bot_user_id", botUserID),
+			attribute.String("outcome", outcome),
+			attribute.String("reason", reason),
 		),
 	)
 }

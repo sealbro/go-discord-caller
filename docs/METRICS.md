@@ -115,6 +115,7 @@ decrypt health is reported as a count of senders per bucket.
 | `gdc.dave.decrypt.total`   | ObservableCounter | `gdc_dave_decrypt_total`   | `bot_user_id`, `outcome` (`success`/`passthrough`/`dropped`/`failure`), `reason` | Inbound frame decryption outcomes, summed over senders. |
 | `gdc.dave.decrypt.senders` | ObservableGauge   | `gdc_dave_decrypt_senders` | `bot_user_id`, `health` (`clean`/`partial`/`failing`) | Distinct senders per decrypt-health bucket. One `failing` sender among `clean` ones points at that sender; `partial` everywhere points at the session. |
 | `gdc.dave.encrypt.total`   | ObservableCounter | `gdc_dave_encrypt_total`   | `bot_user_id`, `outcome` (`success`/`failure`), `reason` | Outbound frame encryption outcomes. A bot whose encryptor lost its key ratchet fails every frame (`reason="missing_key_ratchet"`) and is silent in its channel while looking connected; after ~10 s of failures it rejoins its channel. |
+| `gdc.dave.decrypt.position.total` | ObservableCounter | `gdc_dave_decrypt_position_total` | `bot_user_id`, `outcome` (`success`/`failure`), `position` (`first`/`early`/`mid`) | Decryptions that reached the backend, by where the frame fell in its sender's talk spurt: the first frame after ≥100 ms of silence, frames 1–9 (the first 200 ms), or later. Compare failure rates across positions to tell losses at the start of speech from losses spread through it. |
 
 `reason` is `none` on success, otherwise one of `missing_key_ratchet`,
 `invalid_nonce`, `missing_cryptor`, `decrypt_failure`, `encrypt_failure`,
@@ -162,6 +163,10 @@ gdc_pool_bots_connected / gdc_pool_bots_total
 
 # bots that cannot encrypt outbound audio (silent while connected)
 sum by (bot_user_id) (rate(gdc_dave_encrypt_total{outcome="failure"}[5m])) > 0
+
+# DAVE decrypt failure rate by position in the talk spurt
+sum by (position) (rate(gdc_dave_decrypt_position_total{outcome="failure"}[1h]))
+  / sum by (position) (rate(gdc_dave_decrypt_position_total[1h]))
 
 # active voice raids
 sum(gdc_voice_sessions_active)

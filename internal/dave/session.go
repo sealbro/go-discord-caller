@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/disgoorg/godave"
 )
@@ -21,8 +22,13 @@ func Instrument(inner godave.SessionCreateFunc, stats *Stats, opts ...Option) go
 	for _, opt := range opts {
 		opt(&o)
 	}
+	now := o.clock
+	if now == nil {
+		now = time.Now
+	}
 	return func(logger *slog.Logger, selfUserID godave.UserID, callbacks godave.Callbacks) godave.Session {
 		return &countingSession{
+			now:         now,
 			Session:     inner(logger, selfUserID, callbacks),
 			stats:       stats,
 			botUserID:   string(selfUserID),
@@ -30,7 +36,7 @@ func Instrument(inner godave.SessionCreateFunc, stats *Stats, opts ...Option) go
 			callbacks:   callbacks,
 			stallFrames: int64(o.stallFrames),
 			onStall:     o.onStall,
-			known:       make(map[godave.UserID]struct{}),
+			known:       make(map[godave.UserID]*talkSpurt),
 		}
 	}
 }
@@ -41,6 +47,12 @@ type Option func(*options)
 type options struct {
 	stallFrames int
 	onStall     EncryptStallFunc
+	clock       func() time.Time
+}
+
+// withClock replaces time.Now for talk-spurt timing in tests.
+func withClock(now func() time.Time) Option {
+	return func(o *options) { o.clock = now }
 }
 
 // EncryptStallFunc is told which bot's session has stopped encrypting, and the
@@ -114,9 +126,50 @@ type countingSession struct {
 	stallFrames  int64
 	onStall      EncryptStallFunc
 	encryptFails atomic.Int64
+	now          func() time.Time
 
 	mu    sync.RWMutex
-	known map[godave.UserID]struct{}
+	known map[godave.UserID]*talkSpurt
+}
+
+// A sender's frames stop arriving when they go quiet, so a pause of
+// talkSpurtGap — five missed 20 ms frames — starts a new talk spurt. Shorter
+// gaps are packet loss or jitter.
+const (
+	talkSpurtGap = 100 * time.Millisecond
+	earlyFrames  = 10 // frames 1–9 of a spurt, its first 200 ms
+)
+
+// Frame position within a talk spurt, reported as the position label.
+const (
+	positionFirst = "first"
+	positionEarly = "early"
+	positionMid   = "mid"
+)
+
+// talkSpurt tracks where a sender is within their current stretch of speech.
+// Only Decrypt touches it, on disgo's receive goroutine; the atomics keep it
+// race-free should that ever change.
+type talkSpurt struct {
+	lastAt atomic.Int64 // unix nanos of the previous frame; 0 before the first
+	index  atomic.Int64 // frames seen in the current spurt
+}
+
+// next records a frame arriving at now and returns its position.
+func (t *talkSpurt) next(now time.Time) string {
+	at := now.UnixNano()
+	prev := t.lastAt.Swap(at)
+	if prev == 0 || at-prev >= int64(talkSpurtGap) {
+		t.index.Store(0)
+	}
+	switch i := t.index.Add(1) - 1; {
+	case i == 0:
+		return positionFirst
+	case i < earlyFrames:
+		return positionEarly
+	default:
+		return positionMid
+	}
 }
 
 // Decrypt counts the outcome and handles the no-decryptor case itself.
@@ -138,7 +191,8 @@ type countingSession struct {
 // UPSTREAM(golibdave v0.3.0): the unknown-user passthrough copies its arguments
 // the wrong way round (golibdave.go:104), returning a frame of silence.
 func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedFrame []byte) (int, error) {
-	if !s.knows(userID) {
+	spurt := s.sender(userID)
+	if spurt == nil {
 		if s.Session.Ready() {
 			s.stats.RecordDropped(s.botUserID, string(userID))
 			return 0, nil
@@ -150,8 +204,10 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 		return copy(decryptedFrame[:cap(decryptedFrame)], frame), nil
 	}
 
+	position := spurt.next(s.now())
 	n, err := s.Session.Decrypt(userID, frame, decryptedFrame)
 	s.stats.Record(s.botUserID, string(userID), err)
+	s.stats.RecordPosition(s.botUserID, position, err)
 	return n, err
 }
 
@@ -195,11 +251,13 @@ func (s *countingSession) RemoveUser(userID godave.UserID) {
 	s.Session.RemoveUser(userID)
 }
 
-func (s *countingSession) knows(userID godave.UserID) bool {
+// sender returns the talk-spurt state of a user the backend has a decryptor
+// for, or nil for anyone else.
+func (s *countingSession) sender(userID godave.UserID) *talkSpurt {
 	s.mu.RLock()
-	_, ok := s.known[userID]
+	spurt := s.known[userID]
 	s.mu.RUnlock()
-	return ok
+	return spurt
 }
 
 // remember records userID and reports whether it was new, so the stats
@@ -211,7 +269,7 @@ func (s *countingSession) remember(userID godave.UserID) bool {
 	if _, ok := s.known[userID]; ok {
 		return false
 	}
-	s.known[userID] = struct{}{}
+	s.known[userID] = &talkSpurt{}
 	return true
 }
 

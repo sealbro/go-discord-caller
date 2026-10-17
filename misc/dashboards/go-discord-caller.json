@@ -4287,10 +4287,36 @@
                     },
                     "refId": "A"
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "(round((sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) / 3600) * 3600 and (sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) >= 3600) or round((sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) / 60) * 60",
+                        "format": "table",
+                        "instant": true,
+                        "legendFormat": "__auto",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
                 }
               ],
               "queryOptions": {},
               "transformations": [
+                {
+                  "group": "merge",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {}
+                  }
+                },
                 {
                   "group": "organize",
                   "kind": "Transformation",
@@ -4304,11 +4330,13 @@
                         "origin_prometheus": true
                       },
                       "indexByName": {
-                        "Value": 1,
-                        "guild_name": 0
+                        "guild_name": 0,
+                        "Value #A": 1,
+                        "Value #B": 2
                       },
                       "renameByName": {
-                        "Value": "Sessions (7d)",
+                        "Value #A": "Sessions (7d)",
+                        "Value #B": "Raid Time (7d)",
                         "guild_name": "Guild"
                       }
                     }
@@ -4317,7 +4345,7 @@
               ]
             }
           },
-          "description": "Guilds ranked by number of voice raid sessions started in the last 7 days",
+          "description": "Guilds ranked by number of voice raid sessions started in the last 7 days, with the total time a session was running (1-minute resolution)",
           "id": 36,
           "links": [],
           "title": "Top Guilds by Sessions (7d)",
@@ -4374,6 +4402,22 @@
                       {
                         "id": "custom.width",
                         "value": 220
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Raid Time (7d)"
+                    },
+                    "properties": [
+                      {
+                        "id": "unit",
+                        "value": "dtdurations"
+                      },
+                      {
+                        "id": "decimals",
+                        "value": 0
                       }
                     ]
                   }

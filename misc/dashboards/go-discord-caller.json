@@ -4176,15 +4176,15 @@
                 }
               ],
               "queryOptions": {
-                "timeFrom": "30d"
+                "timeFrom": "14d"
               },
               "transformations": []
             }
           },
-          "description": "Session starts per day over the last 30 days, independent of the dashboard time range",
+          "description": "Session starts per day over the last 14 days, independent of the dashboard time range",
           "id": 35,
           "links": [],
-          "title": "Daily Session Starts (30d)",
+          "title": "Daily Session Starts (14d)",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -4418,10 +4418,11 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "expr": "max_over_time(sum(gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})[1h:1m])",
                         "instant": false,
-                        "legendFormat": "Callers",
-                        "range": true
+                        "legendFormat": "Peak callers",
+                        "range": true,
+                        "interval": "1h"
                       },
                       "version": "v0"
                     },
@@ -4435,7 +4436,7 @@
               "transformations": []
             }
           },
-          "description": "Total live voice callers across all guilds, over the last 7 days, independent of the dashboard time range",
+          "description": "Peak live voice callers per hour across all guilds over the last 7 days, independent of the dashboard time range. Bars appear only in hours with an active raid.",
           "id": 37,
           "links": [],
           "title": "Voice Callers Trend (7d)",
@@ -4456,8 +4457,8 @@
                     "axisPlacement": "auto",
                     "barAlignment": 0,
                     "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 10,
+                    "drawStyle": "bars",
+                    "fillOpacity": 40,
                     "gradientMode": "none",
                     "hideFrom": {
                       "legend": false,
@@ -4465,13 +4466,13 @@
                       "viz": false
                     },
                     "insertNulls": false,
-                    "lineInterpolation": "smooth",
-                    "lineWidth": 2,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 1,
                     "pointSize": 5,
                     "scaleDistribution": {
                       "type": "linear"
                     },
-                    "showPoints": "auto",
+                    "showPoints": "never",
                     "showValues": false,
                     "spanNulls": false,
                     "stacking": {

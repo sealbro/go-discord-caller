@@ -13,6 +13,7 @@ type OpusMetrics struct {
 	provideDuration   metric.Float64Histogram
 	allowUserDuration metric.Float64Histogram
 	tickDuration      metric.Float64Histogram
+	tickLateness      metric.Float64Histogram
 	pipelineLatency   metric.Float64Histogram
 }
 
@@ -32,7 +33,7 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if o.allowUserDuration, err = meter.Float64Histogram("gdc.opus.allow_user.duration",
-		metric.WithDescription("allowUser filter execution duration per evaluated frame"),
+		metric.WithDescription("allowUser lookup duration on a per-session cache miss (once per user, not per frame)"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(1, 2, 5, 12, 20),
 	); err != nil {
@@ -42,6 +43,16 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		metric.WithDescription("Mixer tick processing time"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 20),
+	); err != nil {
+		return
+	}
+	// A tick fires on time to within a millisecond or two; the upper buckets
+	// exist for scheduler or GC stalls, which are what push a queued frame past
+	// the 60 ms cap in gdc.mixer.pipeline.latency.
+	if o.tickLateness, err = meter.Float64Histogram("gdc.mixer.tick.lateness",
+		metric.WithDescription("How far past its 20 ms boundary a mixer tick fired"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 20, 40, 80),
 	); err != nil {
 		return
 	}
@@ -123,6 +134,14 @@ func (r OpusRecorder) RecordTick(ms float64) {
 		return
 	}
 	r.m.tickDuration.Record(context.Background(), ms, r.attr)
+}
+
+// RecordTickLateness records how late a mixer tick fired, in milliseconds.
+func (r OpusRecorder) RecordTickLateness(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.tickLateness.Record(context.Background(), ms, r.attr)
 }
 
 // RecordPipelineLatency records end-to-end pipeline latency in milliseconds.

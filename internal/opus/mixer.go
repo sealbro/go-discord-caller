@@ -297,7 +297,7 @@ func (m *Mixer) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Microsecond)
 	defer timer.Stop()
 
-	deadline := time.Now()
+	schedule := newTickSchedule(time.Now())
 
 	for {
 		select {
@@ -305,26 +305,43 @@ func (m *Mixer) Run(ctx context.Context) {
 			return
 		case <-timer.C:
 			start := time.Now()
+			m.metrics.RecordTickLateness(float64(schedule.lateness(start).Microseconds()) / 1000)
 			if err := m.tick(); err != nil {
 				slog.Error("mixer: tick error", slog.Any("err", err))
 			}
 			m.metrics.RecordTick(float64(time.Since(start).Microseconds()) / 1000)
 
-			deadline = deadline.Add(mixerFrameDur)
-			next := time.Until(deadline)
-			if next < 0 {
-				// Skip past every deadline already in the past so we resume
-				// on a future boundary instead of replaying missed slots.
-				missed := (-next)/mixerFrameDur + 1
-				deadline = deadline.Add(missed * mixerFrameDur)
-				next = time.Until(deadline)
-			}
-			if next < time.Millisecond {
-				next = time.Millisecond
-			}
-			timer.Reset(next)
+			timer.Reset(schedule.next(time.Now()))
 		}
 	}
+}
+
+// tickSchedule holds the absolute 20 ms boundary the mixer aims to tick on.
+type tickSchedule struct {
+	deadline time.Time
+}
+
+func newTickSchedule(start time.Time) *tickSchedule {
+	return &tickSchedule{deadline: start}
+}
+
+// lateness reports how far past its boundary a tick that fired at now is.
+func (s *tickSchedule) lateness(now time.Time) time.Duration {
+	return max(now.Sub(s.deadline), 0)
+}
+
+// next advances to the following boundary and returns how long to wait for
+// it. Boundaries already in the past are skipped so the mixer resumes on a
+// future one instead of replaying missed slots.
+func (s *tickSchedule) next(now time.Time) time.Duration {
+	s.deadline = s.deadline.Add(mixerFrameDur)
+	wait := s.deadline.Sub(now)
+	if wait < 0 {
+		missed := (-wait)/mixerFrameDur + 1
+		s.deadline = s.deadline.Add(missed * mixerFrameDur)
+		wait = s.deadline.Sub(now)
+	}
+	return max(wait, time.Millisecond)
 }
 
 // tick is the 20 ms mix loop. Composes four phases (gather frames, record

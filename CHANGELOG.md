@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.4] - 2026-10-17
+
+### Added
+- **Encrypt failure metrics**: outgoing audio that fails to encrypt is counted per bot, so a silent speaker shows up on the dashboard.
+- **Decrypt outcomes by talk-spurt position**: shows whether lost frames cluster at the start of speech or are spread throughout.
+- **Audio timing metrics**: how late mixer ticks fire and how long copied audio waits in the queue.
+- **Build version metric**: the running version is reported alongside other metrics.
+
 ## [0.11.3] - 2026-10-14
 
 ### Added

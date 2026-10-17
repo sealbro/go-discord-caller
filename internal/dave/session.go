@@ -9,7 +9,8 @@ import (
 )
 
 // Instrument wraps a DAVE session factory so every frame decryption is counted
-// in stats, keyed by the sending user, and so frames from users the backend has
+// in stats, keyed by the sending user, every frame encryption is counted per
+// bot, and frames from users the backend has
 // no decryptor for are passed through correctly (see countingSession.Decrypt).
 //
 // Every other method is the backend's own. Pass the result wherever the raw
@@ -154,10 +155,12 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 	return n, err
 }
 
-// Encrypt reports the session through onStall once outbound encryption has
-// been failing long enough to mean the bot is silent; see WithEncryptStall.
+// Encrypt counts the outcome, and reports the session through onStall once
+// outbound encryption has been failing long enough to mean the bot is silent;
+// see WithEncryptStall.
 func (s *countingSession) Encrypt(ssrc uint32, frame []byte, encryptedFrame []byte) (int, error) {
 	n, err := s.Session.Encrypt(ssrc, frame, encryptedFrame)
+	s.stats.RecordEncrypt(s.botUserID, err)
 	if err == nil {
 		s.encryptFails.Store(0)
 		return n, nil

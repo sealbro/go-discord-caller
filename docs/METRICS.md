@@ -104,6 +104,24 @@ pre-baked `OpusRecorder` (`Metrics.ForGuild`) — zero-alloc per frame.
 
 ---
 
+## 🔐 DAVE end-to-end encryption (`internal/telemetry/dave_metrics.go`)
+
+Counted in memory by `internal/dave` and exported once per collection, so the
+per-frame path stays an atomic increment. No sender identity is exported:
+decrypt health is reported as a count of senders per bucket.
+
+| OTel instrument | Type | Prometheus series | Attributes | Description |
+|-----------------|------|-------------------|------------|-------------|
+| `gdc.dave.decrypt.total`   | ObservableCounter | `gdc_dave_decrypt_total`   | `bot_user_id`, `outcome` (`success`/`passthrough`/`dropped`/`failure`), `reason` | Inbound frame decryption outcomes, summed over senders. |
+| `gdc.dave.decrypt.senders` | ObservableGauge   | `gdc_dave_decrypt_senders` | `bot_user_id`, `health` (`clean`/`partial`/`failing`) | Distinct senders per decrypt-health bucket. One `failing` sender among `clean` ones points at that sender; `partial` everywhere points at the session. |
+| `gdc.dave.encrypt.total`   | ObservableCounter | `gdc_dave_encrypt_total`   | `bot_user_id`, `outcome` (`success`/`failure`), `reason` | Outbound frame encryption outcomes. A bot whose encryptor lost its key ratchet fails every frame (`reason="missing_key_ratchet"`) and is silent in its channel while looking connected; after ~10 s of failures it rejoins its channel. |
+
+`reason` is `none` on success, otherwise one of `missing_key_ratchet`,
+`invalid_nonce`, `missing_cryptor`, `decrypt_failure`, `encrypt_failure`,
+`too_many_attempts` or `other`.
+
+---
+
 ## 🖥️ Process & Go runtime (`internal/telemetry/process_metrics.go`)
 
 The process's own resource use, for capacity planning against the container limit. Compare `gdc_process_memory_usage_bytes` with `go_memory_used_bytes`: the gap is memory libdave and libopus allocate outside the Go heap, which `GOMEMLIMIT` does not cover.
@@ -119,7 +137,8 @@ The process's own resource use, for capacity planning against the container limi
 ## Implementation
 
 Instruments are defined in `internal/telemetry/`, split by subsystem:
-`bot_metrics.go`, `pool_metrics.go`, `session_metrics.go`, `opus_metrics.go`.
+`bot_metrics.go`, `pool_metrics.go`, `session_metrics.go`, `opus_metrics.go`,
+`dave_metrics.go`, `process_metrics.go`.
 `metrics.go` wires them together (`NewMetrics`); `setup.go` configures the OTLP
 exporters (traces, metrics, logs) and the periodic metric reader (15 s interval).
 
@@ -139,6 +158,9 @@ sum by (path) (rate(gdc_fanout_frames_dropped_total[5m]))
 
 # speaker bots connected vs registered
 gdc_pool_bots_connected / gdc_pool_bots_total
+
+# bots that cannot encrypt outbound audio (silent while connected)
+sum by (bot_user_id) (rate(gdc_dave_encrypt_total{outcome="failure"}[5m])) > 0
 
 # active voice raids
 sum(gdc_voice_sessions_active)

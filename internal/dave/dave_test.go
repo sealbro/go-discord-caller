@@ -432,6 +432,8 @@ func TestReasonLabels(t *testing.T) {
 		{errors.New("failed to DAVE decrypt packet: missing key ratchet"), "missing_key_ratchet"},
 		{errors.New("invalid nonce"), "invalid_nonce"},
 		{errors.New("missing cryptor"), "missing_cryptor"},
+		{errors.New("failed to encrypt frame"), "encrypt_failure"},
+		{errors.New("too many attempts to encrypt the frame failed"), "too_many_attempts"},
 		{errors.New("something new upstream"), "other"},
 	}
 

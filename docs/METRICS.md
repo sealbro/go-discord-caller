@@ -91,7 +91,7 @@ the opus pipeline via `FrameDropper`.
 
 ## 🎙️ Opus / mixer timing (`internal/telemetry/opus_metrics.go`)
 
-All histograms, unit `ms`, attribute `guild_id`. Recorded on the hot path via a
+All histograms, attribute `guild_id`; unit `ms` unless noted. Recorded on the hot path via a
 pre-baked `OpusRecorder` (`Metrics.ForGuild`) — zero-alloc per frame.
 
 | OTel instrument | Prometheus series (`_bucket`/`_sum`/`_count`) | Buckets (ms) | Emitter | Description |
@@ -101,6 +101,7 @@ pre-baked `OpusRecorder` (`Metrics.ForGuild`) — zero-alloc per frame.
 | `gdc.opus.allow_user.duration` | `gdc_opus_allow_user_duration_milliseconds` | 1, 2, 5, 12, 20         | `internal/manager/allow_user.go`  | Time of an `allowUser` lookup that missed the per-session cache — once per user, not per frame; cached checks are a single map read and are not recorded. |
 | `gdc.mixer.tick.duration`      | `gdc_mixer_tick_duration_milliseconds`      | 0.5, 1, 2, 5, 10, 20    | `internal/opus/mixer.go`          | Mixer tick processing time. |
 | `gdc.mixer.tick.lateness`      | `gdc_mixer_tick_lateness_milliseconds`      | 0.5, 1, 2, 5, 10, 20, 40, 80 | `internal/opus/mixer.go`     | How far past its 20 ms boundary a mixer tick fired. Scheduler or GC stalls show up here; they are what push a queued frame past the 60 ms cap in `gdc.mixer.pipeline.latency`. |
+| `gdc.opus.copy.queue_depth`    | `gdc_opus_copy_queue_depth`                 | 0, 1, 2, 3 (frames)     | `internal/opus/voice_receiver.go` | Copy mode only (a single caller, mixer bypassed): frames already queued ahead of a copied frame in a speaker's output channel. disgo drains one frame per 20 ms, so 0 / 1 / 2 / 3 ahead ≈ under 20 / 20–40 / 40–60 / 60+ ms of wait. A frame that finds the queue full is dropped (`path="direct"`) and not recorded here. Integer histogram, unit `{frame}`, not `ms`. |
 | `gdc.mixer.pipeline.latency`   | `gdc_mixer_pipeline_latency_milliseconds`   | 10, 15, 20, 25, 30, 35, 40, 50, 60, 80, 120 | `internal/opus/mixer.go`    | Latency from Discord receive to the mixer tick that consumes the frame. Floor ~20 ms (tick period), ceiling 60 ms (`audioSourceCap`). See `docs/LATENCY.md`. |
 
 ---

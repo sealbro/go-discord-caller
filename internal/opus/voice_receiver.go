@@ -312,8 +312,10 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 	for _, out := range state.opusTargets {
 		buf := getRecvFrame(len(opusBytes))
 		copy(buf, opusBytes)
+		ahead := len(out)
 		select {
 		case out <- buf:
+			v.metrics.RecordCopyQueue(ahead)
 		case <-v.done:
 			PutEncodedFrame(buf)
 			return

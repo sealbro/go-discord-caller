@@ -15,6 +15,7 @@ type OpusMetrics struct {
 	tickDuration      metric.Float64Histogram
 	tickLateness      metric.Float64Histogram
 	pipelineLatency   metric.Float64Histogram
+	copyQueueDepth    metric.Int64Histogram
 }
 
 func (o *OpusMetrics) init(meter metric.Meter) (err error) {
@@ -53,6 +54,16 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		metric.WithDescription("How far past its 20 ms boundary a mixer tick fired"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 10, 20, 40, 80),
+	); err != nil {
+		return
+	}
+	// Copy mode bypasses the mixer, so the pipeline-latency histogram never sees
+	// it; a copied frame's wait is the frames queued ahead of it in the
+	// speaker's output channel, which disgo drains one per 20 ms.
+	if o.copyQueueDepth, err = meter.Int64Histogram("gdc.opus.copy.queue_depth",
+		metric.WithDescription("Frames already queued ahead of a copy-mode frame in a speaker's output channel; each is ~20 ms of wait"),
+		metric.WithUnit("{frame}"),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 3),
 	); err != nil {
 		return
 	}
@@ -142,6 +153,15 @@ func (r OpusRecorder) RecordTickLateness(ms float64) {
 		return
 	}
 	r.m.tickLateness.Record(context.Background(), ms, r.attr)
+}
+
+// RecordCopyQueue records how many frames were queued ahead of a copy-mode
+// frame when it entered a speaker's output channel.
+func (r OpusRecorder) RecordCopyQueue(ahead int) {
+	if r.m == nil {
+		return
+	}
+	r.m.copyQueueDepth.Record(context.Background(), int64(ahead), r.attr)
 }
 
 // RecordPipelineLatency records end-to-end pipeline latency in milliseconds.

@@ -245,3 +245,30 @@ func (h *Harness) Shutdown(ctx context.Context) {
 	}
 	h.Owner.Close(ctx)
 }
+
+// PrepareGuild grants the owner bot the permissions the tests need and returns
+// a note for every guild setup problem it found, repaired or not. A bot's
+// managed role keeps its invite-time permissions, so a long-lived test guild
+// drifts behind the code. Role order is only reported: a bot cannot move a
+// role above its own highest role, Administrator or not.
+func (h *Harness) PrepareGuild() []string {
+	var notes []string
+	guildID := h.Cfg.GuildID
+
+	granted, err := h.Listener.GrantBotRolePermission(guildID, h.OwnerID, discord.PermissionDeafenMembers)
+	switch {
+	case err != nil:
+		notes = append(notes, fmt.Sprintf("could not grant DEAFEN_MEMBERS to the owner bot: %v", err))
+	case granted:
+		notes = append(notes, "granted DEAFEN_MEMBERS to the owner bot's role")
+	}
+
+	ok, why, err := h.Listener.CanManageRole(guildID, h.Cfg.CallerRoleID)
+	switch {
+	case err != nil:
+		notes = append(notes, fmt.Sprintf("could not check caller-role management: %v", err))
+	case !ok:
+		notes = append(notes, "role-revoke tests will skip: "+why)
+	}
+	return notes
+}

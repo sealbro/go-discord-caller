@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"log/slog"
 	"os"
@@ -34,6 +35,9 @@ func TestMain(m *testing.M) {
 	h, err = test.NewHarness(ctx, cfg)
 	if err != nil {
 		log.Fatalf("integration harness: %v", err)
+	}
+	for _, note := range h.PrepareGuild() {
+		fmt.Fprintf(os.Stderr, "guild setup: %s\n", note)
 	}
 
 	code := m.Run()

@@ -112,7 +112,7 @@ func statusLockHeld(gw voice.Gateway) bool {
 // connection lock while it waits for the status lock. A DAVE epoch arriving
 // while the bot leaves voice deadlocks the two, and the stuck Close also wedges
 // the bot's main gateway, which handles the voice-state update that closes the
-// conn. Seen as an integration run hanging until the 15 m test timeout.
+// conn.
 func TestLeaveDoesNotDeadlockWithDaveEpoch(t *testing.T) {
 	t.Parallel()
 

@@ -94,8 +94,6 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 }
 
 // Leave closes the bot's current voice connection in the guild, if any.
-// Safe on a connection whose Open never completed — see safeUDPConn, which the
-// voice manager installs via SafeUDPConnOpt.
 //
 // disgo's connImpl.Close does not stop the audio sender, and the sender's loop
 // does not exit on a provider error either — so once teardown closes the
@@ -106,6 +104,7 @@ func (v GuildVoice) Leave(ctx context.Context, guildID snowflake.ID) {
 	if conn := v.vm.GetConn(guildID); conn != nil {
 		conn.Close(ctx)
 		CloseAudioSender(conn)
+		defaultReadyWatchers.forget(conn)
 	}
 	ForgetVoiceRegion(v.botID, guildID)
 }

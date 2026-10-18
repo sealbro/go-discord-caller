@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave"
 )
 
 // countingHandler counts ERROR records emitted by the audio sender.
@@ -43,7 +44,17 @@ func (c *countingProvider) ProvideOpusFrame() ([]byte, error) {
 
 func (c *countingProvider) Close() { c.inner.Close() }
 
-// TestDisgoSpinsOnClosedProvider is a tripwire on disgo v0.19.3, not a test of
+// readyConn reports a ready DAVE session, so the sender pulls frames. Nothing
+// else is called because the provider never produces one.
+type readyConn struct{ voice.Conn }
+
+type readySession struct{ godave.Session }
+
+func (readySession) Ready() bool { return true }
+
+func (readyConn) DAVE() godave.Session { return readySession{} }
+
+// TestDisgoSpinsOnClosedProvider is a tripwire on disgo (v0.19.3 through 2d889db), not a test of
 // our own behaviour.
 //
 // It documents the upstream half of the 2026-09-07 incident, where one speaker
@@ -69,15 +80,13 @@ func (c *countingProvider) Close() { c.inner.Close() }
 // When this test fails, disgo has stopped spinning on provider errors and the
 // registry workaround can be deleted.
 //
-// UPSTREAM-TRIPWIRE(disgo v0.19.3): delete AudioSenderRegistry.
+// UPSTREAM-TRIPWIRE(disgo 2d889db): delete AudioSenderRegistry.
 func TestDisgoSpinsOnClosedProvider(t *testing.T) {
 	t.Parallel()
 
 	p := &countingProvider{inner: NewEmptyVoiceProvider()}
 	h := &countingHandler{Handler: slog.NewTextHandler(io.Discard, nil)}
-	// conn is only dereferenced by send() once a frame is actually produced;
-	// this provider never produces one, so nil is safe here.
-	sender := voice.NewAudioSender(slog.New(h), p, nil)
+	sender := voice.NewAudioSender(slog.New(h), p, readyConn{})
 	sender.Open()
 	t.Cleanup(sender.Close)
 

@@ -51,7 +51,7 @@ func (c *fakeVoiceConn) ChannelID() *snowflake.ID                               
 func (c *fakeVoiceConn) SetSpeaking(context.Context, voice.SpeakingFlags) error { return nil }
 func (c *fakeVoiceConn) SetOpusFrameProvider(voice.OpusFrameProvider)           {}
 func (c *fakeVoiceConn) SetOpusFrameReceiver(voice.OpusFrameReceiver)           {}
-func (c *fakeVoiceConn) SetEventHandlerFunc(voice.EventHandlerFunc)             {}
+func (c *fakeVoiceConn) Gateway() voice.Gateway                                 { return nil }
 
 // fakeVoiceManager hands out one conn per bot, as disgo does: CreateConn for a
 // guild that already has a conn returns that same conn. Two concurrent raids in

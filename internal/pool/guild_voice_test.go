@@ -37,6 +37,8 @@ func (c *hangingConn) Close(ctx context.Context) {
 	<-ctx.Done()
 }
 
+func (c *hangingConn) Gateway() voice.Gateway { return nil }
+
 // hangingVoiceManager hands out a single hangingConn.
 type hangingVoiceManager struct{ conn *hangingConn }
 

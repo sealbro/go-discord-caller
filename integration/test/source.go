@@ -33,9 +33,8 @@ func newTestSpeaker(ctx context.Context, token string) (*Speaker, error) {
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			pool.SafeUDPConnOpt(),
 			pool.SafeAudioSenderOpt(),
-			pool.SafeGatewayOpt(),
+			pool.VoiceReadyOpt(),
 			voice.WithLogger(slog.New(slog.DiscardHandler)),
 		),
 	)

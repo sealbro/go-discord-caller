@@ -9,11 +9,12 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave"
 )
 
-// stubConn is a voice.Conn used only as a registry key. The audio sender
-// dereferences its Conn solely once a frame is produced, and blockedProvider
-// never produces one, so the embedded nil interface is never called.
+// stubConn is a voice.Conn used as a registry key. It reports a ready DAVE
+// session so the sender pulls frames; anything else would be called only once a
+// frame is produced, and blockedProvider never produces one.
 type stubConn struct{ voice.Conn }
 
 // blockedProvider mimics opus.EmptyVoiceProvider: ProvideOpusFrame blocks
@@ -135,8 +136,7 @@ func TestAudioSenderRegistryCloseAll(t *testing.T) {
 // disgo's defaultAudioSender.Close calls s.cancelFunc unconditionally, and
 // that field stays nil until the goroutine Open spawns gets scheduled. Join
 // timeouts make teardown of a never-started sender routine, and an unrecovered
-// panic there would kill the process — the same failure mode safeUDPConn
-// guards for UDP sockets.
+// panic there would kill the process.
 func TestAudioSenderCloseBeforeOpen(t *testing.T) {
 	// Not parallel: senderStartTimeout is package state.
 	orig := senderStartTimeout
@@ -167,3 +167,9 @@ func TestDisgoAudioSenderStillPanicsOnCloseBeforeOpen(t *testing.T) {
 	}()
 	voice.NewAudioSender(slog.New(slog.NewTextHandler(io.Discard, nil)), newBlockedProvider(), &stubConn{}).Close()
 }
+
+type readySession struct{ godave.Session }
+
+func (readySession) Ready() bool { return true }
+
+func (stubConn) DAVE() godave.Session { return readySession{} }

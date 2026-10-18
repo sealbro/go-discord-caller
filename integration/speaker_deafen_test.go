@@ -4,6 +4,7 @@ package integration
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -30,6 +31,32 @@ func requireDeafenPower(t *testing.T, speakerID snowflake.ID) {
 		t.Skipf("server-deafen not available in this guild: %s "+
 			"(grant Deafen Members to the owner bot and place its role above the speakers)", why)
 	}
+}
+
+// requireListenerCaller gives the listener the caller role for the rest of the
+// test, if it lacks it, and takes it back afterwards. The listener sits in the
+// speaker's channel, so holding the role makes it that channel's caller.
+func requireListenerCaller(t *testing.T) {
+	t.Helper()
+	guildID, roleID, listenerID := h.Cfg.GuildID, h.Cfg.CallerRoleID, h.Listener.ID()
+
+	member, err := h.Listener.GetMember(guildID, listenerID)
+	if err != nil {
+		t.Fatalf("read listener member: %v", err)
+	}
+	if slices.Contains(member.RoleIDs, roleID) {
+		return
+	}
+	canManage, why, err := h.Listener.CanManageRole(guildID, roleID)
+	if err != nil {
+		t.Fatalf("check caller-role management: %v", err)
+	}
+	skipIfMissing(t, canManage, "listener cannot take the caller role: %s", why)
+
+	if err := h.Listener.AddMemberRole(guildID, listenerID, roleID); err != nil {
+		t.Fatalf("grant the caller role to the listener: %v", err)
+	}
+	t.Cleanup(func() { _ = h.Listener.RemoveMemberRole(guildID, listenerID, roleID) })
 }
 
 // TestE19_NonCaptureSpeakersAreServerDeafened covers the whole server-deafen
@@ -106,11 +133,15 @@ func TestE19_NonCaptureSpeakersAreServerDeafened(t *testing.T) {
 // is connected during a capture raid (capture teardown has no undeafen step, so
 // the flag survives the stop), then start a fresh capture raid and require that
 // the join repaired it.
+//
+// The speaker's channel needs a caller throughout. Without one the bot deafens
+// the speaker itself and undoes that on stop, erasing the stranded flag.
 func TestE20_CaptureRaidRepairsStrandedDeaf(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
 	defer cancel()
 
 	guildID := h.Cfg.GuildID
+	requireListenerCaller(t)
 
 	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	time.Sleep(500 * time.Millisecond)

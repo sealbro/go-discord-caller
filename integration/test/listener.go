@@ -211,6 +211,9 @@ func (l *Listener) StartPlaying(ctx context.Context, guildID, channelID snowflak
 	return cleanup, nil
 }
 
+// ID returns the listener bot's user ID.
+func (l *Listener) ID() snowflake.ID { return l.id }
+
 // GetMember fetches a guild member via the listener bot's REST client.
 // The listener bot is the designated test-admin bot (Administrator role in the
 // test guild) so privileged setup calls go through it, keeping the owner bot at

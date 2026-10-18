@@ -62,7 +62,13 @@ test-stress-mixminus:
 test-stress:
 	go test $(STRESS_FLAGS)
 
-test: test-unit test-integration
-	@echo "mode: atomic" > combined.out
-	@grep -h -v "^mode:" unit.out coverage.out >> combined.out
-	go tool cover -func=combined.out
+test:
+	@start=$$(date +%s); \
+	$(MAKE) --no-print-directory test-unit test-integration && \
+	echo "mode: atomic" > combined.out && \
+	grep -h -v "^mode:" unit.out coverage.out >> combined.out && \
+	go tool cover -func=combined.out; \
+	status=$$?; \
+	elapsed=$$(( $$(date +%s) - start )); \
+	printf 'make test: total %dm%02ds\n' $$((elapsed / 60)) $$((elapsed % 60)); \
+	exit $$status

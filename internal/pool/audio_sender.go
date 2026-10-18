@@ -202,7 +202,7 @@ func (s *safeAudioSender) Close() {
 var defaultSenders = NewAudioSenderRegistry()
 
 // SafeAudioSenderOpt installs the process-wide audio-sender registry on a bot's
-// voice manager. Install it on every client, together with VoiceReadyOpt, which
+// voice manager. Install it on every client, together with VoiceConnOpt, which
 // stops the sender that disgo's connImpl.Close leaves running.
 func SafeAudioSenderOpt() voice.ManagerConfigOpt {
 	return defaultSenders.Opt()

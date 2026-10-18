@@ -61,11 +61,12 @@ func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, re
 	return conn
 }
 
-// VoiceReadyOpt installs the process-wide Ready dispatcher on a bot's voice
-// manager, along with the cleanup that stops a removed conn's audio sender.
-// Every client must pass it, or OnVoiceReady never fires for its conns and
-// SafeAudioSenderOpt's senders are never stopped.
-func VoiceReadyOpt() voice.ManagerConfigOpt {
+// VoiceConnOpt installs newConn as a bot's voice conn factory: it dispatches
+// voice Ready to OnVoiceReady watchers and, when disgo removes a conn, forgets
+// its watch and stops its audio sender. Every client must pass it, or
+// OnVoiceReady never fires for its conns and SafeAudioSenderOpt's senders are
+// never stopped.
+func VoiceConnOpt() voice.ManagerConfigOpt {
 	return voice.WithConnCreateFunc(newConn)
 }
 

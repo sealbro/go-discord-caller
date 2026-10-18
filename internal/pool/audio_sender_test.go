@@ -209,7 +209,7 @@ func TestAudioSenderStoppedWhenDisgoClosesTheConn(t *testing.T) {
 			return readyDaveSession{}
 		}),
 		SafeAudioSenderOpt(),
-		VoiceReadyOpt(),
+		VoiceConnOpt(),
 		SerialGatewayOpt(),
 		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(&websocket.Dialer{
 			TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone(),

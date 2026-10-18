@@ -112,7 +112,7 @@ func TestReadyWatchForgottenWhenDisgoClosesTheConn(t *testing.T) {
 		userID,
 		voice.WithDaveSessionCreateFunc(func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return dave }),
 		SafeAudioSenderOpt(),
-		VoiceReadyOpt(),
+		VoiceConnOpt(),
 		SerialGatewayOpt(),
 		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(&websocket.Dialer{
 			TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone(),

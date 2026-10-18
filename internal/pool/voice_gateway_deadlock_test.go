@@ -147,7 +147,7 @@ func TestLeaveDoesNotDeadlockWithDaveEpoch(t *testing.T) {
 			return dave
 		}),
 		SafeAudioSenderOpt(),
-		VoiceReadyOpt(),
+		VoiceConnOpt(),
 		SerialGatewayOpt(),
 		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(dialer))),
 		voice.WithLogger(slog.New(slog.DiscardHandler)),

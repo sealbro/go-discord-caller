@@ -33,7 +33,7 @@ type Harness struct {
 	Speaker         *Speaker
 	Speaker2        *Speaker // nil when E2E_SOURCE_BOT_TOKEN_2 is unset (required for E2/E6)
 	Listener        *Listener
-	daveStalls      *dave.EncryptStalls // routed to the newest manager, like activeListeners
+	daveStalls      *dave.EncryptStalls      // routed to the newest manager, like activeListeners
 	activeListeners []disgobot.EventListener // current per-test listeners; swapped in newManagerForGuild
 }
 

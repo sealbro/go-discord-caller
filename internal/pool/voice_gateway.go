@@ -15,6 +15,9 @@ import (
 // for the status lock, so the two deadlock. A DAVE epoch arriving while the bot
 // leaves voice does exactly that, and wedges the bot's main gateway with it.
 // disgo's own heartbeat sends past this wrapper and can still race a Close.
+// Fixed upstream by https://github.com/disgoorg/disgo/pull/588, unmerged as of
+// 2026-10-18: once a disgo release includes it, delete this wrapper and confirm
+// TestLeaveDoesNotDeadlockWithDaveEpoch still passes without it.
 type serialGateway struct {
 	voice.Gateway
 	mu sync.Mutex

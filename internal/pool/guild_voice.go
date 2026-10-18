@@ -93,17 +93,12 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 	return conn, nil
 }
 
-// Leave closes the bot's current voice connection in the guild, if any.
-//
-// disgo's connImpl.Close does not stop the audio sender, and the sender's loop
-// does not exit on a provider error either — so once teardown closes the
-// provider, a surviving sender logs an ERROR every 20 ms forever. Closing the
-// registered sender afterwards is what actually stops that goroutine; see
-// AudioSenderRegistry.
+// Leave closes the bot's current voice connection in the guild, if any. The
+// conn's audio sender, which disgo's connImpl.Close leaves running, is stopped
+// when the conn is removed; see newConn.
 func (v GuildVoice) Leave(ctx context.Context, guildID snowflake.ID) {
 	if conn := v.vm.GetConn(guildID); conn != nil {
 		conn.Close(ctx)
-		CloseAudioSender(conn)
 	}
 	ForgetVoiceRegion(v.botID, guildID)
 }

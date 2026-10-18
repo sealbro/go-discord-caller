@@ -46,8 +46,8 @@ import (
 // day's largest CPU peak on the host.
 //
 // The registry is keyed by the voice.Conn that disgo passes to the create
-// func, which is the same Conn our GuildVoice.Leave holds — so Leave can
-// close exactly the right sender.
+// func, which is the same Conn disgo later removes — so newConn's removal hook
+// can close exactly the right sender.
 //
 // UPSTREAM(disgo 2d889db): Conn.Close leaves the audio sender running.
 type AudioSenderRegistry struct {
@@ -202,15 +202,10 @@ func (s *safeAudioSender) Close() {
 var defaultSenders = NewAudioSenderRegistry()
 
 // SafeAudioSenderOpt installs the process-wide audio-sender registry on a bot's
-// voice manager. Install it on every client, so GuildVoice.Leave
-// can stop the sender that disgo's connImpl.Close leaves running.
+// voice manager. Install it on every client, together with VoiceReadyOpt, which
+// stops the sender that disgo's connImpl.Close leaves running.
 func SafeAudioSenderOpt() voice.ManagerConfigOpt {
 	return defaultSenders.Opt()
-}
-
-// CloseAudioSender stops the audio sender behind conn. Called by GuildVoice.Leave.
-func CloseAudioSender(conn voice.Conn) {
-	defaultSenders.Close(conn)
 }
 
 // CloseAllAudioSenders stops every tracked sender. Backstop for process shutdown.

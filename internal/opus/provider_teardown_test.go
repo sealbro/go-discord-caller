@@ -108,7 +108,7 @@ func TestDisgoSpinsOnClosedProvider(t *testing.T) {
 	if after < 5 {
 		t.Fatalf("disgo polled a closed provider only %d times in %v (%d ERROR lines) — "+
 			"it no longer spins on provider errors, so pool.AudioSenderRegistry, "+
-			"SafeAudioSenderOpt, and the CloseAudioSender call in GuildVoice.Leave "+
+			"SafeAudioSenderOpt, and the sender cleanup in pool.newConn "+
 			"are obsolete and should be removed",
 			after, window, h.errors.Load())
 	}

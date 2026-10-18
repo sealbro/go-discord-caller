@@ -45,25 +45,28 @@ func (w *voiceReadyWatchers) forget(conn voice.Conn) {
 	w.mu.Unlock()
 }
 
-// createConn builds disgo's conn with the Ready dispatcher installed, and
-// forgets its watch when the conn is removed. disgo removes a conn it closes
-// itself, such as on a voice-server disconnect, and a later Leave then finds
-// nothing to forget. A reopen keeps the conn, and so the watch.
-func (w *voiceReadyWatchers) createConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, removeConn func(), opts ...voice.ConnConfigOpt) voice.Conn {
+var defaultReadyWatchers = newVoiceReadyWatchers()
+
+// newConn builds disgo's conn with the Ready dispatcher installed, and releases
+// the conn's ready watch and audio sender when disgo removes it. disgo removes
+// a conn it closes itself, such as on a voice-server disconnect, and a later
+// Leave then finds nothing to release. A reopen keeps the conn, and both.
+func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, removeConn func(), opts ...voice.ConnConfigOpt) voice.Conn {
 	var conn voice.Conn
 	conn = voice.NewConn(guildID, userID, stateUpdate, func() {
 		removeConn()
-		w.forget(conn)
-	}, append(slices.Clip(opts), voice.WithConnEventHandlerFunc(w.handle))...)
+		defaultReadyWatchers.forget(conn)
+		defaultSenders.Close(conn)
+	}, append(slices.Clip(opts), voice.WithConnEventHandlerFunc(defaultReadyWatchers.handle))...)
 	return conn
 }
 
-var defaultReadyWatchers = newVoiceReadyWatchers()
-
 // VoiceReadyOpt installs the process-wide Ready dispatcher on a bot's voice
-// manager. Every client must pass it, or OnVoiceReady never fires for its conns.
+// manager, along with the cleanup that stops a removed conn's audio sender.
+// Every client must pass it, or OnVoiceReady never fires for its conns and
+// SafeAudioSenderOpt's senders are never stopped.
 func VoiceReadyOpt() voice.ManagerConfigOpt {
-	return voice.WithConnCreateFunc(defaultReadyWatchers.createConn)
+	return voice.WithConnCreateFunc(newConn)
 }
 
 // OnVoiceReady runs f on every voice gateway Ready of conn, replacing any

@@ -112,7 +112,7 @@ func (r *AudioSenderRegistry) CloseAll() {
 // harness bots — must pass it, since any of them can be torn down while its
 // gateway is already dead.
 //
-// voice.WithConnConfigOpts appends, so this composes with VoiceReadyOpt and
+// voice.WithConnConfigOpts appends, so this composes with SerialGatewayOpt and
 // voice.WithDaveSessionCreateFunc rather than replacing them.
 func (r *AudioSenderRegistry) Opt() voice.ManagerConfigOpt {
 	return voice.WithConnConfigOpts(voice.WithConnAudioSenderCreateFunc(r.CreateFunc()))

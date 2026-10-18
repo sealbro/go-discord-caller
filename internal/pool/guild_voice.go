@@ -104,7 +104,6 @@ func (v GuildVoice) Leave(ctx context.Context, guildID snowflake.ID) {
 	if conn := v.vm.GetConn(guildID); conn != nil {
 		conn.Close(ctx)
 		CloseAudioSender(conn)
-		defaultReadyWatchers.forget(conn)
 	}
 	ForgetVoiceRegion(v.botID, guildID)
 }

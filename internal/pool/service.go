@@ -35,10 +35,12 @@ type Service struct {
 	mu          sync.RWMutex
 	poolClients map[snowflake.ID]*bot.Client
 	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
-	metrics     *telemetry.PoolMetrics
-	voiceRegion *telemetry.VoiceRegionMetrics
-	daveStats   *dave.Stats
-	daveStalls  *dave.EncryptStalls
+	// verification holds each bot's last fetched verification state.
+	verification map[snowflake.ID]telemetry.BotVerification
+	metrics      *telemetry.PoolMetrics
+	voiceRegion  *telemetry.VoiceRegionMetrics
+	daveStats    *dave.Stats
+	daveStalls   *dave.EncryptStalls
 }
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
@@ -51,12 +53,13 @@ type extraBot struct {
 // NewService creates a new speaker Service.
 func NewService(metrics *telemetry.PoolMetrics, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls) *Service {
 	return &Service{
-		poolClients: make(map[snowflake.ID]*bot.Client),
-		extraBots:   make(map[snowflake.ID]extraBot),
-		metrics:     metrics,
-		voiceRegion: voiceRegion,
-		daveStats:   daveStats,
-		daveStalls:  daveStalls,
+		poolClients:  make(map[snowflake.ID]*bot.Client),
+		extraBots:    make(map[snowflake.ID]extraBot),
+		verification: make(map[snowflake.ID]telemetry.BotVerification),
+		metrics:      metrics,
+		voiceRegion:  voiceRegion,
+		daveStats:    daveStats,
+		daveStalls:   daveStalls,
 	}
 }
 
@@ -196,6 +199,9 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 		}
 		latMs := float64(eb.client.Gateway.Latency().Milliseconds())
 		s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+	}
+	for id, v := range s.verification {
+		s.metrics.ObserveBotVerification(o, id.String(), v)
 	}
 	s.mu.RUnlock()
 	s.metrics.ObservePoolBots(o, total, connected)

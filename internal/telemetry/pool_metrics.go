@@ -15,6 +15,10 @@ type PoolMetrics struct {
 	botsTotal         metric.Int64ObservableGauge
 	botsConnected     metric.Int64ObservableGauge
 	gatewayLatency    metric.Float64ObservableGauge
+	botVerified       metric.Int64ObservableGauge
+	botGuilds         metric.Int64ObservableGauge
+	membersIntent     metric.Int64ObservableGauge
+	verifyBlocked     metric.Int64ObservableGauge
 	reconnectAttempts metric.Int64Counter
 	reconnectFailures metric.Int64Counter
 }
@@ -42,6 +46,26 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 	); err != nil {
 		return
 	}
+	if p.botVerified, err = meter.Int64ObservableGauge("gdc.bot.verified",
+		metric.WithDescription("1 when Discord shows the bot as verified, 0 otherwise. An unverified bot cannot join more than 100 servers."),
+	); err != nil {
+		return
+	}
+	if p.botGuilds, err = meter.Int64ObservableGauge("gdc.bot.guilds",
+		metric.WithDescription("Approximate number of servers the bot is in, as Discord counts it against the 100-server limit."),
+	); err != nil {
+		return
+	}
+	if p.membersIntent, err = meter.Int64ObservableGauge("gdc.bot.members_intent",
+		metric.WithDescription("Always 1; the state label says whether the Guild Members intent is approved, limited (stops at 100 servers) or off."),
+	); err != nil {
+		return
+	}
+	if p.verifyBlocked, err = meter.Int64ObservableGauge("gdc.bot.verification_blocked",
+		metric.WithDescription("1 when Discord has blocked verification because of unusual growth, 0 otherwise."),
+	); err != nil {
+		return
+	}
 	if p.reconnectAttempts, err = meter.Int64Counter("gdc.pool.reconnect.attempts.total",
 		metric.WithDescription("Watchdog gateway reconnect attempts."),
 	); err != nil {
@@ -57,7 +81,8 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 
 // RegisterObservers registers cb as the observable callback for pool bot gauges.
 func (p *PoolMetrics) RegisterObservers(cb metric.Callback) error {
-	_, err := p.meter.RegisterCallback(cb, p.botInfo, p.botsTotal, p.botsConnected, p.gatewayLatency)
+	_, err := p.meter.RegisterCallback(cb, p.botInfo, p.botsTotal, p.botsConnected, p.gatewayLatency,
+		p.botVerified, p.botGuilds, p.membersIntent, p.verifyBlocked)
 	return err
 }
 
@@ -85,6 +110,43 @@ func (p *PoolMetrics) ObserveGatewayLatency(o metric.Observer, botID string, ms 
 	o.ObserveFloat64(p.gatewayLatency, ms,
 		metric.WithAttributes(attribute.String("bot_id", botID)),
 	)
+}
+
+// Guild Members intent states reported by gdc.bot.members_intent.
+const (
+	MembersIntentApproved = "approved"
+	MembersIntentLimited  = "limited"
+	MembersIntentOff      = "off"
+)
+
+// BotVerification is a bot's verification state as Discord last reported it.
+type BotVerification struct {
+	Verified      bool
+	Guilds        *int // nil when Discord did not report a count
+	MembersIntent string
+	Blocked       bool
+}
+
+// ObserveBotVerification reports one bot's verification state via o.
+// Call inside the callback registered with RegisterObservers.
+func (p *PoolMetrics) ObserveBotVerification(o metric.Observer, botID string, v BotVerification) {
+	bot := metric.WithAttributes(attribute.String("bot_id", botID))
+	o.ObserveInt64(p.botVerified, boolToInt(v.Verified), bot)
+	o.ObserveInt64(p.verifyBlocked, boolToInt(v.Blocked), bot)
+	if v.Guilds != nil {
+		o.ObserveInt64(p.botGuilds, int64(*v.Guilds), bot)
+	}
+	o.ObserveInt64(p.membersIntent, 1, metric.WithAttributes(
+		attribute.String("bot_id", botID),
+		attribute.String("state", v.MembersIntent),
+	))
+}
+
+func boolToInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // SeedReconnectSeries registers a zero data point for botID on both reconnect

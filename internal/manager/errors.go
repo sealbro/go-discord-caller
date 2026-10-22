@@ -38,4 +38,9 @@ var (
 	// ErrNoOwnerChannel is returned when starting a raid while the owner bot has
 	// no voice channel, either never bound or bound to one that was deleted.
 	ErrNoOwnerChannel = errors.New("the owner bot has no voice channel: run /setup and pick one")
+
+	// ErrNoCallerRole is returned when a session that captures voice is started
+	// or joined before a caller role is bound. Without the role every user in
+	// the captured channel would be relayed, including into other servers.
+	ErrNoCallerRole = errors.New("no caller role is set: run /setup → Bind Roles and pick the role whose members are relayed")
 )

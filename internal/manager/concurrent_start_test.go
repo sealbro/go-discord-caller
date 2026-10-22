@@ -164,6 +164,7 @@ func TestConcurrentStartVoiceRaid_LoserCleanupMustNotTearDownWinner(t *testing.T
 
 	st := store.NewInMemoryStore()
 	st.BindChannel(testGuildID, testBotID, ownerChannelID)
+	st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
 	st.BindChannel(testGuildID, speakerID, speakerChannelID)
 
 	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("concurrent_start_test"))

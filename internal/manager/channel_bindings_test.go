@@ -103,6 +103,7 @@ func TestWarmGuildCache_KeepsBindingsWhenChannelFetchFails(t *testing.T) {
 func TestStartVoiceRaid_FailsBeforeSpeakersJoinWhenOwnerChannelIsGone(t *testing.T) {
 	st := store.NewInMemoryStore()
 	st.BindChannel(testGuildID, testBotID, deletedChannel)
+	st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
 	st.BindChannel(testGuildID, bindingsSpeakerID, keptChannel)
 
 	var joined atomic.Bool

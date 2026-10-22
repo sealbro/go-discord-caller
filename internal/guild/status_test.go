@@ -60,7 +60,7 @@ func TestRenderEnglishFallback(t *testing.T) {
 			name: "unconfigured",
 			st:   unconfigured,
 			want: []string{
-				"**Capture Role:** not set",
+				"**Capture Role:** ⚠️ not set — required: voice raids cannot start",
 				"**Manager Role:** not set",
 				"**Owner Bot Channel:** not set",
 				"**Speakers (0):**",

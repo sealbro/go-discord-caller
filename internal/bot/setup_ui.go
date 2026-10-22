@@ -25,7 +25,7 @@ const localeAutoValue = "auto"
 // Layout:
 //   - Row 1: language select menu (per-guild locale pin)
 //   - Row 2: owner voice-channel select menu
-//   - Row 3: "Bind Roles", "Bind Speakers" buttons; "Add Speaker" appended when an uninvited pool bot is available
+//   - Row 3: "Bind Roles" (red until a capture role is bound), "Bind Speakers" buttons; "Add Speaker" appended when an uninvited pool bot is available
 func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID, loc *i18n.Localizer) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 	ownerBotID := h.manager.OwnerBotID()
@@ -43,8 +43,12 @@ func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID, loc *i18n.
 	components = append(components, discord.NewActionRow(ownerMenu))
 
 	// Row 3 — action buttons
+	bindRoles := discord.NewPrimaryButton(loc.T("btn.bind_roles"), "/roles/menu")
+	if status.CallerRoleID == nil {
+		bindRoles = discord.NewDangerButton(loc.T("btn.bind_roles"), "/roles/menu")
+	}
 	buttons := []discord.InteractiveComponent{
-		discord.NewPrimaryButton(loc.T("btn.bind_roles"), "/roles/menu"),
+		bindRoles,
 		discord.NewPrimaryButton(loc.T("btn.bind_speakers"), "/speakers/page/0"),
 	}
 	if h.manager.HasAvailableToken(guildID) {

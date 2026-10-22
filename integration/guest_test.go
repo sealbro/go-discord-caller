@@ -20,6 +20,15 @@ func guestPrereqs(t *testing.T) {
 	skipIfMissing(t, h.Cfg.GuestSpeakerChannelID != 0, "E2E_GUEST_SPEAKER_CHANNEL_ID not set")
 }
 
+// guestCapturePrereqs skips a test whose guest captures: a capturing guest is
+// refused without its own caller role, and the host guild's role does not
+// exist in the guest guild.
+func guestCapturePrereqs(t *testing.T) {
+	t.Helper()
+	guestPrereqs(t)
+	skipIfMissing(t, h.Cfg.GuestCallerRoleID != 0, "E2E_GUEST_CALLER_ROLE_ID not set")
+}
+
 // TestE5_InterGuildRelay verifies that audio from the host guild is relayed
 // to a listener sitting in the guest guild's speaker channel.
 func TestE5_InterGuildRelay(t *testing.T) {
@@ -71,7 +80,7 @@ func TestE5_InterGuildRelay(t *testing.T) {
 // and the host's speaker channel receives frames from the guest source.
 // Requires: GuestGuildID, SourceToken2, and the host running GuildCaller.
 func TestE5b_AllyCaller(t *testing.T) {
-	guestPrereqs(t)
+	guestCapturePrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
@@ -83,9 +92,7 @@ func TestE5b_AllyCaller(t *testing.T) {
 
 	st.BindChannel(h.Cfg.GuestGuildID, h.OwnerID, h.Cfg.GuestOwnerChannelID)
 	st.BindChannel(h.Cfg.GuestGuildID, speakerIDs[0], h.Cfg.GuestSpeakerChannelID)
-	// No CallerRole binding for the guest guild: E2E_CALLER_ROLE_ID is a host-guild
-	// role that does not exist in the guest guild, so binding it would silently reject
-	// every speaker. E5b tests relay flow; the guest filter allows any cached member.
+	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.GuestCallerRoleID)
 	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
 
 	// Host runs GuildCaller so guest capture is permitted (AllowGuestCapture = true).
@@ -135,7 +142,7 @@ func TestE5b_AllyCaller(t *testing.T) {
 // Sequence: guest talks (host mixers active) → both guilds quiet past the drain
 // timeout → guest talks again. The second burst must reach the host.
 func TestE5d_RelayResumesAfterIdleHost(t *testing.T) {
-	guestPrereqs(t)
+	guestCapturePrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
@@ -147,7 +154,7 @@ func TestE5d_RelayResumesAfterIdleHost(t *testing.T) {
 
 	st.BindChannel(h.Cfg.GuestGuildID, h.OwnerID, h.Cfg.GuestOwnerChannelID)
 	st.BindChannel(h.Cfg.GuestGuildID, speakerIDs[0], h.Cfg.GuestSpeakerChannelID)
-	// Guest guild keeps no caller role bound (see E5b) so its own capture works.
+	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.GuestCallerRoleID)
 	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
 
 	raidCode, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, guild.RaidModeGuildCaller)
@@ -242,7 +249,7 @@ func TestE5e_RelayResumesAfterIdleGuest(t *testing.T) {
 // This is the star half of the #51 fix (hub RelayFeed + DrainWatcher keep-alive);
 // E5d/E5e only exercise the GuildCaller/AllyCaller pipelines.
 func TestE5f_StarRelayResumesAfterIdleHost(t *testing.T) {
-	guestPrereqs(t)
+	guestCapturePrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
@@ -254,8 +261,7 @@ func TestE5f_StarRelayResumesAfterIdleHost(t *testing.T) {
 
 	st.BindChannel(h.Cfg.GuestGuildID, h.OwnerID, h.Cfg.GuestOwnerChannelID)
 	st.BindChannel(h.Cfg.GuestGuildID, speakerIDs[0], h.Cfg.GuestSpeakerChannelID)
-	// No caller role for the guest guild (see E5b): the guest must capture, and
-	// the host-guild role does not exist there.
+	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.GuestCallerRoleID)
 	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
 
 	raidCode, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, guild.RaidModeOneManyGuildCaller)

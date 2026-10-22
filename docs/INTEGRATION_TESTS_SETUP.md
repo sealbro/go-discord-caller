@@ -79,7 +79,7 @@ server. (E5b, E5c, E5d and E5f additionally need source bot 2; E5c needs
 - Invite owner bot and at least one speaker bot.
 - Create one owner voice channel (`E2E_GUEST_OWNER_CHANNEL_ID`) and one speaker voice channel (`E2E_GUEST_SPEAKER_CHANNEL_ID`).
 - Invite the listener bot.
-- Assign the `caller` role to source bot in this guild too.
+- Create a `caller` role in this guild (`E2E_GUEST_CALLER_ROLE_ID`) and assign it to source bot 2, which plays in the guest owner channel. A guest that captures is refused without its own caller role, so E5b, E5d and E5f skip when it is not set.
 
 ---
 
@@ -153,6 +153,7 @@ E2E_CALLER_ROLE_ID=
 E2E_GUEST_GUILD_ID=
 E2E_GUEST_OWNER_CHANNEL_ID=
 E2E_GUEST_SPEAKER_CHANNEL_ID=
+E2E_GUEST_CALLER_ROLE_ID=        # optional; required for E5b / E5d / E5f
 
 # --- Audio (optional; defaults to integration/samples, all *.dca played randomly) ---
 # E2E_SAMPLES_DIR=integration/samples
@@ -285,6 +286,7 @@ E2E_CALLER_ROLE_ID
 E2E_GUEST_GUILD_ID              # optional
 E2E_GUEST_OWNER_CHANNEL_ID      # optional
 E2E_GUEST_SPEAKER_CHANNEL_ID    # optional
+E2E_GUEST_CALLER_ROLE_ID        # optional
 ```
 
 The workflow uses `concurrency: { group: integration-discord, cancel-in-progress: false }` so

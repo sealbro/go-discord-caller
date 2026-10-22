@@ -58,6 +58,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
 		guestMode = guild.RaidModeAllyListener
 	}
+	if guestMode.WithCapture() && !m.hasBoundCallerRole(guestGuildID) {
+		m.sessions.RemoveGuest(guestGuildID)
+		endSpanErr(span, ErrNoCallerRole)
+		return guestMode, ErrNoCallerRole
+	}
 	allowUser := m.buildAllowUserFilter(guestGuildID)
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm)
@@ -264,6 +269,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", ErrSessionExists
 	}
 	defer m.starting.end(guildID)
+	if !m.hasBoundCallerRole(guildID) {
+		return "", ErrNoCallerRole
+	}
 
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session",
 		trace.WithAttributes(

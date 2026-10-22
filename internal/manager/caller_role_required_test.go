@@ -164,9 +164,9 @@ func TestJoinSessionAllowsListenerWithoutCallerRole(t *testing.T) {
 	}
 }
 
-// The router counts callers through HasCallerRole for the whole raid. With no
-// role bound it must count nobody, or unbinding the role mid-raid would turn
-// every speaking user into a caller.
+// HasCallerRole decides who the voice-callers metric counts and, through
+// member updates, who the live allow filter relays. With no role bound it must
+// match nobody, or unbinding the role mid-raid would relay every user.
 func TestHasCallerRoleFalseWhenNoRoleBound(t *testing.T) {
 	f := newCallerRoleFixture(t)
 

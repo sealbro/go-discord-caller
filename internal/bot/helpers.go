@@ -52,25 +52,16 @@ func formatBotChannels(header string, warnings []manager.ChannelAccessWarning) s
 }
 
 // botPermissions is the Discord permission bitmask required by speaker bots.
-// Bit 48 is an unnamed/reserved Discord permission retained from the original
-// install URL; remove it if Discord revokes or reassigns the bit.
-const botPermissions discord.Permissions = discord.PermissionAddReactions |
-	discord.PermissionPrioritySpeaker |
-	discord.PermissionSendMessages |
-	discord.PermissionSendTTSMessages |
-	discord.PermissionUseExternalEmojis |
+const botPermissions discord.Permissions = discord.PermissionViewChannel |
 	discord.PermissionConnect |
 	discord.PermissionSpeak |
 	discord.PermissionUseVAD |
-	discord.PermissionUseApplicationCommands |
-	discord.PermissionUseExternalStickers |
-	discord.PermissionUseSoundboard |
-	discord.PermissionUseExternalSounds |
-	discord.PermissionSendVoiceMessages |
-	1<<48 // reserved/unnamed bit present in original install URL
+	discord.PermissionPrioritySpeaker
 
 // ownerPermissions is what the owner bot asks for: everything a speaker needs,
-// plus DEAFEN_MEMBERS.
+// plus DEAFEN_MEMBERS and the server-facing permissions held for upcoming
+// features. Speaker bots only join voice, so anything that acts on the server
+// belongs to the owner bot.
 //
 // The owner bot server-deafens speaker bots for the duration of a non-capture
 // raid, which is the only thing that stops Discord forwarding them RTP they
@@ -82,7 +73,13 @@ const botPermissions discord.Permissions = discord.PermissionAddReactions |
 // role — a permission Discord grants but hierarchy still vetoes. Guilds that
 // installed the owner bot before this was added keep working; the deafen is
 // skipped with a warning.
-const ownerPermissions = botPermissions | discord.PermissionDeafenMembers
+const ownerPermissions = botPermissions |
+	discord.PermissionDeafenMembers |
+	discord.PermissionAddReactions |
+	discord.PermissionSendMessages |
+	discord.PermissionSendTTSMessages |
+	discord.PermissionSendVoiceMessages |
+	discord.PermissionSetVoiceChannelStatus
 
 func installOwnerURL(clientID snowflake.ID) string {
 	return fmt.Sprintf(

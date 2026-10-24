@@ -76,6 +76,7 @@ nav:
   - How it works: voice-flow.md
   - Audio latency: latency.md
   - Metrics: metrics.md
+  - Bot permissions: permissions.md
   - Privacy Policy: privacy.md
   - Terms of Service: terms.md
 
@@ -92,4 +93,4 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/sealbro/go-discord-caller
     - icon: fontawesome/brands/discord
-      link: https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=391565771282752
+      link: https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576

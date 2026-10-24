@@ -12,7 +12,7 @@ import (
 // disgo's Open and Close both block on nothing but the caller's context, and
 // the raid context they are given has no deadline.
 //
-// UPSTREAM(disgo v0.19.3): Open and Close bound nothing themselves.
+// UPSTREAM(disgo 2d889db): Open and Close bound nothing themselves.
 const (
 	VoiceJoinTimeout    = 15 * time.Second
 	voiceCleanupTimeout = 5 * time.Second
@@ -93,19 +93,12 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 	return conn, nil
 }
 
-// Leave closes the bot's current voice connection in the guild, if any.
-// Safe on a connection whose Open never completed — see safeUDPConn, which the
-// voice manager installs via SafeUDPConnOpt.
-//
-// disgo's connImpl.Close does not stop the audio sender, and the sender's loop
-// does not exit on a provider error either — so once teardown closes the
-// provider, a surviving sender logs an ERROR every 20 ms forever. Closing the
-// registered sender afterwards is what actually stops that goroutine; see
-// AudioSenderRegistry.
+// Leave closes the bot's current voice connection in the guild, if any. The
+// conn's audio sender, which disgo's connImpl.Close leaves running, is stopped
+// when the conn is removed; see newConn.
 func (v GuildVoice) Leave(ctx context.Context, guildID snowflake.ID) {
 	if conn := v.vm.GetConn(guildID); conn != nil {
 		conn.Close(ctx)
-		CloseAudioSender(conn)
 	}
 	ForgetVoiceRegion(v.botID, guildID)
 }

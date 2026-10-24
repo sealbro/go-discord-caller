@@ -6,17 +6,19 @@ import (
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
 // watchVoiceReady re-arms a bot's audio pipeline after disgo transparently
 // re-identifies its voice gateway.
 //
 // disgo auto-reconnects the voice gateway for every close code marked
-// Reconnect (voice/gateway.go: `if g.config.AutoReconnect && reconnect`).
-// Code 1006 "unexpected EOF" is by far the most common one in production.
-// When the resume is rejected and the gateway has to re-identify, Discord
-// replies with a fresh Ready and connImpl.handleMessage opens a NEW UDP
-// socket — without closing the old one. Two things break:
+// Reconnect, and reopens the whole conn for one marked NewConnection. Code 1006
+// "unexpected EOF" is by far the most common one in production. When the
+// gateway has to re-identify, Discord replies with a fresh Ready and
+// connImpl.handleMessage opens a NEW UDP socket — without closing the old one.
+// Two things break:
 //
 //   - The AudioReceiver goroutine stays blocked in ReadPacket on the ORPHANED
 //     socket. It captured `conn := u.conn` before the swap, and that socket is
@@ -39,15 +41,9 @@ import (
 // Only Ready is watched, not Resumed: a successful resume keeps the existing
 // UDP socket and needs no repair.
 //
-// UPSTREAM(disgo v0.19.3): a transparent voice re-identify swaps in a new UDP conn.
+// UPSTREAM(disgo 2d889db): a transparent voice re-identify swaps in a new UDP conn.
 func (m *Service) watchVoiceReady(guildID, botUserID snowflake.ID, conn voice.Conn) {
-	conn.SetEventHandlerFunc(func(_ voice.Gateway, op voice.Opcode, _ int, _ voice.GatewayMessageData) {
-		if op != voice.OpcodeReady {
-			return
-		}
-		// This runs inline on the voice gateway's listen goroutine (see the
-		// eventHandlerFunc call at the bottom of gatewayImpl.listen), so it must
-		// never block: anything slow here stalls the whole voice gateway.
+	pool.OnVoiceReady(conn, func() {
 		go m.reapplyAfterVoiceReady(guildID, botUserID, conn)
 	})
 }

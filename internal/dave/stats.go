@@ -42,7 +42,7 @@ const (
 // decrypted — and the backend reports no error, making them invisible in the
 // logs.
 //
-// UPSTREAM(disgo v0.19.3): ReadPacket resolves an SSRC it has no SPEAKING op
+// UPSTREAM(disgo 2d889db): ReadPacket resolves an SSRC it has no SPEAKING op
 // for to user "0" rather than skipping the packet.
 const UnknownUserID = "0"
 

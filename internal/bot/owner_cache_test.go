@@ -66,10 +66,7 @@ func TestCacheVoiceMembersRestoresMembersAlreadyInVoiceAtGuildCreate(t *testing.
 	caches.AddMember(idle)
 	joinVoice(caches, inVoice.User.ID)
 
-	cacheVoiceMembers(caches, discord.GatewayGuild{
-		Guild:   discord.Guild{ID: cacheTestGuild},
-		Members: []discord.Member{inVoice, idle},
-	})
+	cacheVoiceMembers(caches, cacheTestGuild, []discord.Member{inVoice, idle})
 
 	if !isCached(caches, inVoice.User.ID) {
 		t.Error("member in voice at GUILD_CREATE is missing from the cache")

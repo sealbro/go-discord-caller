@@ -50,8 +50,8 @@ func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks
 // disgo passes the voice.Conn as the DAVE session's callbacks; a report whose
 // callbacks are anything else resolves to nothing, so no rejoin happens.
 //
-// UPSTREAM(disgo v0.19.3): the DAVE session factory receives the conn itself
-// as its callbacks (voice/conn.go:80).
+// UPSTREAM(disgo 2d889db): the DAVE session factory receives the conn itself
+// as its callbacks (voice/conn.go:81).
 func encryptStallTarget(selfUserID godave.UserID, conn godave.Callbacks) (guildID, botUserID snowflake.ID, ok bool) {
 	vc, isConn := conn.(voice.Conn)
 	if !isConn {
@@ -217,7 +217,7 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 // Polls the speaker's conn for up to 500ms; returns immediately once the
 // move is observed or if the conn is already gone.
 //
-// UPSTREAM(disgo v0.19.3): two bots' gateway listeners consume independent queues.
+// UPSTREAM(disgo 2d889db): two bots' gateway listeners consume independent queues.
 func (m *Service) waitSpeakerConnDrained(guildID, botUserID, boundChID snowflake.ID) {
 	client, ok := m.poolSvc.GetClientByID(botUserID)
 	if !ok || client.VoiceManager == nil {

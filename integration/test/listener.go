@@ -107,7 +107,6 @@ func newTestListener(ctx context.Context, token string) (*Listener, error) {
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
 			pool.SafeAudioSenderOpt(),
 			pool.VoiceConnOpt(),
-			pool.SerialGatewayOpt(),
 			voice.WithLogger(slog.New(slog.DiscardHandler)),
 		),
 	)

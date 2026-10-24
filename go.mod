@@ -3,9 +3,10 @@ module github.com/sealbro/go-discord-caller
 go 1.27.0
 
 require (
-	github.com/disgoorg/disgo v0.19.7-0.20261017103250-2d889db8a812
+	github.com/disgoorg/disgo v0.19.7-0.20261023185300-5bf95ebe8a0d
 	github.com/disgoorg/godave v0.3.0
 	github.com/disgoorg/godave/golibdave v0.3.0
+	github.com/disgoorg/omit v1.0.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/gorilla/websocket v1.5.3
 	github.com/hraban/opus v0.0.0-20260708213942-bde8e4304501
@@ -33,7 +34,6 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/disgoorg/godave/libdave v0.3.0 // indirect
 	github.com/disgoorg/json/v2 v2.0.0 // indirect
-	github.com/disgoorg/omit v1.0.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect

@@ -107,12 +107,12 @@ func statusLockHeld(gw voice.Gateway) bool {
 	}
 }
 
-// disgo's voice gateway takes its two locks in opposite orders: Send holds the
-// status lock while it waits for the connection lock, and Close holds the
-// connection lock while it waits for the status lock. A DAVE epoch arriving
-// while the bot leaves voice deadlocks the two, and the stuck Close also wedges
-// the bot's main gateway, which handles the voice-state update that closes the
-// conn.
+// disgo's voice gateway took its two locks in opposite orders until 5bf95eb:
+// Send held the status lock while it waited for the connection lock, and Close
+// held the connection lock while it waited for the status lock. A DAVE epoch
+// arriving while the bot leaves voice deadlocked the two, and the stuck Close
+// also wedged the bot's main gateway, which handles the voice-state update that
+// closes the conn.
 func TestLeaveDoesNotDeadlockWithDaveEpoch(t *testing.T) {
 	t.Parallel()
 
@@ -148,7 +148,6 @@ func TestLeaveDoesNotDeadlockWithDaveEpoch(t *testing.T) {
 		}),
 		SafeAudioSenderOpt(),
 		VoiceConnOpt(),
-		SerialGatewayOpt(),
 		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(dialer))),
 		voice.WithLogger(slog.New(slog.DiscardHandler)),
 	)

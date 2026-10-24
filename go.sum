@@ -5,8 +5,8 @@ github.com/cenkalti/backoff/v5 v5.0.3/go.mod h1:rkhZdG3JZukswDf7f0cwqPNk4K0sa+F9
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
 github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
-github.com/disgoorg/disgo v0.19.7-0.20261017103250-2d889db8a812 h1:NlVoMsXDLz3ZpA8Idq6rLN4lQROjP2Tc+1SkI96UtMM=
-github.com/disgoorg/disgo v0.19.7-0.20261017103250-2d889db8a812/go.mod h1:ZMGQXsHdnrc7rIgcugi6Ht8sSPOKXwy7WKeNlDGfgKg=
+github.com/disgoorg/disgo v0.19.7-0.20261023185300-5bf95ebe8a0d h1:QYfiO8+OYb9E0fTCVzGsRW8xcpE/1hc/dhybLffpwSo=
+github.com/disgoorg/disgo v0.19.7-0.20261023185300-5bf95ebe8a0d/go.mod h1:ZMGQXsHdnrc7rIgcugi6Ht8sSPOKXwy7WKeNlDGfgKg=
 github.com/disgoorg/godave v0.3.0 h1:37F3ZuiMd8/EXeoCtTeE8iP2eT2nWsfEa4/ITwoKfe4=
 github.com/disgoorg/godave v0.3.0/go.mod h1:OreAC3hpabr39bMVA+jwOVDq1EUPXH5A0XUBiZaDI1Y=
 github.com/disgoorg/godave/golibdave v0.3.0 h1:mSX4YzIYasUB80fo8izi0ENplOKRm7WDwRxXYfKFKWQ=

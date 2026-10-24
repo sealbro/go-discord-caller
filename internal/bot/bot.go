@@ -246,6 +246,7 @@ func (b *Bot) Run(ctx context.Context) error {
 		)
 		b.poolSvc.RegisterBot(selfUser.ID, selfUser.Username, b.client)
 	}
+	b.poolSvc.StartVerificationPoll(ctx, time.Hour)
 
 	slog.InfoContext(ctx, "bot is running. Press Ctrl+C to stop.")
 

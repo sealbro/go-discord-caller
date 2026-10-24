@@ -59,7 +59,10 @@ All instruments carry the resource attribute `service.name="go-discord-caller"`.
 ## 🛰️ Speaker pool (`internal/telemetry/pool_metrics.go`)
 
 Emitted from `internal/pool/service.go` (observable gauges via a registered
-callback; counters inline in the watchdog).
+callback; counters inline in the watchdog). The `gdc.bot.verified` /
+`guilds` / `members_intent` / `verification_blocked` gauges come from each
+bot's own application, fetched at startup and then hourly; a failed fetch keeps
+the last known value.
 
 | OTel instrument | Type | Prometheus series | Attributes | Description |
 |-----------------|------|-------------------|------------|-------------|
@@ -67,6 +70,10 @@ callback; counters inline in the watchdog).
 | `gdc.pool.bots.total`            | ObservableGauge | `gdc_pool_bots_total`            | —        | Total speaker bots registered in the pool. (Gauge — *not* a counter despite the `total` suffix.) |
 | `gdc.pool.bots.connected`        | ObservableGauge | `gdc_pool_bots_connected`        | —        | Speaker bots with a healthy gateway connection. |
 | `gdc.bot.gateway.latency`        | ObservableGauge (`ms`) | `gdc_bot_gateway_latency_milliseconds` | `bot_id` | Gateway WebSocket heartbeat RTT per bot. `0` until first ACK. See `docs/LATENCY.md` — this is the **control channel**, not audio latency. |
+| `gdc.bot.verified`               | ObservableGauge | `gdc_bot_verified`               | `bot_id` | `1` when Discord shows the bot as verified, `0` otherwise. An unverified bot cannot join more than 100 servers. Owner and speakers. |
+| `gdc.bot.guilds`                 | ObservableGauge | `gdc_bot_guilds`                 | `bot_id` | Approximate server count per bot, as Discord counts it against that limit. Absent when Discord reports no count. |
+| `gdc.bot.members_intent`         | ObservableGauge | `gdc_bot_members_intent`         | `bot_id`, `state` | Always `1`; `state` is `approved`, `limited` (works only below 100 servers) or `off`. |
+| `gdc.bot.verification_blocked`   | ObservableGauge | `gdc_bot_verification_blocked`   | `bot_id` | `1` when Discord has blocked verification because of unusual growth. |
 | `gdc.pool.reconnect.attempts.total` | Counter | `gdc_pool_reconnect_attempts_total` | `bot_id` | Watchdog gateway reconnect attempts. |
 | `gdc.pool.reconnect.failures.total` | Counter | `gdc_pool_reconnect_failures_total` | `bot_id` | Watchdog gateway reconnect failures. |
 

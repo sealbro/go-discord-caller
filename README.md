@@ -206,7 +206,7 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
 ### 2. Finish the bot setup
 
 1. In your Discord server, run `/setup` to open the interactive panel:
-   - Bind the **capture role** — members with this role will have their voice relayed
+   - Bind the **capture role** (required) — only members with this role have their voice relayed; `/start` refuses until it is set. A server joining with a relay code needs its own capture role too, unless it only listens
    - Bind the **manager role** — members with this role can use `/start` and `/stop`
    - Bind the **owner bot** to a voice channel
    - Add speaker bots via the **Add Speaker** button and bind each to a voice channel

@@ -376,7 +376,7 @@ func (p *cacheVoiceProbe) HasListeners(channelID snowflake.ID) bool {
 
 // EnumerateCallers returns the user IDs of cached non-bot members in
 // channelID whose role set contains roleID. When roleID == 0 (no caller role
-// bound) every non-bot in the channel counts — matching AllowFilter semantics.
+// bound) nobody counts — matching AllowFilter semantics.
 func (p *cacheVoiceProbe) EnumerateCallers(channelID, roleID snowflake.ID) []snowflake.ID {
 	caches := p.svc.ownerClient.Caches
 	var users []snowflake.ID
@@ -386,10 +386,6 @@ func (p *cacheVoiceProbe) EnumerateCallers(channelID, roleID snowflake.ID) []sno
 		}
 		member, ok := caches.Member(p.guildID, vs.UserID)
 		if !ok || p.svc.IsBot(member.User) {
-			continue
-		}
-		if roleID == 0 {
-			users = append(users, vs.UserID)
 			continue
 		}
 		for _, rID := range member.RoleIDs {

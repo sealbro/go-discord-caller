@@ -26,6 +26,7 @@ type Config struct {
 	// Guest guild channels (required only when GuestGuildID is set)
 	GuestOwnerChannelID   snowflake.ID
 	GuestSpeakerChannelID snowflake.ID
+	GuestCallerRoleID     snowflake.ID // E2E_GUEST_CALLER_ROLE_ID — optional; enables guest capture tests
 	// Directory containing .dca files streamed in random order by the source bot.
 	SamplesDir string
 }
@@ -72,6 +73,7 @@ func LoadConfig() (*Config, error) {
 	}
 	cfg.GuestOwnerChannelID, _ = optionalSnowflake("E2E_GUEST_OWNER_CHANNEL_ID")
 	cfg.GuestSpeakerChannelID, _ = optionalSnowflake("E2E_GUEST_SPEAKER_CHANNEL_ID")
+	cfg.GuestCallerRoleID, _ = optionalSnowflake("E2E_GUEST_CALLER_ROLE_ID")
 
 	cfg.SamplesDir = os.Getenv("E2E_SAMPLES_DIR")
 	if cfg.SamplesDir == "" {

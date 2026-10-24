@@ -68,7 +68,7 @@ func (s Status) Render(loc Translator) string {
 	if s.CallerRoleID != nil {
 		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.capture_role"), s.CallerRoleID)
 	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.capture_role"), t("status.not_set"))
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.capture_role"), t("status.capture_role_required"))
 	}
 
 	if s.ManagerRoleID != nil {
@@ -156,6 +156,8 @@ func englishStatusFallback(key string, args ...any) string {
 		return "Owner Bot Channel"
 	case "status.not_set":
 		return "not set"
+	case "status.capture_role_required":
+		return "⚠️ not set — required: voice raids cannot start"
 	case "status.unbound":
 		return "unbound"
 	case "status.ally_code":

@@ -32,6 +32,7 @@ type fakeManager struct {
 	hasCallerRoleFn func(snowflake.ID, []snowflake.ID) bool
 	hasActiveFn     func(snowflake.ID) bool
 	hasManagerFn    func(snowflake.ID, []snowflake.ID) bool
+	statusFn        func(snowflake.ID) guild.Status
 
 	seedCalls           [][]snowflake.ID
 	trySeedCalls        []snowflakePair
@@ -139,7 +140,12 @@ func (f *fakeManager) GetLocale(snowflake.ID) string                        { re
 func (f *fakeManager) ToggleSpeaker(snowflake.ID, snowflake.ID, bool) error { return nil }
 func (f *fakeManager) NextSpeakerID(snowflake.ID) (snowflake.ID, bool)      { return 0, false }
 func (f *fakeManager) HasAvailableToken(snowflake.ID) bool                  { return false }
-func (f *fakeManager) GetStatus(snowflake.ID) guild.Status                  { return guild.Status{} }
+func (f *fakeManager) GetStatus(g snowflake.ID) guild.Status {
+	if f.statusFn != nil {
+		return f.statusFn(g)
+	}
+	return guild.Status{}
+}
 func (f *fakeManager) HasManagerRole(g snowflake.ID, r []snowflake.ID) bool {
 	if f.hasManagerFn != nil {
 		return f.hasManagerFn(g, r)

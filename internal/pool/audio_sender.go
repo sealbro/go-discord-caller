@@ -6,18 +6,20 @@ import (
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
+	"github.com/disgoorg/godave"
 )
 
 // AudioSenderRegistry tracks the live audio sender behind each voice.Conn so
 // teardown can stop it.
 //
-// disgo v0.19.3 never closes the audio sender when a connection is closed:
+// disgo (v0.19.3 through master 2d889db) never closes the audio sender when a
+// connection is closed:
 //
 //	func (c *connImpl) Close(ctx context.Context) {
 //		_ = c.voiceStateUpdateFunc(ctx, c.state.GuildID, nil, false, false)
-//		defer c.gateway.Close()
-//		defer func() { _ = c.udp.Close() }()
-//		...
+//		c.gateway.Close()
+//		_ = c.udp.Close()
+//		_ = c.dave.Close()
 //		c.removeConnFunc()
 //	}
 //
@@ -44,10 +46,10 @@ import (
 // day's largest CPU peak on the host.
 //
 // The registry is keyed by the voice.Conn that disgo passes to the create
-// func, which is the same Conn our GuildVoice.Leave holds — so Leave can
-// close exactly the right sender.
+// func, which is the same Conn disgo later removes — so newConn's removal hook
+// can close exactly the right sender.
 //
-// UPSTREAM(disgo v0.19.3): Conn.Close leaves the audio sender running.
+// UPSTREAM(disgo 2d889db): Conn.Close leaves the audio sender running.
 type AudioSenderRegistry struct {
 	mu      sync.Mutex
 	senders map[voice.Conn]*safeAudioSender
@@ -66,10 +68,10 @@ func NewAudioSenderRegistry() *AudioSenderRegistry {
 // mirrors what the library already did and never orphans a running sender.
 func (r *AudioSenderRegistry) CreateFunc() voice.AudioSenderCreateFunc {
 	return func(logger *slog.Logger, provider voice.OpusFrameProvider, conn voice.Conn) voice.AudioSender {
-		g := &startSignalProvider{OpusFrameProvider: provider, started: make(chan struct{})}
+		c := &startSignalConn{Conn: conn, started: make(chan struct{})}
 		s := &safeAudioSender{
-			AudioSender: voice.NewAudioSender(logger, g, conn),
-			started:     g.started,
+			AudioSender: voice.NewAudioSender(logger, provider, c),
+			started:     c.started,
 		}
 		r.mu.Lock()
 		r.senders[conn] = s
@@ -110,14 +112,14 @@ func (r *AudioSenderRegistry) CloseAll() {
 // harness bots — must pass it, since any of them can be torn down while its
 // gateway is already dead.
 //
-// voice.WithConnConfigOpts appends, so this composes with SafeUDPConnOpt and
-// voice.WithDaveSessionCreateFunc rather than replacing them.
+// voice.WithConnConfigOpts appends, so this composes with
+// voice.WithDaveSessionCreateFunc rather than replacing it.
 func (r *AudioSenderRegistry) Opt() voice.ManagerConfigOpt {
 	return voice.WithConnConfigOpts(voice.WithConnAudioSenderCreateFunc(r.CreateFunc()))
 }
 
-// startSignalProvider passes frames through unchanged and closes started on the
-// first ProvideOpusFrame call.
+// startSignalConn passes everything through to the conn and closes started on
+// the first DAVE() call.
 //
 // It exists to make closing the sender safe. disgo's defaultAudioSender sets
 // its cancelFunc inside the goroutine that Open spawns:
@@ -125,36 +127,36 @@ func (r *AudioSenderRegistry) Opt() voice.ManagerConfigOpt {
 //	func (s *defaultAudioSender) open() {
 //		...
 //		ctx, cancel := context.WithCancel(context.Background())
-//		s.cancelFunc = cancel   // line 75, in the new goroutine
+//		s.cancelFunc = cancel   // in the new goroutine
 //		...
-//		s.send()                // line 84, calls ProvideOpusFrame
+//		s.send()                // calls conn.DAVE().Ready() every tick
 //	}
 //
 // while Close reads it from the caller's goroutine with no synchronisation:
 //
-//	func (s *defaultAudioSender) Close() { s.cancelFunc() }
+//	func (s *defaultAudioSender) Close() { s.cancelFunc(); ... }
 //
-// That is both a data race and a nil-func panic when Close beats the goroutine
-// — the same Close-before-Open hazard safeUDPConn guards for UDP sockets, and
-// join timeouts make it just as reachable here.
+// That is both a data race and a nil-func panic when Close beats the goroutine,
+// and join timeouts make it routine.
 //
-// The first ProvideOpusFrame call happens after the cancelFunc write, so
-// closing started at that point and receiving from it before calling Close
-// establishes a happens-before edge covering the write. Waiting on it is what
-// makes safeAudioSender.Close race-free rather than merely crash-free.
-type startSignalProvider struct {
-	voice.OpusFrameProvider
+// The first DAVE() call happens after the cancelFunc write, so closing started
+// at that point and receiving from it before calling Close establishes a
+// happens-before edge covering the write. The signal cannot come from the
+// provider: send skips ProvideOpusFrame until the DAVE session is ready, which
+// a conn torn down mid-handshake never reaches.
+type startSignalConn struct {
+	voice.Conn
 	once    sync.Once
 	started chan struct{}
 }
 
-func (p *startSignalProvider) ProvideOpusFrame() ([]byte, error) {
-	p.once.Do(func() { close(p.started) })
-	return p.OpusFrameProvider.ProvideOpusFrame()
+func (c *startSignalConn) DAVE() godave.Session {
+	c.once.Do(func() { close(c.started) })
+	return c.Conn.DAVE()
 }
 
 // senderStartTimeout bounds the wait for the sender goroutine to reach its
-// first ProvideOpusFrame call. Open schedules that goroutine immediately, so
+// first DAVE() call. Open schedules that goroutine immediately, so
 // this is far more headroom than needed; it only stops teardown blocking
 // forever if the goroutine never ran at all.
 var senderStartTimeout = 2 * time.Second
@@ -163,7 +165,7 @@ var senderStartTimeout = 2 * time.Second
 // panic, and cannot race the sender goroutine's start-up. Everything except
 // Close is promoted from the embedded interface.
 //
-// UPSTREAM(disgo v0.19.3): defaultAudioSender.Close cancels a func Open has not set yet.
+// UPSTREAM(disgo 2d889db): defaultAudioSender.Close cancels a func Open has not set yet.
 type safeAudioSender struct {
 	voice.AudioSender
 	once    sync.Once
@@ -171,7 +173,7 @@ type safeAudioSender struct {
 }
 
 // Close stops the sender goroutine. It waits for the goroutine to signal that
-// it is running (see startSignalProvider) so the underlying cancelFunc read is
+// it is running (see startSignalConn) so the underlying cancelFunc read is
 // ordered after its write, and recovers if disgo panics anyway.
 //
 // After cancellation the goroutine may emit one final "error while reading
@@ -200,15 +202,10 @@ func (s *safeAudioSender) Close() {
 var defaultSenders = NewAudioSenderRegistry()
 
 // SafeAudioSenderOpt installs the process-wide audio-sender registry on a bot's
-// voice manager. Pair it with SafeUDPConnOpt on every client, so GuildVoice.Leave
-// can stop the sender that disgo's connImpl.Close leaves running.
+// voice manager. Install it on every client, together with VoiceConnOpt, which
+// stops the sender that disgo's connImpl.Close leaves running.
 func SafeAudioSenderOpt() voice.ManagerConfigOpt {
 	return defaultSenders.Opt()
-}
-
-// CloseAudioSender stops the audio sender behind conn. Called by GuildVoice.Leave.
-func CloseAudioSender(conn voice.Conn) {
-	defaultSenders.Close(conn)
 }
 
 // CloseAllAudioSenders stops every tracked sender. Backstop for process shutdown.

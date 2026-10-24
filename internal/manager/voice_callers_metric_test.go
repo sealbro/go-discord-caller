@@ -89,17 +89,16 @@ func (h *callersHarness) member(userID snowflake.ID, bot bool, roles ...snowflak
 // unready, then GUILD_CREATE carries the members and voice states.
 func (h *callersHarness) startup(members []discord.Member, voiceStates []discord.VoiceState) {
 	h.client.Caches.SetGuildUnready(testGuildID, true)
-	h.dispatch(gateway.EventTypeGuildCreate, gateway.EventGuildCreate{GatewayGuild: discord.GatewayGuild{
-		RestGuild:   discord.RestGuild{Guild: discord.Guild{ID: testGuildID}},
+	h.dispatch(gateway.EventTypeGuildCreate, gateway.EventGuildCreate{
+		ID:          testGuildID,
 		Members:     members,
-		VoiceStates: voiceStates,
-	}})
+		VoiceStates: voiceStates})
 }
 
 func (h *callersHarness) voiceState(userID snowflake.ID, channelID *snowflake.ID) {
 	h.dispatch(gateway.EventTypeVoiceStateUpdate, gateway.EventVoiceStateUpdate{
-		VoiceState: discord.VoiceState{GuildID: testGuildID, UserID: userID, ChannelID: channelID},
-		Member:     h.members[userID],
+		GuildID: testGuildID, UserID: userID, ChannelID: channelID,
+		Member: h.members[userID],
 	})
 }
 

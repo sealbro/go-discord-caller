@@ -2,9 +2,12 @@ package bot
 
 import (
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/bot/handlers"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/disgo/gateway"
+	"github.com/disgoorg/snowflake/v2"
 )
 
 // ownerCacheFlags are the caches the owner bot reads. Everything else disgo
@@ -38,21 +41,30 @@ func ownerCacheOpts(caches *cache.Caches) []cache.ConfigOpt {
 // ownerCacheListeners keep the member cache consistent with ownerCacheOpts.
 func ownerCacheListeners() []bot.EventListener {
 	return []bot.EventListener{
-		bot.NewListenerFunc(func(e *events.GuildReady) { cacheVoiceMembers(e.Client().Caches, e.Guild) }),
-		bot.NewListenerFunc(func(e *events.GuildAvailable) { cacheVoiceMembers(e.Client().Caches, e.Guild) }),
-		bot.NewListenerFunc(func(e *events.GuildJoin) { cacheVoiceMembers(e.Client().Caches, e.Guild) }),
 		bot.NewListenerFunc(func(e *events.GuildVoiceLeave) {
 			evictVoiceLeaver(e.Client().Caches, e.Member)
 		}),
 	}
 }
 
-// cacheVoiceMembers re-adds the members of a GUILD_CREATE. disgo caches them
-// before the guild's voice states, so the policy rejects everyone in voice on
-// that first pass.
-func cacheVoiceMembers(caches cache.Caches, g discord.GatewayGuild) {
-	for _, m := range g.Members {
-		m.GuildID = g.ID
+// ownerGatewayHandlers runs disgo's GUILD_CREATE handler, then re-adds the
+// guild's members. disgo caches them before the guild's voice states, so the
+// policy rejects everyone in voice on that first pass, and the guild events it
+// dispatches no longer carry the member list.
+func ownerGatewayHandlers() bot.ConfigOpt {
+	gatewayHandlers := handlers.GetGatewayHandlers()
+	guildCreate := gatewayHandlers[gateway.EventTypeGuildCreate]
+	gatewayHandlers[gateway.EventTypeGuildCreate] = bot.NewGatewayEventHandler(gateway.EventTypeGuildCreate,
+		func(client *bot.Client, sequenceNumber int, shardID int, event gateway.EventGuildCreate) {
+			guildCreate.HandleGatewayEvent(client, sequenceNumber, shardID, event)
+			cacheVoiceMembers(client.Caches, event.ID, event.Members)
+		})
+	return bot.WithEventManagerConfigOpts(bot.WithGatewayHandlers(gatewayHandlers))
+}
+
+func cacheVoiceMembers(caches cache.Caches, guildID snowflake.ID, members []discord.Member) {
+	for _, m := range members {
+		m.GuildID = guildID
 		caches.AddMember(m)
 	}
 }

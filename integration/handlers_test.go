@@ -151,11 +151,17 @@ func TestE11_MixerPauseResumeViaVoiceEvents(t *testing.T) {
 // removing the caller role mid-session causes NotifyMemberUpdate to update the
 // AllowFilter so the ex-caller's audio is no longer captured.
 //
-// Requires the owner bot to have the Manage Roles permission in the test guild.
-// The test restores the caller role in cleanup so it does not affect other tests.
+// Requires the listener bot to be able to manage the caller role: MANAGE_ROLES
+// and a highest role above it. The test restores the caller role in cleanup so
+// it does not affect other tests.
 func TestE12_AllowFilterUpdatedOnRoleRevoke(t *testing.T) {
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need second speaker to verify filter")
 	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
+	canManage, why, err := h.Listener.CanManageRole(h.Cfg.GuildID, h.Cfg.CallerRoleID)
+	if err != nil {
+		t.Fatalf("check caller-role management: %v", err)
+	}
+	skipIfMissing(t, canManage, "E12: %s", why)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()

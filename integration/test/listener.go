@@ -105,9 +105,8 @@ func newTestListener(ctx context.Context, token string) (*Listener, error) {
 		),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(golibdave.NewSession),
-			pool.SafeUDPConnOpt(),
 			pool.SafeAudioSenderOpt(),
-			pool.SafeGatewayOpt(),
+			pool.VoiceConnOpt(),
 			voice.WithLogger(slog.New(slog.DiscardHandler)),
 		),
 	)
@@ -211,6 +210,9 @@ func (l *Listener) StartPlaying(ctx context.Context, guildID, channelID snowflak
 	return cleanup, nil
 }
 
+// ID returns the listener bot's user ID.
+func (l *Listener) ID() snowflake.ID { return l.id }
+
 // GetMember fetches a guild member via the listener bot's REST client.
 // The listener bot is the designated test-admin bot (Administrator role in the
 // test guild) so privileged setup calls go through it, keeping the owner bot at
@@ -266,44 +268,15 @@ func (l *Listener) SetServerDeaf(guildID, userID snowflake.ID, deaf bool) error 
 // so tests use this to tell "the feature is off in this guild" apart from
 // "the code stopped deafening".
 func (l *Listener) CanDeafen(guildID, actorID, targetID snowflake.ID) (bool, string, error) {
-	roles, err := l.client.Rest.GetRoles(guildID)
-	if err != nil {
-		return false, "", fmt.Errorf("get guild roles: %w", err)
-	}
-	byID := make(map[snowflake.ID]discord.Role, len(roles))
-	for _, r := range roles {
-		byID[r.ID] = r
-	}
-
-	inspect := func(userID snowflake.ID) (allowed bool, top int, err error) {
-		member, err := l.client.Rest.GetMember(guildID, userID)
-		if err != nil {
-			return false, 0, fmt.Errorf("get member %s: %w", userID, err)
-		}
-		// @everyone carries the guild ID as its role ID and applies to everyone.
-		if r, ok := byID[guildID]; ok {
-			allowed = r.Permissions.Has(discord.PermissionDeafenMembers) ||
-				r.Permissions.Has(discord.PermissionAdministrator)
-		}
-		for _, rid := range member.RoleIDs {
-			r, ok := byID[rid]
-			if !ok {
-				continue
-			}
-			if r.Permissions.Has(discord.PermissionDeafenMembers) ||
-				r.Permissions.Has(discord.PermissionAdministrator) {
-				allowed = true
-			}
-			top = max(top, r.Position)
-		}
-		return allowed, top, nil
-	}
-
-	actorAllowed, actorTop, err := inspect(actorID)
+	roles, err := l.guildRoles(guildID)
 	if err != nil {
 		return false, "", err
 	}
-	_, targetTop, err := inspect(targetID)
+	actorAllowed, actorTop, err := l.memberPower(guildID, actorID, roles, discord.PermissionDeafenMembers)
+	if err != nil {
+		return false, "", err
+	}
+	_, targetTop, err := l.memberPower(guildID, targetID, roles, discord.PermissionDeafenMembers)
 	if err != nil {
 		return false, "", err
 	}
@@ -316,4 +289,99 @@ func (l *Listener) CanDeafen(guildID, actorID, targetID snowflake.ID) (bool, str
 			actorTop, targetID, targetTop), nil
 	}
 	return true, "", nil
+}
+
+// CanManageRole reports whether the listener can add or remove roleID on
+// members of guildID. Administrator does not lift Discord's hierarchy rule: the
+// listener's highest role must sit strictly above roleID, so a listener whose
+// highest role is roleID itself is refused with 50013.
+func (l *Listener) CanManageRole(guildID, roleID snowflake.ID) (bool, string, error) {
+	roles, err := l.guildRoles(guildID)
+	if err != nil {
+		return false, "", err
+	}
+	target, ok := roles[roleID]
+	if !ok {
+		return false, "", fmt.Errorf("role %s not found in guild %s", roleID, guildID)
+	}
+	allowed, top, err := l.memberPower(guildID, l.id, roles, discord.PermissionManageRoles)
+	if err != nil {
+		return false, "", err
+	}
+
+	switch {
+	case !allowed:
+		return false, fmt.Sprintf("listener bot %s lacks MANAGE_ROLES in guild %s", l.id, guildID), nil
+	case top <= target.Position:
+		return false, fmt.Sprintf("listener bot's highest role (pos %d) is not above role %q (pos %d): "+
+			"move the listener's role above it in Server Settings → Roles", top, target.Name, target.Position), nil
+	}
+	return true, "", nil
+}
+
+// GrantBotRolePermission adds perm to botID's managed role in guildID unless
+// one of its roles already grants it, and reports whether it changed anything.
+// A bot's managed role keeps the permissions of the invite link it joined
+// with, so a test guild falls behind every permission added to the bot since.
+func (l *Listener) GrantBotRolePermission(guildID, botID snowflake.ID, perm discord.Permissions) (bool, error) {
+	roles, err := l.guildRoles(guildID)
+	if err != nil {
+		return false, err
+	}
+	allowed, _, err := l.memberPower(guildID, botID, roles, perm)
+	if err != nil {
+		return false, err
+	}
+	if allowed {
+		return false, nil
+	}
+	for _, r := range roles {
+		if r.Tags == nil || r.Tags.BotID == nil || *r.Tags.BotID != botID {
+			continue
+		}
+		perms := r.Permissions.Add(perm)
+		if _, err := l.client.Rest.UpdateRole(guildID, r.ID, discord.RoleUpdate{Permissions: &perms}); err != nil {
+			return false, fmt.Errorf("update role %q: %w", r.Name, err)
+		}
+		return true, nil
+	}
+	return false, fmt.Errorf("bot %s has no managed role in guild %s", botID, guildID)
+}
+
+func (l *Listener) guildRoles(guildID snowflake.ID) (map[snowflake.ID]discord.Role, error) {
+	roles, err := l.client.Rest.GetRoles(guildID)
+	if err != nil {
+		return nil, fmt.Errorf("get guild roles: %w", err)
+	}
+	byID := make(map[snowflake.ID]discord.Role, len(roles))
+	for _, r := range roles {
+		byID[r.ID] = r
+	}
+	return byID, nil
+}
+
+// memberPower reports whether userID holds perm (directly or via
+// Administrator) and the position of its highest role.
+func (l *Listener) memberPower(guildID, userID snowflake.ID, roles map[snowflake.ID]discord.Role,
+	perm discord.Permissions) (allowed bool, top int, err error) {
+	member, err := l.client.Rest.GetMember(guildID, userID)
+	if err != nil {
+		return false, 0, fmt.Errorf("get member %s: %w", userID, err)
+	}
+	grants := func(r discord.Role) bool {
+		return r.Permissions.Has(perm) || r.Permissions.Has(discord.PermissionAdministrator)
+	}
+	// @everyone carries the guild ID as its role ID and applies to everyone.
+	if r, ok := roles[guildID]; ok {
+		allowed = grants(r)
+	}
+	for _, rid := range member.RoleIDs {
+		r, ok := roles[rid]
+		if !ok {
+			continue
+		}
+		allowed = allowed || grants(r)
+		top = max(top, r.Position)
+	}
+	return allowed, top, nil
 }

@@ -333,11 +333,11 @@ func NewOwnerClient(token string, daveStats *dave.Stats, daveStalls *dave.Encryp
 	base := []bot.ConfigOpt{
 		bot.WithCacheConfigOpts(ownerCacheOpts(&caches)...),
 		bot.WithEventListeners(ownerCacheListeners()...),
+		ownerGatewayHandlers(),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
-			pool.SafeUDPConnOpt(),
 			pool.SafeAudioSenderOpt(),
-			pool.SafeGatewayOpt(),
+			pool.VoiceConnOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
 	}

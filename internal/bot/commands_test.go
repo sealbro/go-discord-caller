@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"math/bits"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,11 +10,12 @@ import (
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
+
+	"github.com/sealbro/go-discord-caller/internal/manager"
 )
 
-// TestBotPermissions guards against accidental changes to the install URL
-// permission bitmask. The constant must equal the original value so that
-// existing bot invitations continue to work.
+// TestBotPermissions guards against accidental changes to the speaker bots'
+// install URL bitmask.
 func TestBotPermissions(t *testing.T) {
 	const want discord.Permissions = 36701440
 	if botPermissions != want {
@@ -74,7 +76,7 @@ func TestInstallURL(t *testing.T) {
 // TestOwnerInviteURLsMatchPermissions checks the invite URLs published in the
 // docs against ownerPermissions.
 //
-// The number is hard-coded in four tracked files, and they have already drifted
+// The number is hard-coded in several tracked files, and they have already drifted
 // once: when DEAFEN_MEMBERS was added, README.md was updated and the docs site
 // was not, so every visitor following the "Try the hosted bot" button got an
 // invite missing the permission and silently lost the optimisation. A comment
@@ -99,5 +101,129 @@ func TestOwnerInviteURLsMatchPermissions(t *testing.T) {
 				t.Errorf("%s still carries a stale invite URL with %q", path, staleParam)
 			}
 		})
+	}
+}
+
+// permissionSpecs is every permission either bot requests, and which bot
+// requests it. docs/PERMISSIONS.md documents the same table.
+var permissionSpecs = []struct {
+	flag    string
+	perm    discord.Permissions
+	owner   bool
+	speaker bool
+}{
+	{"VIEW_CHANNEL", discord.PermissionViewChannel, true, true},
+	{"CONNECT", discord.PermissionConnect, true, true},
+	{"SPEAK", discord.PermissionSpeak, true, true},
+	{"USE_VAD", discord.PermissionUseVAD, true, true},
+	{"PRIORITY_SPEAKER", discord.PermissionPrioritySpeaker, true, true},
+	{"DEAFEN_MEMBERS", discord.PermissionDeafenMembers, true, false},
+	{"ADD_REACTIONS", discord.PermissionAddReactions, true, false},
+	{"SEND_MESSAGES", discord.PermissionSendMessages, true, false},
+	{"SEND_TTS_MESSAGES", discord.PermissionSendTTSMessages, true, false},
+	{"SEND_VOICE_MESSAGES", discord.PermissionSendVoiceMessages, true, false},
+	{"SET_VOICE_CHANNEL_STATUS", permissionSetVoiceChannelStatus, true, false},
+}
+
+func TestPermissionSpecs(t *testing.T) {
+	var owner, speaker discord.Permissions
+	for _, spec := range permissionSpecs {
+		if got := ownerPermissions.Has(spec.perm); got != spec.owner {
+			t.Errorf("owner bot requests %s = %v, want %v", spec.flag, got, spec.owner)
+		}
+		if got := botPermissions.Has(spec.perm); got != spec.speaker {
+			t.Errorf("speaker bots request %s = %v, want %v", spec.flag, got, spec.speaker)
+		}
+		if spec.owner {
+			owner |= spec.perm
+		}
+		if spec.speaker {
+			speaker |= spec.perm
+		}
+	}
+	if extra := ownerPermissions &^ owner; extra != 0 {
+		t.Errorf("owner bot requests bits %b missing from permissionSpecs", extra)
+	}
+	if extra := botPermissions &^ speaker; extra != 0 {
+		t.Errorf("speaker bots request bits %b missing from permissionSpecs", extra)
+	}
+}
+
+// TestBotsRequestChannelAccess ties the install permissions to the check that
+// blocks a raid: a bot installed without one of them could never pass it.
+func TestBotsRequestChannelAccess(t *testing.T) {
+	if !botPermissions.Has(manager.ChannelAccessPermissions) {
+		t.Errorf("speaker bots request %d, missing channel access bits %b",
+			botPermissions, manager.ChannelAccessPermissions&^botPermissions)
+	}
+	if !ownerPermissions.Has(manager.ChannelAccessPermissions) {
+		t.Errorf("owner bot requests %d, missing channel access bits %b",
+			ownerPermissions, manager.ChannelAccessPermissions&^ownerPermissions)
+	}
+}
+
+type permissionDocRow struct {
+	bit, value     string
+	owner, speaker bool
+}
+
+// permissionDocRows reads the permission table in docs/PERMISSIONS.md, keyed
+// by API flag.
+func permissionDocRows(t *testing.T, doc string) map[string]permissionDocRow {
+	t.Helper()
+	rows := map[string]permissionDocRow{}
+	for _, line := range strings.Split(doc, "\n") {
+		cells := strings.Split(line, "|")
+		// | Permission | `FLAG` | bit | `value` | owner | speaker | used for |
+		if len(cells) != 9 || !strings.HasPrefix(strings.TrimSpace(cells[2]), "`") {
+			continue
+		}
+		flag := strings.Trim(strings.TrimSpace(cells[2]), "`")
+		if _, dup := rows[flag]; dup {
+			t.Errorf("docs/PERMISSIONS.md lists %s twice", flag)
+		}
+		rows[flag] = permissionDocRow{
+			bit:     strings.TrimSpace(cells[3]),
+			value:   strings.Trim(strings.TrimSpace(cells[4]), "`"),
+			owner:   strings.TrimSpace(cells[5]) == "✓",
+			speaker: strings.TrimSpace(cells[6]) == "✓",
+		}
+	}
+	return rows
+}
+
+func TestPermissionsDocMatchesCode(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/PERMISSIONS.md")
+	if err != nil {
+		t.Fatalf("read docs/PERMISSIONS.md: %v", err)
+	}
+	doc := string(raw)
+	rows := permissionDocRows(t, doc)
+
+	for _, spec := range permissionSpecs {
+		row, ok := rows[spec.flag]
+		if !ok {
+			t.Errorf("docs/PERMISSIONS.md has no row for %s", spec.flag)
+			continue
+		}
+		delete(rows, spec.flag)
+		want := permissionDocRow{
+			bit:     fmt.Sprint(bits.TrailingZeros64(uint64(spec.perm))),
+			value:   fmt.Sprint(uint64(spec.perm)),
+			owner:   spec.owner,
+			speaker: spec.speaker,
+		}
+		if row != want {
+			t.Errorf("docs/PERMISSIONS.md row for %s = %+v, want %+v", spec.flag, row, want)
+		}
+	}
+	for flag := range rows {
+		t.Errorf("docs/PERMISSIONS.md lists %s, which neither bot requests", flag)
+	}
+
+	for bot, perms := range map[string]discord.Permissions{"Owner": ownerPermissions, "Speaker": botPermissions} {
+		if total := fmt.Sprintf("| %s | `%d` |", bot, perms); !strings.Contains(doc, total) {
+			t.Errorf("docs/PERMISSIONS.md has no %q", total)
+		}
 	}
 }

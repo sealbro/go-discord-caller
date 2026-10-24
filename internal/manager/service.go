@@ -560,7 +560,13 @@ func (m *Service) warmGuildCache(guildID snowflake.ID) {
 	}
 }
 
-// botChannelWarning checks whether botUserID has ViewChannel+Connect+Speak in channelID using
+// ChannelAccessPermissions are what every bot needs in its bound voice channel;
+// a raid will not start while any bot is missing one.
+const ChannelAccessPermissions = discord.PermissionViewChannel |
+	discord.PermissionConnect |
+	discord.PermissionSpeak
+
+// botChannelWarning checks whether botUserID has ChannelAccessPermissions in channelID using
 // the owner bot's cache (it has guild, channel and role data via IntentGuilds).
 // Both channel and member caches are pre-warmed at startup by warmGuildCache.
 func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) (ChannelAccessWarning, bool) {
@@ -573,7 +579,7 @@ func (m *Service) botChannelWarning(botUserID, guildID, channelID snowflake.ID) 
 		return ChannelAccessWarning{}, false
 	}
 	perms := m.ownerClient.Caches.MemberPermissionsInChannel(channel, member)
-	if !perms.Has(discord.PermissionViewChannel) || !perms.Has(discord.PermissionConnect) || !perms.Has(discord.PermissionSpeak) {
+	if !perms.Has(ChannelAccessPermissions) {
 		return ChannelAccessWarning{
 			BotID:     botUserID,
 			ChannelID: channelID,

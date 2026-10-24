@@ -15,7 +15,7 @@ import (
 // permission bitmask. The constant must equal the original value so that
 // existing bot invitations continue to work.
 func TestBotPermissions(t *testing.T) {
-	const want discord.Permissions = 391565762894144
+	const want discord.Permissions = 36701440
 	if botPermissions != want {
 		t.Errorf("botPermissions = %d, want %d; update the install URLs if the permission set changed intentionally", botPermissions, want)
 	}
@@ -25,15 +25,16 @@ func TestBotPermissions(t *testing.T) {
 // URL. Paths are relative to this package.
 var ownerInviteDocs = []string{
 	"../../README.md",
+	"../../docs/PERMISSIONS.md",
 	"../../mkdocs.yml",
 	"../../misc/website/index.md",
 	"../../misc/website/free-shot-caller-bot.md",
 }
 
 // TestOwnerPermissions pins the owner bot's bitmask, which is botPermissions
-// plus DEAFEN_MEMBERS.
+// plus DEAFEN_MEMBERS and the server-facing permissions.
 func TestOwnerPermissions(t *testing.T) {
-	const want discord.Permissions = 391565771282752
+	const want discord.Permissions = 351843765984576
 	if ownerPermissions != want {
 		t.Errorf("ownerPermissions = %d, want %d; also update every file in ownerInviteDocs", ownerPermissions, want)
 	}

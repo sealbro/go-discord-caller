@@ -51,10 +51,6 @@ func formatBotChannels(header string, warnings []manager.ChannelAccessWarning) s
 	return msg
 }
 
-// permissionSetVoiceChannelStatus is bit 48; switch to disgo's constant of the
-// same name once the disgo version in use defines it.
-const permissionSetVoiceChannelStatus discord.Permissions = 1 << 48
-
 // botPermissions is the Discord permission bitmask required by speaker bots.
 const botPermissions discord.Permissions = discord.PermissionViewChannel |
 	discord.PermissionConnect |
@@ -83,7 +79,7 @@ const ownerPermissions = botPermissions |
 	discord.PermissionSendMessages |
 	discord.PermissionSendTTSMessages |
 	discord.PermissionSendVoiceMessages |
-	permissionSetVoiceChannelStatus
+	discord.PermissionSetVoiceChannelStatus
 
 func installOwnerURL(clientID snowflake.ID) string {
 	return fmt.Sprintf(

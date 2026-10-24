@@ -122,7 +122,7 @@ var permissionSpecs = []struct {
 	{"SEND_MESSAGES", discord.PermissionSendMessages, true, false},
 	{"SEND_TTS_MESSAGES", discord.PermissionSendTTSMessages, true, false},
 	{"SEND_VOICE_MESSAGES", discord.PermissionSendVoiceMessages, true, false},
-	{"SET_VOICE_CHANNEL_STATUS", permissionSetVoiceChannelStatus, true, false},
+	{"SET_VOICE_CHANNEL_STATUS", discord.PermissionSetVoiceChannelStatus, true, false},
 }
 
 func TestPermissionSpecs(t *testing.T) {

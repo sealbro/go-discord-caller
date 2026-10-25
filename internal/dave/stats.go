@@ -392,6 +392,7 @@ func reason(err error) string {
 		{"failed to decrypt frame", "decrypt_failure"},
 		{"failed to encrypt frame", "encrypt_failure"},
 		{"too many attempts", "too_many_attempts"},
+		{"session not ready", "not_ready"},
 	} {
 		if strings.Contains(msg, r.substr) {
 			return r.label

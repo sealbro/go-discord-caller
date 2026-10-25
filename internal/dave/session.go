@@ -1,6 +1,7 @@
 package dave
 
 import (
+	"errors"
 	"log/slog"
 	"sync"
 	"sync/atomic"
@@ -72,6 +73,10 @@ const EncryptStallFrames = 500
 // not established at that moment the encryptor is left with none. Every frame
 // then fails with "missing key ratchet" until the next membership change in
 // the channel happens to repair it — observed lasting an hour in production.
+//
+// disgo's sender does not encrypt at all while the session reports not ready,
+// which a missing key ratchet does, so the frames it drops instead are counted
+// through RecordUnsentFrame.
 //
 // UPSTREAM(golibdave v0.3.0): executing a transition before the MLS group is
 // established leaves the encryptor with no key ratchet.
@@ -221,10 +226,33 @@ func (s *countingSession) Encrypt(ssrc uint32, frame []byte, encryptedFrame []by
 		s.encryptFails.Store(0)
 		return n, nil
 	}
+	s.countEncryptFailure()
+	return n, err
+}
+
+// ErrNotReady is recorded for an outbound frame dropped because the session
+// was not ready to encrypt it.
+var ErrNotReady = errors.New("session not ready")
+
+// UnsentFrameRecorder is implemented by sessions from Instrument.
+type UnsentFrameRecorder interface {
+	// RecordUnsentFrame counts an outbound frame that was dropped unencrypted
+	// because the session was not ready, as a failed Encrypt.
+	RecordUnsentFrame()
+}
+
+// RecordUnsentFrame exists because disgo's sender skips a tick while the
+// session is not ready, so a lost key ratchet no longer reaches Encrypt at
+// all; see WithEncryptStall.
+func (s *countingSession) RecordUnsentFrame() {
+	s.stats.RecordEncrypt(s.botUserID, ErrNotReady)
+	s.countEncryptFailure()
+}
+
+func (s *countingSession) countEncryptFailure() {
 	if s.onStall != nil && s.stallFrames > 0 && s.encryptFails.Add(1)%s.stallFrames == 0 {
 		s.onStall(s.selfUserID, s.callbacks)
 	}
-	return n, err
 }
 
 // AddUser and RemoveUser keep the mirror on the conservative side of the

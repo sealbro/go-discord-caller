@@ -179,7 +179,7 @@ For each bot (owner first, then one per speaker) go to [https://discord.com/deve
 
 Then open the **Bot** section:
 - Click **Reset Token**, copy and save it — you won't see it again
-- **Owner bot only:** enable **Server Members Intent** under *Privileged Gateway Intents*
+- **Owner bot only:** enable **Server Members Intent** under *Privileged Gateway Intents* (once the bot reaches 10,000 users, Discord asks you to apply for it)
 
 Add all tokens to your `.env`:
 

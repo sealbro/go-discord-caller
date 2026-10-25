@@ -6364,7 +6364,7 @@
               ]
             }
           },
-          "description": "Discord verification state per bot, checked hourly. An unverified bot cannot join more than 100 servers; verification can be requested from 75. Servers is Discord's own count. Members Intent matters for the owner bot only: Limited stops working past 100 servers.",
+          "description": "Discord verification state per bot, checked hourly. An unverified bot cannot join more than 100 servers; verification can be requested from 75. Servers is Discord's own count. Members Intent matters for the owner bot only: \"On, not reviewed\" is fine until the bot reaches 10,000 users, when Discord asks for an application.",
           "id": 52,
           "links": [],
           "title": "Bot Verification",
@@ -6492,8 +6492,8 @@
                                 "index": 0
                               },
                               "limited": {
-                                "text": "Limited (stops at 100)",
-                                "color": "orange",
+                                "text": "On, not reviewed",
+                                "color": "blue",
                                 "index": 1
                               },
                               "off": {

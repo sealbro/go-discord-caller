@@ -72,7 +72,7 @@ the last known value.
 | `gdc.bot.gateway.latency`        | ObservableGauge (`ms`) | `gdc_bot_gateway_latency_milliseconds` | `bot_id` | Gateway WebSocket heartbeat RTT per bot. `0` until first ACK. See `docs/LATENCY.md` — this is the **control channel**, not audio latency. |
 | `gdc.bot.verified`               | ObservableGauge | `gdc_bot_verified`               | `bot_id` | `1` when Discord shows the bot as verified, `0` otherwise. An unverified bot cannot join more than 100 servers. Owner and speakers. |
 | `gdc.bot.guilds`                 | ObservableGauge | `gdc_bot_guilds`                 | `bot_id` | Approximate server count per bot, as Discord counts it against that limit. Absent when Discord reports no count. |
-| `gdc.bot.members_intent`         | ObservableGauge | `gdc_bot_members_intent`         | `bot_id`, `state` | Always `1`; `state` is `approved`, `limited` (works only below 100 servers) or `off`. |
+| `gdc.bot.members_intent`         | ObservableGauge | `gdc_bot_members_intent`         | `bot_id`, `state` | Always `1`; `state` is `approved`, `limited` (switched on without review, allowed until the bot reaches 10,000 users) or `off`. |
 | `gdc.bot.verification_blocked`   | ObservableGauge | `gdc_bot_verification_blocked`   | `bot_id` | `1` when Discord has blocked verification because of unusual growth. |
 | `gdc.pool.reconnect.attempts.total` | Counter | `gdc_pool_reconnect_attempts_total` | `bot_id` | Watchdog gateway reconnect attempts. |
 | `gdc.pool.reconnect.failures.total` | Counter | `gdc_pool_reconnect_failures_total` | `bot_id` | Watchdog gateway reconnect failures. |

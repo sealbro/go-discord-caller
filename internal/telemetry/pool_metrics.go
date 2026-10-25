@@ -57,7 +57,7 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if p.membersIntent, err = meter.Int64ObservableGauge("gdc.bot.members_intent",
-		metric.WithDescription("Always 1; the state label says whether the Guild Members intent is approved, limited (stops at 100 servers) or off."),
+		metric.WithDescription("Always 1; the state label says whether the Guild Members intent is approved (reviewed by Discord), limited (switched on without review, allowed below 10,000 users) or off."),
 	); err != nil {
 		return
 	}

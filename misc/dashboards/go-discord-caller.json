@@ -1794,7 +1794,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "expr": "sum(gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) or vector(0)",
                         "instant": true,
                         "legendFormat": "Callers",
                         "range": false
@@ -1809,7 +1809,7 @@
               "transformations": []
             }
           },
-          "description": "Users with the caller role currently in a voice channel, per guild",
+          "description": "Users with the caller role currently in a voice channel of a guild with an active raid; 0 when no raid is running",
           "id": 22,
           "links": [],
           "title": "Active Voice Callers",
@@ -2204,128 +2204,6 @@
                   "displayMode": "list",
                   "placement": "bottom",
                   "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.1.0-24779284961"
-          }
-        }
-      },
-      "panel-26": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "count by (user_id) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) * on(user_id) group_left(bot_name) label_replace(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}, \"user_id\", \"$1\", \"bot_id\", \"(.+)\")",
-                        "instant": false,
-                        "legendFormat": "{{bot_name}}",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Number of guilds each bot is a member of",
-          "id": 26,
-          "links": [],
-          "title": "Guilds per Bot",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 20,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "short",
-                  "decimals": 0
-                },
-                "overrides": []
-              },
-              "options": {
-                "annotations": {
-                  "clustering": -1,
-                  "multiLane": false
-                },
-                "legend": {
-                  "calcs": [
-                    "lastNotNull"
-                  ],
-                  "displayMode": "table",
-                  "placement": "right",
-                  "showLegend": true,
-                  "sortBy": "Last *",
-                  "sortDesc": true
                 },
                 "tooltip": {
                   "hideZeros": false,
@@ -3827,6 +3705,20 @@
                   }
                 },
                 {
+                  "group": "sortBy",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "fields": {},
+                      "sort": [
+                        {
+                          "field": "guild_name"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
                   "group": "organize",
                   "kind": "Transformation",
                   "spec": {
@@ -3984,8 +3876,8 @@
                 "showHeader": true,
                 "sortBy": [
                   {
-                    "displayName": "Guild",
-                    "desc": false
+                    "displayName": "Active Session",
+                    "desc": true
                   }
                 ]
               }
@@ -6891,7 +6783,7 @@
                 "name": "panel-19"
               },
               "height": 8,
-              "width": 8,
+              "width": 12,
               "x": 0,
               "y": 76
             }
@@ -6904,21 +6796,8 @@
                 "name": "panel-17"
               },
               "height": 8,
-              "width": 8,
-              "x": 8,
-              "y": 76
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "panel-26"
-              },
-              "height": 8,
-              "width": 8,
-              "x": 16,
+              "width": 12,
+              "x": 12,
               "y": 76
             }
           },
@@ -7164,9 +7043,9 @@
                 "name": "panel-46"
               },
               "height": 8,
-              "width": 12,
-              "x": 12,
-              "y": 155
+              "width": 8,
+              "x": 16,
+              "y": 163
             }
           },
           {
@@ -7229,9 +7108,9 @@
                 "name": "panel-51"
               },
               "height": 8,
-              "width": 8,
-              "x": 16,
-              "y": 163
+              "width": 12,
+              "x": 12,
+              "y": 155
             }
           },
           {

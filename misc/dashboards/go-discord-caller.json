@@ -6235,6 +6235,336 @@
             "version": "13.1.0-24779284961"
           }
         }
+      },
+      "panel-52": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max by (bot_name) (gdc_bot_verified{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "format": "table",
+                        "instant": true,
+                        "legendFormat": "Verified",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max by (bot_name) (gdc_bot_guilds{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "format": "table",
+                        "instant": true,
+                        "legendFormat": "Servers",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max by (bot_name, state) (gdc_bot_members_intent{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "format": "table",
+                        "instant": true,
+                        "legendFormat": "Members Intent",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max by (bot_name) (gdc_bot_verification_blocked{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "format": "table",
+                        "instant": true,
+                        "legendFormat": "Blocked",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "D"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": [
+                {
+                  "group": "joinByField",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "byField": "bot_name",
+                      "mode": "outer"
+                    }
+                  }
+                },
+                {
+                  "group": "organize",
+                  "kind": "Transformation",
+                  "spec": {
+                    "options": {
+                      "excludeByName": {
+                        "Time 1": true,
+                        "Time 2": true,
+                        "Time 3": true,
+                        "Time 4": true,
+                        "Value #C": true
+                      },
+                      "indexByName": {
+                        "bot_name": 0,
+                        "Value #A": 1,
+                        "Value #B": 2,
+                        "state": 3,
+                        "Value #D": 4
+                      },
+                      "renameByName": {
+                        "bot_name": "Bot",
+                        "Value #A": "Verified",
+                        "Value #B": "Servers",
+                        "state": "Members Intent",
+                        "Value #D": "Blocked"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "description": "Discord verification state per bot, checked hourly. An unverified bot cannot join more than 100 servers; verification can be requested from 75. Servers is Discord's own count. Members Intent matters for the owner bot only: Limited stops working past 100 servers.",
+          "id": 52,
+          "links": [],
+          "title": "Bot Verification",
+          "vizConfig": {
+            "group": "table",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "custom": {
+                    "align": "auto",
+                    "cellOptions": {
+                      "type": "auto"
+                    },
+                    "filterable": false,
+                    "inspect": false
+                  },
+                  "mappings": [],
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      }
+                    ]
+                  }
+                },
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Verified"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "color-background",
+                          "mode": "basic"
+                        }
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "value",
+                            "options": {
+                              "1": {
+                                "text": "Yes",
+                                "color": "green",
+                                "index": 0
+                              },
+                              "0": {
+                                "text": "No",
+                                "color": "orange",
+                                "index": 1
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Servers"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "color-background",
+                          "mode": "basic"
+                        }
+                      },
+                      {
+                        "id": "thresholds",
+                        "value": {
+                          "mode": "absolute",
+                          "steps": [
+                            {
+                              "color": "green",
+                              "value": 0
+                            },
+                            {
+                              "color": "orange",
+                              "value": 75
+                            },
+                            {
+                              "color": "red",
+                              "value": 90
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Members Intent"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "color-background",
+                          "mode": "basic"
+                        }
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "value",
+                            "options": {
+                              "approved": {
+                                "text": "Approved",
+                                "color": "green",
+                                "index": 0
+                              },
+                              "limited": {
+                                "text": "Limited (stops at 100)",
+                                "color": "orange",
+                                "index": 1
+                              },
+                              "off": {
+                                "text": "Off",
+                                "color": "transparent",
+                                "index": 2
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Blocked"
+                    },
+                    "properties": [
+                      {
+                        "id": "custom.cellOptions",
+                        "value": {
+                          "type": "color-background",
+                          "mode": "basic"
+                        }
+                      },
+                      {
+                        "id": "mappings",
+                        "value": [
+                          {
+                            "type": "value",
+                            "options": {
+                              "0": {
+                                "text": "No",
+                                "color": "green",
+                                "index": 0
+                              },
+                              "1": {
+                                "text": "Yes",
+                                "color": "red",
+                                "index": 1
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              },
+              "options": {
+                "cellHeight": "sm",
+                "showHeader": true,
+                "sortBy": [
+                  {
+                    "displayName": "Bot",
+                    "desc": false
+                  }
+                ],
+                "footer": {
+                  "show": false,
+                  "reducer": [
+                    "sum"
+                  ],
+                  "fields": ""
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
       }
     },
     "layout": {
@@ -6902,6 +7232,19 @@
               "width": 8,
               "x": 16,
               "y": 163
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-52"
+              },
+              "height": 9,
+              "width": 24,
+              "x": 0,
+              "y": 171
             }
           }
         ]

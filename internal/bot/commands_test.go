@@ -29,7 +29,6 @@ var ownerInviteDocs = []string{
 	"../../README.md",
 	"../../docs/PERMISSIONS.md",
 	"../../mkdocs.yml",
-	"../../misc/website/index.md",
 	"../../misc/website/free-shot-caller-bot.md",
 }
 

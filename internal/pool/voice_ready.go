@@ -48,16 +48,18 @@ func (w *voiceReadyWatchers) forget(conn voice.Conn) {
 var defaultReadyWatchers = newVoiceReadyWatchers()
 
 // newConn builds disgo's conn with the Ready dispatcher and a paced audio
-// receiver (see newPacedAudioReceiver) installed, and releases
-// the conn's ready watch and audio sender when disgo removes it. disgo removes
-// a conn it closes itself, such as on a voice-server disconnect, and a later
-// Leave then finds nothing to release. A reopen keeps the conn, and both.
+// receiver (see newPacedAudioReceiver) installed, and releases the conn's
+// ready watch, audio sender and audio receiver when disgo removes it. disgo
+// removes a conn it closes itself, such as on a voice-server disconnect, and a
+// later Leave then finds nothing to release. A reopen keeps the conn, and all
+// three.
 func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, removeConn func(), opts ...voice.ConnConfigOpt) voice.Conn {
 	var conn voice.Conn
 	conn = voice.NewConn(guildID, userID, stateUpdate, func() {
 		removeConn()
 		defaultReadyWatchers.forget(conn)
 		defaultSenders.Close(conn)
+		defaultReceivers.close(conn)
 	}, append(slices.Clip(opts),
 		voice.WithConnEventHandlerFunc(defaultReadyWatchers.handle),
 		voice.WithConnAudioReceiverCreateFunc(newPacedAudioReceiver),
@@ -67,10 +69,10 @@ func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, re
 
 // VoiceConnOpt installs newConn as a bot's voice conn factory: it paces the
 // audio receiver, dispatches voice Ready to OnVoiceReady watchers and, when
-// disgo removes a conn, forgets its watch and stops its audio sender. Every
-// client must pass it, or its receivers spin while DAVE is not ready,
-// OnVoiceReady never fires for its conns, and SafeAudioSenderOpt's senders are
-// never stopped.
+// disgo removes a conn, forgets its watch and stops its audio sender and
+// receiver. Every client must pass it, or its receivers spin while DAVE is not
+// ready and outlive their conn, OnVoiceReady never fires for its conns, and
+// SafeAudioSenderOpt's senders are never stopped.
 func VoiceConnOpt() voice.ManagerConfigOpt {
 	return voice.WithConnCreateFunc(newConn)
 }

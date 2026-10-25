@@ -259,6 +259,13 @@ func (s *YAMLStore) save() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: write temp file: %w", err)
 	}
+	// Without a sync, a crash shortly after the rename can leave an empty or
+	// truncated store.yaml: the rename may reach disk before the data does.
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("yaml store: sync temp file: %w", err)
+	}
 	if err := tmp.Close(); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: close temp file: %w", err)
@@ -267,7 +274,23 @@ func (s *YAMLStore) save() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: rename failed: %w", err)
 	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("yaml store: sync dir: %w", err)
+	}
 	return nil
+}
+
+// syncDir makes a rename inside dir durable.
+func syncDir(dir string) error {
+	d, err := os.Open(filepath.Clean(dir))
+	if err != nil {
+		return err
+	}
+	if err := d.Sync(); err != nil {
+		_ = d.Close()
+		return err
+	}
+	return d.Close()
 }
 
 // ── Store interface ───────────────────────────────────────────────────────────

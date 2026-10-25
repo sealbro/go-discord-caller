@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-25
+
+### Added
+- **Bot verification metrics**: each bot reports its verification status, server count and members-intent state, so the 100-server limit can be alerted on in time.
+- **Raid time on the dashboard**: the guild sessions panel shows how long each server spent in raids.
+- **Permissions page**: the docs explain what each bot permission is for and the role order the owner bot needs.
+
+### Changed
+- **Caller role required**: a raid or a capturing relay session no longer starts until a caller role is set in `/setup`; only members with it are relayed.
+- **Fewer permissions requested**: speaker bots ask only for voice permissions, unused ones are dropped, and View Channel is added. Servers that already have the bots keep their current permissions.
+- **Voice library updated**: disgo moved to its latest development version.
+
+### Fixed
+- **Bot hanging while leaving voice**: a voice encryption update arriving during a leave no longer freezes the bot.
+- **Cleanup after forced disconnects**: when Discord drops a voice connection, the bot now releases everything tied to it.
+
 ## [0.11.4] - 2026-10-17
 
 ### Added

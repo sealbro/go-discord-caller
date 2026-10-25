@@ -198,6 +198,15 @@ type VoiceReceiver struct {
 	cachedState   *fanoutDispatch
 	cachedUserID  snowflake.ID
 	cachedTargets []*SourceBuffer
+
+	// Each user's previous packet, for gdc.opus.receive.interval. Guarded by
+	// cacheMu: CleanupUser deletes from it on the gateway goroutine.
+	lastArrivals map[snowflake.ID]arrival
+}
+
+type arrival struct {
+	at        time.Time
+	timestamp uint32
 }
 
 // NewVoiceReceiver constructs a VoiceReceiver. The wiring code must call
@@ -238,6 +247,8 @@ func (v *VoiceReceiver) ReceiveOpusFrame(userID snowflake.ID, packet *voice.Pack
 	if v.allowUser != nil && !v.allowUser(userID) {
 		return nil
 	}
+
+	v.recordReceiveInterval(userID, packet.Timestamp, receivedAt)
 
 	// Decode + multicast inline on disgo's UDP goroutine. Frames received before
 	// the FanoutHandle is Installed (brief pre-install window) are silently dropped.
@@ -352,12 +363,29 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 		copy(pcm, v.scratch[:n*MixerChannels])
 		opusCopy := getRecvFrame(len(opusBytes))
 		copy(opusCopy, opusBytes)
-		t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt})
+		v.metrics.RecordSourceDepth(t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt}))
 	}
 }
 
 func (v *VoiceReceiver) recordReceiveLatency(start time.Time) {
 	v.metrics.RecordReceive(float64(time.Since(start).Microseconds()) / 1000.0)
+}
+
+// recordReceiveInterval records the time since userID's previous packet when
+// the two are consecutive frames by RTP timestamp. A larger step is a pause in
+// speech — Discord sends nothing during silence — not uneven delivery.
+func (v *VoiceReceiver) recordReceiveInterval(userID snowflake.ID, timestamp uint32, at time.Time) {
+	v.cacheMu.Lock()
+	prev, seen := v.lastArrivals[userID]
+	if v.lastArrivals == nil {
+		v.lastArrivals = make(map[snowflake.ID]arrival)
+	}
+	v.lastArrivals[userID] = arrival{at: at, timestamp: timestamp}
+	v.cacheMu.Unlock()
+
+	if seen && timestamp-prev.timestamp == mixerFrameSize {
+		v.metrics.RecordReceiveInterval(float64(at.Sub(prev.at).Microseconds()) / 1000.0)
+	}
 }
 
 // CleanupUser drops the per-user decoder and invalidates the same-user cache.
@@ -374,6 +402,7 @@ func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 		v.cachedTargets = nil
 	}
 	delete(v.decoders, userID)
+	delete(v.lastArrivals, userID)
 }
 
 // Close stops this receiver. Does NOT close the FanoutHandle — that lives

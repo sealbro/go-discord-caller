@@ -33,6 +33,19 @@ type fakeManager struct {
 	hasActiveFn     func(snowflake.ID) bool
 	hasManagerFn    func(snowflake.ID, []snowflake.ID) bool
 	statusFn        func(snowflake.ID) guild.Status
+	startFn         func(guild.RaidMode) (ally.Code, error)
+	stopFn          func() error
+	joinFn          func(guild.RaidMode, ally.Code) (guild.RaidMode, error)
+	accessFn        func() []manager.ChannelAccessWarning
+	missingFn       func() []manager.ChannelAccessWarning
+	nextSpeakerFn   func() (snowflake.ID, bool)
+	toggleFn        func(snowflake.ID, bool) error
+
+	locale      string
+	bindings    []bindCall
+	toggleCalls []toggleCall
+	startModes  []guild.RaidMode
+	joinCodes   []ally.Code
 
 	seedCalls           [][]snowflake.ID
 	trySeedCalls        []snowflakePair
@@ -44,6 +57,14 @@ type fakeManager struct {
 }
 
 type snowflakePair struct{ guild, user snowflake.ID }
+
+// bindCall records one Bind*/Unbind* call; target is the role type, speaker
+// ID or locale it concerns, and value is empty for an unbind.
+type bindCall struct{ op, target, value string }
+type toggleCall struct {
+	speaker snowflake.ID
+	enabled bool
+}
 type autoRouteCall struct{ guild, channel snowflake.ID }
 type botMoveCall struct {
 	guild, bot snowflake.ID
@@ -106,40 +127,103 @@ func (f *fakeManager) OnBotVoiceMove(_ context.Context, g, b snowflake.ID, ch *s
 	f.onBotVoiceMoveCalls = append(f.onBotVoiceMoveCalls, botMoveCall{g, b, ch})
 }
 
-// Stubs for the rest of ManagerService — handlers under test do not exercise these.
-func (f *fakeManager) StartVoiceRaid(context.Context, snowflake.ID, context.CancelFunc, guild.RaidMode) (ally.Code, error) {
+// Stubs for the rest of ManagerService. Behaviour is configured through the
+// *Fn fields; binding changes are recorded so handlers can be checked.
+func (f *fakeManager) StartVoiceRaid(_ context.Context, _ snowflake.ID, _ context.CancelFunc, mode guild.RaidMode) (ally.Code, error) {
+	f.mu.Lock()
+	f.startModes = append(f.startModes, mode)
+	f.mu.Unlock()
+	if f.startFn != nil {
+		return f.startFn(mode)
+	}
 	return "", nil
 }
-func (f *fakeManager) StopVoiceRaid(context.Context, snowflake.ID) error { return nil }
+func (f *fakeManager) StopVoiceRaid(context.Context, snowflake.ID) error {
+	if f.stopFn != nil {
+		return f.stopFn()
+	}
+	return nil
+}
 func (f *fakeManager) CheckDeafenReadiness(snowflake.ID) manager.DeafenReadiness {
 	return f.deafenReadiness
 }
-func (f *fakeManager) JoinSession(context.Context, snowflake.ID, context.CancelFunc, guild.RaidMode, ally.Code) (guild.RaidMode, error) {
-	return "", nil
+func (f *fakeManager) JoinSession(_ context.Context, _ snowflake.ID, _ context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error) {
+	f.mu.Lock()
+	f.joinCodes = append(f.joinCodes, code)
+	f.mu.Unlock()
+	if f.joinFn != nil {
+		return f.joinFn(mode, code)
+	}
+	return mode, nil
 }
 func (f *fakeManager) SpeakersWithMissingChannel(snowflake.ID) []manager.ChannelAccessWarning {
+	if f.missingFn != nil {
+		return f.missingFn()
+	}
 	return nil
 }
 func (f *fakeManager) ChannelDeleted(snowflake.ID, snowflake.ID) {}
 func (f *fakeManager) CheckGuildChannelAccess(snowflake.ID) []manager.ChannelAccessWarning {
+	if f.accessFn != nil {
+		return f.accessFn()
+	}
 	return nil
 }
-func (f *fakeManager) EnsureGuildReady(snowflake.ID)                       {}
-func (f *fakeManager) BindRole(snowflake.ID, store.RoleType, snowflake.ID) {}
-func (f *fakeManager) UnbindRole(snowflake.ID, store.RoleType)             {}
-func (f *fakeManager) BindChannel(snowflake.ID, snowflake.ID, snowflake.ID) {
+func (f *fakeManager) EnsureGuildReady(snowflake.ID) {}
+func (f *fakeManager) record(op, target, value string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.bindings = append(f.bindings, bindCall{op, target, value})
 }
-func (f *fakeManager) UnbindChannel(snowflake.ID, snowflake.ID) {}
+func (f *fakeManager) BindRole(_ snowflake.ID, rt store.RoleType, role snowflake.ID) {
+	f.record("bind-role", string(rt), role.String())
+}
+func (f *fakeManager) UnbindRole(_ snowflake.ID, rt store.RoleType) {
+	f.record("unbind-role", string(rt), "")
+}
+func (f *fakeManager) BindChannel(_ snowflake.ID, sp snowflake.ID, ch snowflake.ID) {
+	f.record("bind-channel", sp.String(), ch.String())
+}
+func (f *fakeManager) UnbindChannel(_ snowflake.ID, sp snowflake.ID) {
+	f.record("unbind-channel", sp.String(), "")
+}
 func (f *fakeManager) GetBoundChannel(snowflake.ID, snowflake.ID) (snowflake.ID, bool) {
 	return 0, false
 }
-func (f *fakeManager) OwnerBotID() snowflake.ID                             { return 0 }
-func (f *fakeManager) BindLocale(snowflake.ID, string)                      {}
-func (f *fakeManager) UnbindLocale(snowflake.ID)                            {}
-func (f *fakeManager) GetLocale(snowflake.ID) string                        { return "" }
-func (f *fakeManager) ToggleSpeaker(snowflake.ID, snowflake.ID, bool) error { return nil }
-func (f *fakeManager) NextSpeakerID(snowflake.ID) (snowflake.ID, bool)      { return 0, false }
-func (f *fakeManager) HasAvailableToken(snowflake.ID) bool                  { return false }
+func (f *fakeManager) OwnerBotID() snowflake.ID { return fakeOwnerBotID }
+func (f *fakeManager) BindLocale(_ snowflake.ID, locale string) {
+	f.record("bind-locale", "", locale)
+	f.mu.Lock()
+	f.locale = locale
+	f.mu.Unlock()
+}
+func (f *fakeManager) UnbindLocale(snowflake.ID) {
+	f.record("unbind-locale", "", "")
+	f.mu.Lock()
+	f.locale = ""
+	f.mu.Unlock()
+}
+func (f *fakeManager) GetLocale(snowflake.ID) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.locale
+}
+func (f *fakeManager) ToggleSpeaker(_ snowflake.ID, sp snowflake.ID, enabled bool) error {
+	f.mu.Lock()
+	f.toggleCalls = append(f.toggleCalls, toggleCall{sp, enabled})
+	f.mu.Unlock()
+	if f.toggleFn != nil {
+		return f.toggleFn(sp, enabled)
+	}
+	return nil
+}
+func (f *fakeManager) NextSpeakerID(snowflake.ID) (snowflake.ID, bool) {
+	if f.nextSpeakerFn != nil {
+		return f.nextSpeakerFn()
+	}
+	return 0, false
+}
+func (f *fakeManager) HasAvailableToken(snowflake.ID) bool { return false }
 func (f *fakeManager) GetStatus(g snowflake.ID) guild.Status {
 	if f.statusFn != nil {
 		return f.statusFn(g)
@@ -170,6 +254,8 @@ func (f *fakeManager) snapshotCalls() fakeManagerSnapshot {
 		onBotVoiceMoveCalls: append([]botMoveCall(nil), f.onBotVoiceMoveCalls...),
 	}
 }
+
+const fakeOwnerBotID snowflake.ID = 7777
 
 type fakeManagerSnapshot struct {
 	seedCalls           [][]snowflake.ID

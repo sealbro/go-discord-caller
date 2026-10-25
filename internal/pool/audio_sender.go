@@ -7,6 +7,8 @@ import (
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave"
+
+	"github.com/sealbro/go-discord-caller/internal/dave"
 )
 
 // AudioSenderRegistry tracks the live audio sender behind each voice.Conn so
@@ -68,7 +70,7 @@ func NewAudioSenderRegistry() *AudioSenderRegistry {
 // mirrors what the library already did and never orphans a running sender.
 func (r *AudioSenderRegistry) CreateFunc() voice.AudioSenderCreateFunc {
 	return func(logger *slog.Logger, provider voice.OpusFrameProvider, conn voice.Conn) voice.AudioSender {
-		c := &startSignalConn{Conn: conn, started: make(chan struct{})}
+		c := &startSignalConn{Conn: conn, dave: unsentFrameSession{Session: conn.DAVE(), provider: provider}, started: make(chan struct{})}
 		s := &safeAudioSender{
 			AudioSender: voice.NewAudioSender(logger, provider, c),
 			started:     c.started,
@@ -146,13 +148,40 @@ func (r *AudioSenderRegistry) Opt() voice.ManagerConfigOpt {
 // a conn torn down mid-handshake never reaches.
 type startSignalConn struct {
 	voice.Conn
+	dave    godave.Session
 	once    sync.Once
 	started chan struct{}
 }
 
 func (c *startSignalConn) DAVE() godave.Session {
 	c.once.Do(func() { close(c.started) })
-	return c.Conn.DAVE()
+	return c.dave
+}
+
+// unsentFrameSession is the sender's view of the conn's DAVE session. disgo's
+// sender asks Ready once per tick and, while it is false, neither pulls nor
+// encrypts a frame — so a lost key ratchet never fails an Encrypt, and the
+// encrypt-stall rejoin never fires. On such a tick this drops one queued frame
+// and records it as unsent, which counts toward the stall only while there is
+// speech to send: an idle bot is never rejoined, and the queue drains within a
+// few ticks of the speech stopping.
+type unsentFrameSession struct {
+	godave.Session
+	provider voice.OpusFrameProvider
+}
+
+type frameDiscarder interface{ DiscardFrame() bool }
+
+func (s unsentFrameSession) Ready() bool {
+	if s.Session.Ready() {
+		return true
+	}
+	if d, ok := s.provider.(frameDiscarder); ok && d.DiscardFrame() {
+		if r, ok := s.Session.(dave.UnsentFrameRecorder); ok {
+			r.RecordUnsentFrame()
+		}
+	}
+	return false
 }
 
 // senderStartTimeout bounds the wait for the sender goroutine to reach its

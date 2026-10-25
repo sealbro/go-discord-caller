@@ -109,6 +109,22 @@ func (v *VoiceProvider) ProvideOpusFrame() ([]byte, error) {
 	}
 }
 
+// DiscardFrame drops one queued frame without blocking and reports whether
+// there was one. It is for a sender that cannot send this tick, so the queue
+// still drains at the frame rate and says when speech has stopped.
+func (v *VoiceProvider) DiscardFrame() bool {
+	select {
+	case data, ok := <-v.ch:
+		if !ok {
+			return false
+		}
+		PutEncodedFrame(data)
+		return true
+	default:
+		return false
+	}
+}
+
 func (v *VoiceProvider) Close() {
 	select {
 	case <-v.done:

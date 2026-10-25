@@ -16,6 +16,8 @@ type OpusMetrics struct {
 	tickLateness      metric.Float64Histogram
 	pipelineLatency   metric.Float64Histogram
 	copyQueueDepth    metric.Int64Histogram
+	receiveInterval   metric.Float64Histogram
+	sourceDepth       metric.Int64Histogram
 }
 
 func (o *OpusMetrics) init(meter metric.Meter) (err error) {
@@ -62,6 +64,22 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 	// speaker's output channel, which disgo drains one per 20 ms.
 	if o.copyQueueDepth, err = meter.Int64Histogram("gdc.opus.copy.queue_depth",
 		metric.WithDescription("Frames already queued ahead of a copy-mode frame in a speaker's output channel; each is ~20 ms of wait"),
+		metric.WithUnit("{frame}"),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 3),
+	); err != nil {
+		return
+	}
+	// Clustered around 20 ms, the cadence a sender produces frames at: a clump
+	// lands in the lowest buckets, a frame held back lands at 40 ms and above.
+	if o.receiveInterval, err = meter.Float64Histogram("gdc.opus.receive.interval",
+		metric.WithDescription("Time between two consecutive frames from the same user as they reach the receiver; 20 ms when delivery is even"),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(2, 5, 10, 15, 18, 22, 25, 30, 40, 60),
+	); err != nil {
+		return
+	}
+	if o.sourceDepth, err = meter.Int64Histogram("gdc.opus.source.depth",
+		metric.WithDescription("Frames already waiting in a user's mixer input when a new frame is fed; 3 means the feed evicted the oldest"),
 		metric.WithUnit("{frame}"),
 		metric.WithExplicitBucketBoundaries(0, 1, 2, 3),
 	); err != nil {
@@ -162,6 +180,24 @@ func (r OpusRecorder) RecordCopyQueue(ahead int) {
 		return
 	}
 	r.m.copyQueueDepth.Record(context.Background(), int64(ahead), r.attr)
+}
+
+// RecordReceiveInterval records the time between two consecutive frames from
+// one user, in milliseconds.
+func (r OpusRecorder) RecordReceiveInterval(ms float64) {
+	if r.m == nil {
+		return
+	}
+	r.m.receiveInterval.Record(context.Background(), ms, r.attr)
+}
+
+// RecordSourceDepth records how many frames were already buffered in a mixer
+// input when a frame was fed into it.
+func (r OpusRecorder) RecordSourceDepth(ahead int) {
+	if r.m == nil {
+		return
+	}
+	r.m.sourceDepth.Record(context.Background(), int64(ahead), r.attr)
 }
 
 // RecordPipelineLatency records end-to-end pipeline latency in milliseconds.

@@ -48,12 +48,15 @@ func NewSourceBuffer(drop func()) *SourceBuffer {
 	return &SourceBuffer{drop: drop}
 }
 
-// Feed inserts f into the ring. If the ring is full the oldest frame is evicted
+// Feed inserts f into the ring and returns how many frames were already
+// buffered ahead of it, audioSourceCap meaning one was evicted to make room.
+// If the ring is full the oldest frame is evicted
 // (its pool buffers returned) and drop is invoked AFTER releasing the mutex
 // so a slow drop callback doesn't widen the buffer's critical section.
 // Safe to call concurrently with Pull/Drain.
-func (s *SourceBuffer) Feed(f Frame) {
+func (s *SourceBuffer) Feed(f Frame) (ahead int) {
 	s.mu.Lock()
+	ahead = s.n
 	dropped := false
 	if s.n == audioSourceCap {
 		old := s.buf[s.head]
@@ -74,6 +77,7 @@ func (s *SourceBuffer) Feed(f Frame) {
 	if dropped && drop != nil {
 		drop()
 	}
+	return ahead
 }
 
 // Len returns the number of frames currently buffered. Intended for

@@ -32,7 +32,7 @@
         }
       }
     ],
-    "cursorSync": "Off",
+    "cursorSync": "Tooltip",
     "description": "Discord voice relay system. Metrics exported via OpenTelemetry OTLP gRPC. OTel→Prometheus naming: dots→underscores, unit suffixes appended (_seconds, _milliseconds).",
     "editable": true,
     "elements": {

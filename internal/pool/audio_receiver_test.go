@@ -78,3 +78,28 @@ func TestAudioReceiverDoesNotSpinWhileDaveNotReady(t *testing.T) {
 			"was not ready: it busy-loops and pins a CPU core", got, window, float64(got)/window.Seconds())
 	}
 }
+
+// UPSTREAM-TRIPWIRE(disgo 5bf95eb): when this fails, disgo paces the receive
+// loop itself and newPacedAudioReceiver is obsolete.
+func TestDisgoAudioReceiverStillSpinsWhileDaveNotReady(t *testing.T) {
+	t.Parallel()
+
+	session := &notReadyDaveSession{release: make(chan struct{})}
+	t.Cleanup(func() { close(session.release) })
+
+	receiver := voice.NewAudioReceiver(slog.New(slog.DiscardHandler), discardReceiver{}, daveConn{dave: session})
+	receiver.Open()
+
+	time.Sleep(50 * time.Millisecond)
+	if got := session.checks.Load(); got < 1000 {
+		t.Errorf("disgo's audio receiver checked DAVE readiness only %d times in 50ms — it no longer "+
+			"busy-loops, so newPacedAudioReceiver should be removed", got)
+	}
+}
+
+type daveConn struct {
+	voice.Conn
+	dave godave.Session
+}
+
+func (c daveConn) DAVE() godave.Session { return c.dave }

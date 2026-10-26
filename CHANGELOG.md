@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-10-26
+
+### Added
+- **Continuous profiling**: set `PYROSCOPE_ENDPOINT` to push CPU and memory profiles to Pyroscope.
+- **Audio delivery metrics**: new metrics show how evenly callers' audio arrives and how much backs up before mixing.
+
+### Fixed
+- **Rejoin loops on broken voice encryption**: a speaker whose rejoin does not fix its encryption now waits longer before each retry.
+- **Lost settings after a crash**: saved bindings and relay codes are flushed to disk, so they survive a crash or power loss.
+
 ## [0.12.1] - 2026-10-25
 
 ### Fixed

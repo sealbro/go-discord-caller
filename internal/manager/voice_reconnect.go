@@ -43,7 +43,7 @@ func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks
 		slog.String("guildID", guildID.String()),
 		slog.String("botUserID", botUserID.String()),
 	)
-	go m.ReconnectBotChannel(context.Background(), guildID, botUserID)
+	m.rejoinStalled(guildID, botUserID)
 }
 
 // encryptStallTarget resolves a stall report to the bot and guild it concerns.

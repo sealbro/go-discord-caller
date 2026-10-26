@@ -59,3 +59,23 @@ func TestEncryptStallWithoutAVoiceConnIsIgnored(t *testing.T) {
 		t.Error("a stall with an unparsable bot ID must not resolve to a rejoin")
 	}
 }
+
+// A rejoin cannot repair a session that comes back just as broken: on
+// 2026-10-26 two speakers whose DAVE session never became ready were rejoined
+// every ~14 s for three hours. Stall reports for the same bot must back off.
+func TestEncryptStallRejoinBacksOff(t *testing.T) {
+	t.Parallel()
+
+	m := newTestService(true)
+	rejoins := 0
+	m.rejoinStalled = func(guildID, botUserID snowflake.ID) { rejoins++ }
+
+	conn := guildConn{guildID: testGuildID}
+	for range 10 {
+		m.OnEncryptStall(godave.UserID(testBotID.String()), conn)
+	}
+
+	if rejoins != 1 {
+		t.Errorf("10 back-to-back stall reports caused %d rejoins, want 1", rejoins)
+	}
+}

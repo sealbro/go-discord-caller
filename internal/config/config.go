@@ -32,6 +32,8 @@ type Config struct {
 	StorePath string
 	// OtelEndpoint is the OTLP gRPC endpoint (e.g. "alloy:4317"); empty disables telemetry
 	OtelEndpoint string
+	// PyroscopeEndpoint is the Pyroscope push URL (e.g. "http://alloy:4040"); empty disables profiling
+	PyroscopeEndpoint string
 	// LogLevel is the minimum log level (default: info); controlled by LOG_LEVEL env var
 	LogLevel slog.Level
 	// VoiceLogLevel is the minimum level for disgo's voice-layer logs, controlled
@@ -82,6 +84,7 @@ func Load() (*Config, error) {
 		SpeakerTokens:      speakerTokens,
 		StorePath:          storePath(),
 		OtelEndpoint:       os.Getenv("OTEL_ENDPOINT"),
+		PyroscopeEndpoint:  os.Getenv("PYROSCOPE_ENDPOINT"),
 		LogLevel:           parseLogLevel(os.Getenv("LOG_LEVEL")),
 		VoiceLogLevel:      parseVoiceLogLevel(os.Getenv("VOICE_LOG_LEVEL")),
 		SessionIdleTimeout: parseSessionIdleTimeout(os.Getenv("SESSION_IDLE_TIMEOUT")),

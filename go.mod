@@ -9,6 +9,7 @@ require (
 	github.com/disgoorg/omit v1.0.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/gorilla/websocket v1.5.3
+	github.com/grafana/pyroscope-go v1.4.3
 	github.com/hraban/opus v0.0.0-20260708213942-bde8e4304501
 	github.com/joho/godotenv v1.5.1
 	github.com/nicksnyder/go-i18n/v2 v2.6.1
@@ -37,6 +38,7 @@ require (
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/grafana/pyroscope-go/godeltaprof v0.1.11 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.32.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/kr/text v0.2.0 // indirect

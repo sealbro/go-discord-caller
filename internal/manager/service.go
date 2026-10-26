@@ -330,14 +330,18 @@ func (m *Service) Shutdown(ctx context.Context) {
 	}
 	m.mu.RUnlock()
 
+	var wg sync.WaitGroup
 	for _, guildID := range activeGuilds {
-		if err := m.StopVoiceRaid(ctx, guildID); err != nil {
-			slog.WarnContext(ctx, "shutdown: failed to stop voice raid",
-				slog.String("guildID", guildID.String()),
-				slog.Any("err", err),
-			)
-		}
+		wg.Go(func() {
+			if err := m.StopVoiceRaid(ctx, guildID); err != nil {
+				slog.WarnContext(ctx, "shutdown: failed to stop voice raid",
+					slog.String("guildID", guildID.String()),
+					slog.Any("err", err),
+				)
+			}
+		})
 	}
+	wg.Wait()
 	m.poolSvc.Shutdown(ctx)
 }
 

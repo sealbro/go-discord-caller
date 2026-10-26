@@ -109,6 +109,8 @@ func (h *callersHarness) setRoles(userID snowflake.ID, roles ...snowflake.ID) {
 	h.dispatch(gateway.EventTypeGuildMemberUpdate, gateway.EventGuildMemberUpdate{Member: m})
 }
 
+// collect returns the exported value per channel; a channel with no data point
+// is absent from the map, which is not the same as an exported 0.
 func (h *callersHarness) collect() map[snowflake.ID]int64 {
 	h.t.Helper()
 	var rm metricdata.ResourceMetrics
@@ -144,6 +146,22 @@ func (h *callersHarness) expect(step string, want map[snowflake.ID]int64) {
 	for _, ch := range []snowflake.ID{callerChannel, otherChannel} {
 		if got[ch] != want[ch] {
 			h.t.Errorf("%s: channel %s want %d callers, got %d", step, ch, want[ch], got[ch])
+		}
+	}
+}
+
+// expectZeroed asserts each channel is exported with an explicit 0. Prometheus
+// carries a series' last value forward for five minutes once it stops
+// arriving, so a channel that is merely dropped keeps being counted.
+func (h *callersHarness) expectZeroed(step string, channels ...snowflake.ID) {
+	h.t.Helper()
+	got := h.collect()
+	for _, ch := range channels {
+		v, exported := got[ch]
+		if !exported {
+			h.t.Errorf("%s: channel %s was dropped from the export instead of reported as 0", step, ch)
+		} else if v != 0 {
+			h.t.Errorf("%s: channel %s want 0 callers, got %d", step, ch, v)
 		}
 	}
 }
@@ -229,4 +247,24 @@ func TestVoiceCallers_OnlyDuringActiveRaid(t *testing.T) {
 
 	h.setRaid(false)
 	h.expect("raid stopped", nil)
+}
+
+// TestVoiceCallers_EmptiedChannelReportsZero is the dashboard overcount: a
+// channel left empty, by a move or by the raid stopping, vanished from the
+// export, and the backend kept counting its last value for five minutes — up to
+// 15 callers too many in an hourly peak on 2026-10-21.
+func TestVoiceCallers_EmptiedChannelReportsZero(t *testing.T) {
+	t.Parallel()
+	h := newCallersHarness(t)
+	h.startup(nil, nil)
+	h.member(123, false, callerRoleID)
+
+	h.voiceState(123, ptr(callerChannel))
+	h.expect("joined", map[snowflake.ID]int64{callerChannel: 1})
+
+	h.voiceState(123, ptr(otherChannel))
+	h.expectZeroed("moved out", callerChannel)
+
+	h.setRaid(false)
+	h.expectZeroed("raid stopped", otherChannel)
 }

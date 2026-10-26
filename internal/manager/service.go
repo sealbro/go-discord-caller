@@ -45,8 +45,8 @@ type Service struct {
 	metrics            *telemetry.Metrics
 	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
 	rejoinStalled      func(guildID, botUserID snowflake.ID)
-	starting           startGuard     // one raid start per guild at a time
-	sessionIdleTimeout time.Duration  // 0 disables; set via SetSessionIdleTimeout
+	starting           startGuard    // one raid start per guild at a time
+	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
 }
 
 // NewService creates a new manager Service.

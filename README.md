@@ -167,6 +167,7 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | `SESSION_IDLE_TIMEOUT`        | ❌        | How long a voice raid may stay continuously idle (default: `10m`; set `0` to disable)                   |
 | `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)                                               |
 | `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
+| `PYROSCOPE_ENDPOINT`          | ❌        | Pyroscope push URL for continuous profiling (e.g. `http://alloy:4040`); empty or unset disables it      |
 | `LOG_LEVEL`                   | ❌        | Minimum log level: `debug`, `info`, `warn`, `error` (default: `info`)                                   |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.

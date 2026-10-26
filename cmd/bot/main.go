@@ -29,6 +29,12 @@ func main() {
 	}
 	defer shutdownTelemetry()
 
+	stopProfiling, err := telemetry.StartProfiling(cfg.PyroscopeEndpoint)
+	if err != nil {
+		log.Fatalf("failed to start profiling: %v", err)
+	}
+	defer stopProfiling()
+
 	telemetry.SetVoiceLogLevel(cfg.VoiceLogLevel)
 
 	st, err := store.NewYAMLStore(cfg.StorePath)

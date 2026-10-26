@@ -45,6 +45,9 @@ theme:
     - search.suggest
     - search.highlight
 
+extra_css:
+  - stylesheets/extra.css
+
 plugins:
   - search
 

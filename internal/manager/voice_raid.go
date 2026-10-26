@@ -200,7 +200,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			allySession.RemoveGuild(guestGuildID)
 			pipelineCleanup()
 			m.sessions.RemoveGuest(guestGuildID)
-			m.clearAppliers(guestGuildID)
+			m.clearReconnectState(guestGuildID)
 			guestGm.SessionStopped(string(guestMode))
 			span.End()
 			slog.InfoContext(ctx, "guest session ended", slog.String("guildID", guestGuildID.String()))
@@ -256,7 +256,7 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 		m.ownerVoice(guildID).Leave(ctx, guildID)
 		m.sessions.RemoveHost(guildID)
 	}
-	m.clearAppliers(guildID)
+	m.clearReconnectState(guildID)
 	slog.InfoContext(ctx, "voice raid stopped", slog.String("guildID", guildID.String()))
 	return nil
 }

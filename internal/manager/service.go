@@ -44,8 +44,9 @@ type Service struct {
 	sessions           *ally.Manager
 	metrics            *telemetry.Metrics
 	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
-	starting           startGuard     // one raid start per guild at a time
-	sessionIdleTimeout time.Duration  // 0 disables; set via SetSessionIdleTimeout
+	rejoinStalled      func(guildID, botUserID snowflake.ID)
+	starting           startGuard    // one raid start per guild at a time
+	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
 }
 
 // NewService creates a new manager Service.
@@ -60,6 +61,9 @@ func NewService(st store.Store, poolSvc pool.PoolService, ownerClient *bot.Clien
 		sessions:    ally.NewManager(),
 		metrics:     metrics,
 		reconnect:   newReconnectState(),
+	}
+	s.rejoinStalled = func(guildID, botUserID snowflake.ID) {
+		go s.ReconnectBotChannel(context.Background(), guildID, botUserID)
 	}
 	empty := map[snowflake.ID]guild.AutoRouter{}
 	s.activeRouters.Store(&empty)

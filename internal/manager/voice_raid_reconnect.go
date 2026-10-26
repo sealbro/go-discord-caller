@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
@@ -72,15 +73,71 @@ func (s *inFlightSet) unset(k botKey) {
 	s.m.Delete(k)
 }
 
-// reconnectState bundles the two reconnect subsystem maps and their operations.
+// stallRejoinBackoffMin is the wait before a bot that stalled again is
+// rejoined a second time; each further rejoin doubles it up to
+// stallRejoinBackoffMax. A stall that survives a rejoin usually means the new
+// DAVE session is just as broken, and rejoining every stall report (~10 s)
+// only churns the voice gateway.
+const (
+	stallRejoinBackoffMin = 30 * time.Second
+	stallRejoinBackoffMax = 5 * time.Minute
+)
+
+type stallRejoin struct {
+	lastReport time.Time
+	nextRejoin time.Time
+	delay      time.Duration
+}
+
+// stallBackoff rate-limits encrypt-stall rejoins per (guild, bot). A bot that
+// has gone stallRejoinBackoffMax without a stall report starts over.
+type stallBackoff struct {
+	mu sync.Mutex
+	m  map[botKey]stallRejoin
+}
+
+func newStallBackoff() stallBackoff {
+	return stallBackoff{m: make(map[botKey]stallRejoin)}
+}
+
+// due records a stall report at now and reports whether it should rejoin.
+func (b *stallBackoff) due(k botKey, now time.Time) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	r, seen := b.m[k]
+	if !seen || now.Sub(r.lastReport) >= stallRejoinBackoffMax {
+		r = stallRejoin{delay: stallRejoinBackoffMin}
+	}
+	r.lastReport = now
+	due := !now.Before(r.nextRejoin)
+	if due {
+		r.nextRejoin = now.Add(r.delay)
+		r.delay = min(2*r.delay, stallRejoinBackoffMax)
+	}
+	b.m[k] = r
+	return due
+}
+
+func (b *stallBackoff) delete(k botKey) {
+	b.mu.Lock()
+	delete(b.m, k)
+	b.mu.Unlock()
+}
+
+// reconnectState bundles the reconnect subsystem maps and their operations.
 // Extracting them from Service clarifies ownership and eliminates type assertions.
 type reconnectState struct {
 	appliers reconnectRegistry
 	inFlight inFlightSet
+	stalls   stallBackoff
 }
 
 func newReconnectState() reconnectState {
-	return reconnectState{appliers: newReconnectRegistry()}
+	return reconnectState{appliers: newReconnectRegistry(), stalls: newStallBackoff()}
+}
+
+func (rs *reconnectState) stallRejoinDue(guildID, botUserID snowflake.ID, now time.Time) bool {
+	return rs.stalls.due(botKey{guildID, botUserID}, now)
 }
 
 // tryLock claims the in-flight slot for the given (guild, bot) pair.
@@ -101,11 +158,16 @@ func (rs *reconnectState) loadApplier(guildID, botUserID snowflake.ID) (reconnec
 	return rs.appliers.load(botKey{guildID, botUserID})
 }
 
-// clearAppliers removes all appliers for guildID using the known bot ID set,
-// avoiding a full O(N*M) map scan.
-func (rs *reconnectState) clearAppliers(guildID snowflake.ID, botIDs []snowflake.ID, ownerBotID snowflake.ID) {
+// clearGuild removes all appliers and stall backoff for guildID using the known
+// bot ID set, avoiding a full O(N*M) map scan.
+func (rs *reconnectState) clearGuild(guildID snowflake.ID, botIDs []snowflake.ID, ownerBotID snowflake.ID) {
 	for _, botID := range botIDs {
-		rs.appliers.delete(botKey{guildID, botID})
+		rs.clearBot(botKey{guildID, botID})
 	}
-	rs.appliers.delete(botKey{guildID, ownerBotID})
+	rs.clearBot(botKey{guildID, ownerBotID})
+}
+
+func (rs *reconnectState) clearBot(k botKey) {
+	rs.appliers.delete(k)
+	rs.stalls.delete(k)
 }

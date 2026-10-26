@@ -32,18 +32,26 @@ func (m *Service) OnBotVoiceMove(ctx context.Context, guildID, botUserID snowfla
 
 // OnEncryptStall rejoins a bot whose DAVE session has stopped encrypting its
 // outbound audio (see dave.WithEncryptStall). The bot looks connected but is
-// silent; a fresh voice connection gets a fresh DAVE session. It runs on
-// disgo's audio send goroutine, so the rejoin happens in the background.
+// silent; a fresh voice connection gets a fresh DAVE session. Repeated stalls
+// for the same bot back off (see stallBackoff). It runs on disgo's audio send
+// goroutine, so the rejoin happens in the background.
 func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks) {
 	guildID, botUserID, ok := encryptStallTarget(selfUserID, conn)
 	if !ok {
+		return
+	}
+	if !m.reconnect.stallRejoinDue(guildID, botUserID, time.Now()) {
+		slog.Debug("voice: outbound encryption still stalled, rejoin backing off",
+			slog.String("guildID", guildID.String()),
+			slog.String("botUserID", botUserID.String()),
+		)
 		return
 	}
 	slog.Warn("voice: outbound encryption stalled, rejoining",
 		slog.String("guildID", guildID.String()),
 		slog.String("botUserID", botUserID.String()),
 	)
-	go m.ReconnectBotChannel(context.Background(), guildID, botUserID)
+	m.rejoinStalled(guildID, botUserID)
 }
 
 // encryptStallTarget resolves a stall report to the bot and guild it concerns.
@@ -167,9 +175,9 @@ func (m *Service) storeApplier(guildID, botUserID snowflake.ID, a reconnectAppli
 	m.reconnect.storeApplier(guildID, botUserID, a)
 }
 
-// clearAppliers removes all reconnect appliers for a guild (call on session teardown).
-func (m *Service) clearAppliers(guildID snowflake.ID) {
-	m.reconnect.clearAppliers(guildID, m.poolSvc.GetIDs(), m.ownerBotID)
+// clearReconnectState removes all reconnect state for a guild (call on session teardown).
+func (m *Service) clearReconnectState(guildID snowflake.ID) {
+	m.reconnect.clearGuild(guildID, m.poolSvc.GetIDs(), m.ownerBotID)
 }
 
 // buildApplier returns a reconnectApplier that re-wires provider/receiver on a fresh conn.

@@ -18,6 +18,7 @@ site_dir: misc/www
 theme:
   name: material
   custom_dir: misc/overrides
+  font: false
   icon:
     repo: fontawesome/brands/github
   palette:
@@ -43,6 +44,9 @@ theme:
     - content.code.copy
     - search.suggest
     - search.highlight
+
+extra_css:
+  - stylesheets/extra.css
 
 plugins:
   - search

@@ -1,0 +1,26 @@
+/* Colour overrides that bring the Material theme up to WCAG AA contrast. */
+
+/* Body links are told apart from text by colour alone, which fails 3:1 against the text. */
+.md-typeset p a:not(.md-button),
+.md-typeset li a:not(.md-button),
+.md-typeset td a:not(.md-button) {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
+}
+
+[data-md-color-scheme="slate"] .md-typeset .md-button:not(.md-button--primary) {
+  color: var(--md-typeset-a-color);
+  border-color: var(--md-typeset-a-color);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-code-hl-constant-color: #9d8fe6;
+}
+
+[data-md-color-scheme="default"] {
+  --md-code-hl-variable-color: #6b6b6b;
+}
+
+[data-md-color-scheme="default"] .md-copyright {
+  color: #8a8a8a;
+}

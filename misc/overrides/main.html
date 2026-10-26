@@ -57,11 +57,9 @@
   {% endif %}
 {% endblock %}
 
-{#- Render Mermaid diagrams -#}
-{% block scripts %}
-  {{ super() }}
-  <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-    mermaid.initialize({ startOnLoad: true });
-  </script>
+{#- The theme's search dialog has no accessible name; patch it here rather than fork the whole partial. -#}
+{% block header %}
+  {% filter replace('data-md-component="search" role="dialog"', 'data-md-component="search" role="dialog" aria-label="' ~ lang.t("search") ~ '"') %}
+    {{ super() }}
+  {% endfilter %}
 {% endblock %}

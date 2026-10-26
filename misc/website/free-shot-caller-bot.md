@@ -22,7 +22,7 @@ Most Discord shot-caller bots are paid, hosted services — a "speak once, reach
 
 ## Comparison
 
-| | go-discord-caller | Typical paid shot-caller service |
+| Feature | go-discord-caller | Typical paid shot-caller service |
 |---|---|---|
 | **Price** | ✅ Free & open source (Apache-2.0) | 💸 Monthly subscription (tiered) |
 | **Servers** | ✅ Unlimited (inter-guild relay) | ⚠️ Usually capped by plan |

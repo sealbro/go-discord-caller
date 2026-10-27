@@ -24,6 +24,7 @@ type ratchetlessSession struct{ godave.Session }
 func (ratchetlessSession) Ready() bool                   { return false }
 func (ratchetlessSession) SetChannelID(godave.ChannelID) {}
 func (ratchetlessSession) Close() error                  { return nil }
+func (ratchetlessSession) AddUser(godave.UserID)         {}
 func (ratchetlessSession) Encrypt(uint32, []byte, []byte) (int, error) {
 	return 0, errors.New("missing key ratchet")
 }
@@ -60,7 +61,7 @@ func TestEncryptStallReportedWhileDaveNotReady(t *testing.T) {
 
 	frames := make(chan []byte, opus.AudioChanBuf)
 	speakingCaller(t, frames)
-	stalls := startRatchetlessSpeaker(t, frames)
+	stalls := startRatchetlessSpeaker(t, frames, withListener)
 
 	// stallFrames ticks are 100 ms; a second is ten times that.
 	deadline := time.Now().Add(time.Second)
@@ -79,7 +80,7 @@ func TestEncryptStallReportedWhileDaveNotReady(t *testing.T) {
 func TestNoEncryptStallWhileIdle(t *testing.T) {
 	t.Parallel()
 
-	stalls := startRatchetlessSpeaker(t, make(chan []byte, opus.AudioChanBuf))
+	stalls := startRatchetlessSpeaker(t, make(chan []byte, opus.AudioChanBuf), withListener)
 
 	time.Sleep(4 * stallFrames * voice.OpusFrameSizeMs * time.Millisecond)
 	if n := stalls.Load(); n > 0 {
@@ -88,11 +89,37 @@ func TestNoEncryptStallWhileIdle(t *testing.T) {
 	}
 }
 
+// Discord does not make a lone bot's DAVE session ready (integration E22), so a
+// speaker in an empty channel looks exactly like a stalled one — but nobody can
+// hear it, and a rejoin lands it in the same empty channel. Production,
+// 2026-10-26: 1,927 futile rejoins in a day.
+func TestNoEncryptStallWhileAlone(t *testing.T) {
+	t.Parallel()
+
+	frames := make(chan []byte, opus.AudioChanBuf)
+	speakingCaller(t, frames)
+	stalls := startRatchetlessSpeaker(t, frames, alone)
+
+	time.Sleep(4 * stallFrames * voice.OpusFrameSizeMs * time.Millisecond)
+	if n := stalls.Load(); n > 0 {
+		t.Fatalf("a speaker alone in its channel was reported stalled %d times: "+
+			"it would be rejoined into the same empty channel", n)
+	}
+}
+
 const stallFrames = 5
+
+type channelCompany bool
+
+const (
+	alone        channelCompany = false
+	withListener channelCompany = true
+)
 
 // startRatchetlessSpeaker connects a speaker fed from frames whose session has
 // no key ratchet, with production sender wiring, and counts stall reports.
-func startRatchetlessSpeaker(t *testing.T, frames chan []byte) *atomic.Int64 {
+// company says whether anyone else is in the speaker's channel.
+func startRatchetlessSpeaker(t *testing.T, frames chan []byte, company channelCompany) *atomic.Int64 {
 	t.Helper()
 
 	var stalls atomic.Int64
@@ -109,6 +136,9 @@ func startRatchetlessSpeaker(t *testing.T, frames chan []byte) *atomic.Int64 {
 		voice.WithLogger(slog.New(slog.DiscardHandler)),
 	)
 	conn := vm.CreateConn(snowflake.ID(1430511050704289835))
+	if company == withListener {
+		conn.DAVE().AddUser(godave.UserID("1484911902801924237"))
+	}
 	conn.SetOpusFrameProvider(opus.NewVoiceProvider(frames, telemetry.OpusRecorder{}))
 	t.Cleanup(func() { defaultSenders.Close(conn) })
 	return &stalls

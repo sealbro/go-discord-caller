@@ -131,6 +131,12 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	return svc, st
 }
 
+// SetEncryptStallHandler routes encrypt-stall reports to f until the next
+// NewManager, which routes them to that manager instead.
+func (h *Harness) SetEncryptStallHandler(f dave.EncryptStallFunc) {
+	h.daveStalls.SetHandler(f)
+}
+
 // DisconnectSpeakerVoice drops the speaker bot's voice connection in the guild
 // by sending OP4 with channel_id=null, triggering VOICE_STATE_UPDATE on Discord
 // so the owner bot's onVoiceLeave handler fires and calls ReconnectBotChannel.

@@ -47,6 +47,18 @@ type Service struct {
 	rejoinStalled      func(guildID, botUserID snowflake.ID)
 	starting           startGuard    // one raid start per guild at a time
 	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
+	reportedCallers    reportedCallers
+}
+
+type voiceChannelKey struct{ guildID, channelID snowflake.ID }
+
+// reportedCallers remembers which channels the last voice-callers collection
+// exported, so a channel that empties is reported as 0 once rather than
+// dropped: the backend carries a dropped series' last value forward for five
+// minutes and keeps counting callers who already left.
+type reportedCallers struct {
+	mu       sync.Mutex
+	channels map[voiceChannelKey]struct{}
 }
 
 // NewService creates a new manager Service.
@@ -206,12 +218,31 @@ func (m *Service) observeGuildInfo(_ context.Context, o metric.Observer) error {
 // misses — callers already in voice at startup, a role granted or revoked
 // mid-call — while the cache stays correct by construction.
 func (m *Service) observeVoiceCallers(_ context.Context, o metric.Observer) error {
+	counts := m.countVoiceCallers()
+
+	m.reportedCallers.mu.Lock()
+	defer m.reportedCallers.mu.Unlock()
+	for ch := range m.reportedCallers.channels {
+		if _, stillReported := counts[ch]; !stillReported {
+			m.metrics.Bot.ObserveVoiceCallers(o, 0, ch.guildID.String(), ch.channelID.String())
+		}
+	}
+	reported := make(map[voiceChannelKey]struct{}, len(counts))
+	for ch, count := range counts {
+		m.metrics.Bot.ObserveVoiceCallers(o, count, ch.guildID.String(), ch.channelID.String())
+		reported[ch] = struct{}{}
+	}
+	m.reportedCallers.channels = reported
+	return nil
+}
+
+func (m *Service) countVoiceCallers() map[voiceChannelKey]int64 {
 	caches := m.ownerClient.Caches
+	counts := make(map[voiceChannelKey]int64)
 	for g := range caches.Guilds() {
 		if !m.HasActiveSession(g.ID) {
 			continue
 		}
-		perChannel := make(map[snowflake.ID]int64)
 		for vs := range caches.VoiceStates(g.ID) {
 			if vs.ChannelID == nil {
 				continue
@@ -220,13 +251,10 @@ func (m *Service) observeVoiceCallers(_ context.Context, o metric.Observer) erro
 			if !ok || m.IsBot(member.User) || !m.HasCallerRole(g.ID, member.RoleIDs) {
 				continue
 			}
-			perChannel[*vs.ChannelID]++
-		}
-		for channelID, count := range perChannel {
-			m.metrics.Bot.ObserveVoiceCallers(o, count, g.ID.String(), channelID.String())
+			counts[voiceChannelKey{g.ID, *vs.ChannelID}]++
 		}
 	}
-	return nil
+	return counts
 }
 
 // observeBotOnline is an OTel observable callback that emits gdc_bot_online

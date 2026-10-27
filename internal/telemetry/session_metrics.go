@@ -125,3 +125,15 @@ func (s *SessionMetrics) FrameDropper(_ context.Context, guildID snowflake.ID, p
 	)
 	return func() { s.dropped.Add(context.Background(), 1, opt) }
 }
+
+// SpeakerFrameDropper is FrameDropper for a drop on one speaker bot's output
+// queue. The bot_id label tells one stuck speaker apart from every speaker
+// falling behind, which a guild-wide count cannot.
+func (s *SessionMetrics) SpeakerFrameDropper(guildID snowflake.ID, path DropPath, botID snowflake.ID) func() {
+	opt := metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("path", string(path)),
+		attribute.String("bot_id", botID.String()),
+	)
+	return func() { s.dropped.Add(context.Background(), 1, opt) }
+}

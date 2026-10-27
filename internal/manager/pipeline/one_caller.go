@@ -25,6 +25,7 @@ import (
 type OneCallerPipeline struct{}
 
 func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, func(), error) {
+	bots := p.outputBots()
 	destinations := BuildDestinations(p.Setup.Joined)
 
 	// Per-speaker-channel mixers. Each writes its sink output to that
@@ -72,7 +73,7 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 	guildID := p.GuildID
 	ownerSlot.BuildInstall = routerInstallBuilder(installBuildOpts{
 		src:        ownerSlot,
-		dropDirect: p.GM.Drop(telemetry.DropPathDirect),
+		dropDirect: bots.Dropper(p.GM, telemetry.DropPathDirect),
 		dropMixer:  p.GM.Drop(telemetry.DropPathMixer),
 		allyBroadcast: func(pkt []byte) {
 			allySession.BroadcastFromGuild(guildID, pkt)
@@ -119,7 +120,7 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 		// no destination here carries a RelayFeed — but guests still need to
 		// see this guild as capturing.
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
-		StartChannelMixers(ctx, p.GM, destinations, channelMixers, nil)
+		StartChannelMixers(ctx, p.GM, destinations, channelMixers, nil, bots)
 		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup, string(p.Mode))
 		// Initial route: the cache is now up to date with voice states for
 		// every member in the owner channel (prefetchChannelMembers and the

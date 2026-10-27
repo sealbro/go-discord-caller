@@ -28,6 +28,7 @@ import (
 type GuildCallerPipeline struct{}
 
 func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, func(), error) {
+	bots := p.outputBots()
 	destinations := BuildDestinations(p.Setup.Joined)
 	if p.ChOwnerOut != nil {
 		destinations = append(destinations, &DestChannel{
@@ -93,7 +94,7 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 		allySession := p.AllySession
 		slot.BuildInstall = routerInstallBuilder(installBuildOpts{
 			src:        slot,
-			dropDirect: p.GM.Drop(telemetry.DropPathDirect),
+			dropDirect: bots.Dropper(p.GM, telemetry.DropPathDirect),
 			dropMixer:  p.GM.Drop(telemetry.DropPathMixer),
 			allyBroadcast: func(pkt []byte) {
 				allySession.BroadcastFromGuild(guildID, pkt)
@@ -141,7 +142,7 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 		// see it as capturing; the observer re-routes this guild when a guest
 		// attaches or leaves.
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
-		StartChannelMixers(ctx, p.GM, destinations, channelMixers, relayFeed)
+		StartChannelMixers(ctx, p.GM, destinations, channelMixers, relayFeed, bots)
 		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup, string(p.Mode))
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)

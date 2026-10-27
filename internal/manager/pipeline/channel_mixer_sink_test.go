@@ -46,7 +46,7 @@ func TestChannelMixerSinkGivesEachSpeakerItsOwnBuffer(t *testing.T) {
 	second := make(chan []byte, opus.AudioChanBuf)
 	dest := &DestChannel{ChannelID: channelID, Outs: []chan<- []byte{first, second}}
 
-	StartChannelMixers(ctx, gm, []*DestChannel{dest}, map[snowflake.ID]*opus.Mixer{channelID: mx}, nil)
+	StartChannelMixers(ctx, gm, []*DestChannel{dest}, map[snowflake.ID]*opus.Mixer{channelID: mx}, nil, nil)
 
 	pcm := opus.GetPCM()
 	for i := range pcm {

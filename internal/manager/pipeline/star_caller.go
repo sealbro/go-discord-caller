@@ -34,6 +34,7 @@ import (
 type StarCallerPipeline struct{}
 
 func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, func(), error) {
+	bots := p.outputBots()
 	srcEntries := BuildSources(p.OwnerBotID, p.OV.ChannelID(), p.OwnerHandle, p.Setup.Joined)
 	destinations := BuildDestinations(p.Setup.Joined)
 	// Partition destinations: owner hub is the only mixer-driven destination.
@@ -103,7 +104,7 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 			allySession := p.AllySession
 			slot.BuildInstall = routerInstallBuilder(installBuildOpts{
 				src:        slot,
-				dropDirect: p.GM.Drop(telemetry.DropPathDirect),
+				dropDirect: bots.Dropper(p.GM, telemetry.DropPathDirect),
 				dropMixer:  p.GM.Drop(telemetry.DropPathMixer),
 				// Raw Opus stays on the speaker ChOuts in both copy and mix
 				// modes — star has no per-speaker mixer to feed.
@@ -161,7 +162,7 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 		}
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
 		channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}
-		StartChannelMixers(ctx, p.GM, ownerDests, channelMixers, relayFeed)
+		StartChannelMixers(ctx, p.GM, ownerDests, channelMixers, relayFeed, bots)
 		StartRelayBroadcast(ctx, p.GM, relayMixer, p.AllySession, p.OwnerCleanup, string(p.Mode))
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)

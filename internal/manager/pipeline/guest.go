@@ -52,6 +52,7 @@ func (GuestListenerPipeline) Build(_ context.Context, p GuestParams) (*guild.Ses
 type GuestStarCallerPipeline struct{}
 
 func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Session, func(), func(), error) {
+	bots := p.outputBots()
 	allOuts := make([]chan<- []byte, len(p.Setup.Outs))
 	copy(allOuts, p.Setup.Outs)
 	if p.OwnerChOut != nil {
@@ -81,7 +82,7 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 		allySession := p.AllySession
 		slot.BuildInstall = routerInstallBuilder(installBuildOpts{
 			src:        slot,
-			dropDirect: p.GuestGM.Drop(telemetry.DropPathDirect),
+			dropDirect: bots.Dropper(p.GuestGM, telemetry.DropPathDirect),
 			dropMixer:  p.GuestGM.Drop(telemetry.DropPathMixer),
 			allyBroadcast: func(pkt []byte) {
 				allySession.BroadcastFromGuild(guestGuildID, pkt)
@@ -143,6 +144,7 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 type GuestCallerPipeline struct{}
 
 func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Session, func(), func(), error) {
+	bots := p.outputBots()
 	destinations := BuildDestinations(p.Setup.Joined)
 	if p.OwnerChOut != nil {
 		destinations = append(destinations, &DestChannel{
@@ -203,7 +205,7 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 		allySession := p.AllySession
 		slot.BuildInstall = routerInstallBuilder(installBuildOpts{
 			src:        slot,
-			dropDirect: p.GuestGM.Drop(telemetry.DropPathDirect),
+			dropDirect: bots.Dropper(p.GuestGM, telemetry.DropPathDirect),
 			dropMixer:  p.GuestGM.Drop(telemetry.DropPathMixer),
 			allyBroadcast: func(pkt []byte) {
 				allySession.BroadcastFromGuild(guestGuildID, pkt)
@@ -249,7 +251,7 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 		// destinations as live for as long as this guest is attached.
 		WatchRelayMembership(p.AllySession, p.GuestGuildID, r, true)
 		relayInputs = RegisterRelayInputs(ctx, p.GuestGM, p.AllySession, destinations, channelMixers)
-		StartChannelMixers(ctx, p.GuestGM, destinations, channelMixers, relayFeed)
+		StartChannelMixers(ctx, p.GuestGM, destinations, channelMixers, relayFeed, bots)
 		StartGuestRelayBroadcast(ctx, relayMixer, p.AllySession, p.GuestGuildID)
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)

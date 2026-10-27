@@ -118,3 +118,23 @@ func GuestFor(mode guild.RaidMode) GuestPipeline {
 		return GuestCallerPipeline{}
 	}
 }
+
+// outputBots maps every output queue of the session, the owner's included, to
+// the bot that drains it.
+func (p Params) outputBots() OutputBots {
+	bots := SpeakerOutputs(p.Setup.Joined)
+	if p.ChOwnerOut != nil {
+		bots[p.ChOwnerOut] = p.OwnerBotID
+	}
+	return bots
+}
+
+// outputBots maps every output queue of the session, the owner's included, to
+// the bot that drains it.
+func (p GuestParams) outputBots() OutputBots {
+	bots := SpeakerOutputs(p.Setup.Joined)
+	if p.OwnerChOut != nil {
+		bots[p.OwnerChOut] = p.OwnerBotID
+	}
+	return bots
+}

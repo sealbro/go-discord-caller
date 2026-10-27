@@ -1295,7 +1295,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
+                        "expr": "gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"})), 1)",
                         "instant": false,
                         "legendFormat": "{{guild_name}}",
                         "range": true
@@ -1515,7 +1515,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "increase(gdc_fanout_frames_dropped_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__interval]) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"}",
+                        "expr": "increase(gdc_fanout_frames_dropped_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__interval]) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"})), 1)",
                         "instant": false,
                         "legendFormat": "{{path}} – {{guild_name}}",
                         "range": true
@@ -1880,7 +1880,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (guild_id, origin_prometheus) (gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}",
+                        "expr": "sum by (guild_id, origin_prometheus) (gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})), 1)",
                         "instant": false,
                         "legendFormat": "{{guild_name}}",
                         "range": true
@@ -2107,7 +2107,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}",
+                        "expr": "gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1)",
                         "instant": false,
                         "legendFormat": "{{bot_name}}",
                         "range": true
@@ -4169,7 +4169,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}",
+                        "expr": "topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})), 1)",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "__auto",
@@ -4188,7 +4188,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "(round((sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) / 3600) * 3600 and (sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) >= 3600) or round((sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) / 60) * 60",
+                        "expr": "(round((sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})), 1)) / 3600) * 3600 and (sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})), 1)) >= 3600) or round((sum by (guild_id, origin_prometheus) (sum_over_time(clamp_max(gdc_voice_sessions_active{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}, 1)[7d:1m])) * 60 and on(guild_id, origin_prometheus) topk(10, sum by (guild_id, origin_prometheus) (increase(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[7d]))) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})), 1)) / 60) * 60",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "__auto",
@@ -5525,7 +5525,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (bot_user_id) (rate(gdc_dave_encrypt_total{origin_prometheus=~\"$origin_prometheus\", outcome=\"failure\"}[$__rate_interval])) * on(bot_user_id) group_left(bot_name) label_replace(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"}, \"bot_user_id\", \"$1\", \"bot_id\", \"(.+)\")",
+                        "expr": "sum by (bot_user_id) (rate(gdc_dave_encrypt_total{origin_prometheus=~\"$origin_prometheus\", outcome=\"failure\"}[$__rate_interval])) * on(bot_user_id) group_left(bot_name) label_replace(clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1), \"bot_user_id\", \"$1\", \"bot_id\", \"(.+)\")",
                         "instant": false,
                         "legendFormat": "{{bot_name}}",
                         "range": true
@@ -6143,7 +6143,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max by (bot_name) (gdc_bot_verified{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "expr": "max by (bot_name) (gdc_bot_verified{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1))",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Verified",
@@ -6162,7 +6162,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max by (bot_name) (gdc_bot_guilds{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "expr": "max by (bot_name) (gdc_bot_guilds{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1))",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Servers",
@@ -6181,7 +6181,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max by (bot_name, state) (gdc_bot_members_intent{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "expr": "max by (bot_name, state) (gdc_bot_members_intent{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1))",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Members Intent",
@@ -6200,7 +6200,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max by (bot_name) (gdc_bot_verification_blocked{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})",
+                        "expr": "max by (bot_name) (gdc_bot_verification_blocked{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1))",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Blocked",

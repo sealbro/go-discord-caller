@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.3] - 2026-10-27
+
+### Added
+- **Dropped frames per speaker bot**: the dropped-frames metric now shows which speaker bot lost the audio.
+
+### Changed
+- **Faster shutdown**: active raids are now stopped in parallel instead of one after another.
+- **Quieter profile upload errors**: rejected Pyroscope uploads log a warning at most every 10 minutes.
+
+### Fixed
+- **Inflated caller counts**: callers who moved or left voice no longer stay counted for up to five minutes.
+- **Needless speaker rejoins**: a speaker bot alone in its channel is no longer rejoined as if its audio had stalled.
+- **Relay leak after a raid**: ending a host raid now stops its relay to guest servers.
+
 ## [0.12.2] - 2026-10-26
 
 ### Added

@@ -103,6 +103,10 @@ type DestChannel struct {
 	Outs      []chan<- []byte
 }
 
+// OutputBots maps each speaker output queue to the bot that drains it, so a
+// frame dropped on a full queue can be attributed to that bot.
+type OutputBots map[chan<- []byte]snowflake.ID
+
 // mixerRef pairs a mixer with the input ID registered in it. Used by the
 // router-driven install closures to detach the mixer inputs they allocated
 // when transitioning out of mix mode or closing the session.

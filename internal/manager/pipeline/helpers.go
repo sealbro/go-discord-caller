@@ -48,8 +48,8 @@ func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 // the DrainWatcher from auto-pausing a mixer that a peer guild may feed at any
 // moment (see DrainWatcher.WithKeepAlive). Pass nil for mixers no relay input
 // reaches.
-func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayFeed func() bool) {
-	drop := gm.Drop(telemetry.DropPathChannelMixer)
+func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayFeed func() bool, bots OutputBots) {
+	drop := bots.Dropper(gm, telemetry.DropPathChannelMixer)
 	for _, dest := range dests {
 		mx := chanMixers[dest.ChannelID]
 		destOuts := dest.Outs
@@ -68,7 +68,7 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 				case out <- buf:
 				default:
 					opus.PutEncodedFrame(buf)
-					drop()
+					drop(out)
 				}
 			}
 			last := destOuts[len(destOuts)-1]
@@ -76,7 +76,7 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 			case last <- pkt:
 			default:
 				opus.PutEncodedFrame(pkt)
-				drop()
+				drop(last)
 			}
 		})
 		go mx.Run(ctx)
@@ -243,6 +243,34 @@ func BuildGuestSources(joined []SpeakerResult) []SourceEntry {
 		sources = append(sources, SourceEntry{r.Speaker.ID, r.GV.ChannelID(), r.Handle})
 	})
 	return sources
+}
+
+// SpeakerOutputs returns the output queue of every joined speaker, keyed to
+// its bot.
+func SpeakerOutputs(joined []SpeakerResult) OutputBots {
+	bots := make(OutputBots, len(joined))
+	for _, r := range joined {
+		bots[r.ChOut] = r.Speaker.ID
+	}
+	return bots
+}
+
+// Dropper returns a drop counter for path that labels each drop with the bot
+// whose queue was full. The per-bot counters are built up front so a drop
+// costs one map lookup; a queue missing from b is counted without a bot.
+func (b OutputBots) Dropper(gm telemetry.GuildMetrics, path telemetry.DropPath) func(chan<- []byte) {
+	perQueue := make(map[chan<- []byte]func(), len(b))
+	for out, botID := range b {
+		perQueue[out] = gm.DropFor(path, botID)
+	}
+	unattributed := gm.Drop(path)
+	return func(out chan<- []byte) {
+		if drop, ok := perQueue[out]; ok {
+			drop()
+			return
+		}
+		unattributed()
+	}
 }
 
 // BuildDestinations groups each speaker's output channel by its destination voice channel.

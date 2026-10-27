@@ -59,6 +59,11 @@ func (g GuildMetrics) Drop(path DropPath) func() {
 	return g.session.FrameDropper(g.ctx, g.guildID, path)
 }
 
+// DropFor returns a counter func for drops on botID's output queue.
+func (g GuildMetrics) DropFor(path DropPath, botID snowflake.ID) func() {
+	return g.session.SpeakerFrameDropper(g.guildID, path, botID)
+}
+
 // SessionStarted records a raid start using the bundled guild ID.
 func (g GuildMetrics) SessionStarted(speakerCount int, mode string) {
 	g.session.SessionStarted(g.ctx, g.guildID, speakerCount, mode)

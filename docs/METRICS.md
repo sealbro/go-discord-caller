@@ -91,7 +91,7 @@ the opus pipeline via `FrameDropper`.
 | `gdc.voice.session.start.total`     | Counter       | `gdc_voice_session_start_total`     | `guild_id` | Voice raid starts. |
 | `gdc.voice.session.stop.total`      | Counter       | `gdc_voice_session_stop_total`      | `guild_id` | Voice raid stops. |
 | `gdc.session.speakers`              | Gauge         | `gdc_session_speakers`              | `guild_id` | Speakers (pool speaker bots plus the owner bot, if it joined) in the active raid; reset to `0` on stop. |
-| `gdc.fanout.frames.dropped.total`   | Counter       | `gdc_fanout_frames_dropped_total`   | `guild_id`, `path` | Opus frames dropped on full channels. `path`: `mixer` / `direct` / `channel_mixer` / `relay_bridge` / `provider` / `receiver`. |
+| `gdc.fanout.frames.dropped.total`   | Counter       | `gdc_fanout_frames_dropped_total`   | `guild_id`, `path`, `bot_id` | Opus frames dropped on full channels. `path`: `mixer` / `direct` / `channel_mixer` / `relay_bridge` / `provider` / `receiver`. `bot_id` is the bot whose output queue was full; set on `direct` and `channel_mixer` only. |
 | `gdc.session.route_transitions.total` | Counter     | `gdc_session_route_transitions_total` | `guild_id`, `from`, `to` | Auto-router source-mode transitions. `from`/`to`: `off` / `copy` / `mix`. |
 
 ---
@@ -168,6 +168,9 @@ histogram_quantile(0.99,
 
 # frame drop rate by pipeline stage
 sum by (path) (rate(gdc_fanout_frames_dropped_total[5m]))
+
+# which speaker bot is losing frames
+sum by (bot_id) (rate(gdc_fanout_frames_dropped_total{path=~"direct|channel_mixer"}[5m]))
 
 # speaker bots connected vs registered
 gdc_pool_bots_connected / gdc_pool_bots_total

@@ -27,7 +27,7 @@ import (
 //     relay to ally guests.
 type installBuildOpts struct {
 	src        *router.SourceSlot
-	dropDirect func()
+	dropDirect func(chan<- []byte)
 	dropMixer  func()
 	// allyBroadcast, when non-nil, is set as OpusCallback in copy mode and
 	// triggers DropOpus = dropDirect. In mix mode the relay mixer

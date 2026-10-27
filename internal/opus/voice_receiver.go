@@ -75,9 +75,9 @@ type FanoutInstall struct {
 	// teardown). Use it to detach mixer inputs (RemoveInput) and drain any
 	// remaining SourceBuffer frames. NOT called on reconnect-time receiver close.
 	OnClose func()
-	// DropOpus is invoked each time an OpusTargets send is dropped because
-	// the destination channel is full. Optional.
-	DropOpus func()
+	// DropOpus is invoked with the target each time an OpusTargets send is
+	// dropped because that channel is full. Optional.
+	DropOpus func(target chan<- []byte)
 }
 
 // FanoutHandle is the session-stable dispatch state shared across reconnects
@@ -109,7 +109,7 @@ type fanoutDispatch struct {
 	sourceTargets map[snowflake.ID][]*SourceBuffer
 	opusCallback  func([]byte)
 	onClose       func()
-	dropOpus      func()
+	dropOpus      func(target chan<- []byte)
 }
 
 // installTargetsForUser returns the SourceBuffers that should be fed when a
@@ -333,7 +333,7 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 		default:
 			PutEncodedFrame(buf)
 			if state.dropOpus != nil {
-				state.dropOpus()
+				state.dropOpus(out)
 			}
 		}
 	}

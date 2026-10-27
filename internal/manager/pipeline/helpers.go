@@ -185,6 +185,42 @@ func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *
 	return []chan<- []byte{relayOpusIn}
 }
 
+// hostRelayInputs owns the relay inputs a host pipeline registers, whose
+// bridge goroutines run until the inputs are closed. A /stop can tear the
+// session down before start registers them, so registering after close is a
+// no-op rather than a leak.
+type hostRelayInputs struct {
+	mu     sync.Mutex
+	chs    []chan<- []byte
+	closed bool
+}
+
+func (r *hostRelayInputs) register(registerFn func() []chan<- []byte) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.closed {
+		r.chs = registerFn()
+	}
+}
+
+// close detaches guildID from the session before closing its inputs, so no
+// broadcast can send on a closed channel (see ally.Session.broadcast).
+func (r *hostRelayInputs) close(session *ally.Session, guildID snowflake.ID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	r.closed = true
+	if len(r.chs) == 0 {
+		return
+	}
+	session.RemoveGuild(guildID)
+	for _, ch := range r.chs {
+		close(ch)
+	}
+}
+
 // RelayFeedFor returns the router.DestSlot.RelayFeed predicate for guildID:
 // true while some OTHER guild in the ally session may broadcast audio in.
 // Attach it to every destination that RegisterRelayInputs feeds, so the router

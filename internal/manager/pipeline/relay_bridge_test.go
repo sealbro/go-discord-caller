@@ -59,3 +59,35 @@ func TestHostRaidTeardownStopsTheRelayBridge(t *testing.T) {
 		})
 	}
 }
+
+// A /stop can land between committing a raid and running its start func, so
+// the cleanup may run first. The bridge must then never start, or it leaks
+// with nothing left to close it.
+func TestRelayBridgeNeverStartsAfterEarlyTeardown(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	fx := hostFx()
+	mode := guild.RaidModeGuildCaller
+	p := buildHostParams(t, ctx, fx, mode)
+	p.CancelFunc = cancel
+	session, start, err := HostFor(mode).Build(ctx, p)
+	if err != nil {
+		t.Fatalf("build: %v", err)
+	}
+	t.Cleanup(func() {
+		p.OwnerHandle.Close()
+		for _, r := range p.Setup.Joined {
+			r.Handle.Close()
+		}
+	})
+
+	session.Cleanup()
+	start()
+
+	hub := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
+	if slices.Contains(hub.InputIDs(), RelayInputID) {
+		t.Fatalf("relay bridge started after the raid was torn down; nothing will ever stop it")
+	}
+}

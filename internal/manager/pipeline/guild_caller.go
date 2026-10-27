@@ -117,11 +117,13 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 	mixerPausers[RelayDestID] = relayMixer
 
 	speakerCleanup := p.Setup.SpeakerCleanup
+	var relayInputs hostRelayInputs
 	session := &guild.Session{
 		GuildID: p.GuildID,
 		Cancel:  p.CancelFunc,
 		Cleanup: func() {
 			r.Close()
+			relayInputs.close(p.AllySession, p.GuildID)
 			speakerCleanup()
 		},
 		AllyCode:      p.AllyCode,
@@ -136,7 +138,9 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 		// as needed. RegisterRelayInputs still attaches guest broadcast feeds
 		// into host channel mixers when AllyCaller guests are permitted.
 		if p.Mode.AllowGuestCapture() {
-			RegisterRelayInputs(ctx, p.GM, p.AllySession, destinations, channelMixers)
+			relayInputs.register(func() []chan<- []byte {
+				return RegisterRelayInputs(ctx, p.GM, p.AllySession, destinations, channelMixers)
+			})
 		}
 		// The host always broadcasts, so guests' relay-fed destinations must
 		// see it as capturing; the observer re-routes this guild when a guest

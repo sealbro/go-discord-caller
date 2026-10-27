@@ -60,8 +60,9 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 //     in-flight broadcast (holding RLock) completes.
 //  2. ONLY AFTER RemoveGuild returns may the caller close the channels.
 //
-// Both callers in `manager/voice_raid.go` (host StopVoiceRaid / guest
-// JoinSession defer) follow this order. If you add a new caller that
+// Both owners follow this order: the host pipelines' session cleanup
+// (`pipeline.hostRelayInputs.close`) and the guest JoinSession defer in
+// `manager/voice_raid.go`. If you add a new caller that
 // owns channels registered via AddGuild, preserve this ordering.
 func (s *Session) broadcast(pkt []byte, excludeGuildID snowflake.ID) {
 	for guildID, chs := range s.outs {

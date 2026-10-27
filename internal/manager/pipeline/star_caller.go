@@ -139,11 +139,13 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 	}
 
 	speakerCleanup := p.Setup.SpeakerCleanup
+	var relayInputs hostRelayInputs
 	session := &guild.Session{
 		GuildID: p.GuildID,
 		Cancel:  p.CancelFunc,
 		Cleanup: func() {
 			r.Close()
+			relayInputs.close(p.AllySession, p.GuildID)
 			speakerCleanup()
 		},
 		AllyCode:      p.AllyCode,
@@ -158,7 +160,9 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 			// Guest broadcasts enter at the hub mixer only — speakers don't
 			// receive guest audio in star mode.
 			channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}
-			RegisterRelayInputs(ctx, p.GM, p.AllySession, ownerDests, channelMixers)
+			relayInputs.register(func() []chan<- []byte {
+				return RegisterRelayInputs(ctx, p.GM, p.AllySession, ownerDests, channelMixers)
+			})
 		}
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)
 		channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}

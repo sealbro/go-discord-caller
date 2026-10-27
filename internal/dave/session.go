@@ -244,7 +244,15 @@ type UnsentFrameRecorder interface {
 // RecordUnsentFrame exists because disgo's sender skips a tick while the
 // session is not ready, so a lost key ratchet no longer reaches Encrypt at
 // all; see WithEncryptStall.
+//
+// A bot alone in its channel is not ready either — Discord completes the
+// handshake only once there is a group to share keys with — but nobody can
+// hear it, it becomes ready as soon as someone joins, and a rejoin lands it in
+// the same empty channel. Its unsent frames are neither failures nor a stall.
 func (s *countingSession) RecordUnsentFrame() {
+	if s.alone() {
+		return
+	}
 	s.stats.RecordEncrypt(s.botUserID, ErrNotReady)
 	s.countEncryptFailure()
 }
@@ -286,6 +294,14 @@ func (s *countingSession) sender(userID godave.UserID) *talkSpurt {
 	spurt := s.known[userID]
 	s.mu.RUnlock()
 	return spurt
+}
+
+// alone reports whether no one else is in the channel: disgo adds every other
+// client in it to the session, and removes each as they leave.
+func (s *countingSession) alone() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.known) == 0
 }
 
 // remember records userID and reports whether it was new, so the stats

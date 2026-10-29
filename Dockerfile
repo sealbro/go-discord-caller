@@ -30,6 +30,28 @@ RUN mkdir -p /runtime-libs && \
         | awk '{print $3}' \
         | xargs -I{} cp --dereference {} /runtime-libs/
 
+ARG GO_LICENSES_VERSION=v2.0.1
+
+# Third-party licence texts for everything shipped in the runtime image
+RUN go install github.com/google/go-licenses/v2@${GO_LICENSES_VERSION} \
+	&& go-licenses save . --save_path=/licenses/go --ignore github.com/sealbro/go-discord-caller \
+	&& cp /src/LICENSE /licenses/LICENSE
+
+# install-libdave discards the licences shipped in libdave's release archive (its own plus the libraries it bundles)
+RUN case "$(uname -m)" in x86_64) arch=X64 ;; aarch64) arch=ARM64 ;; *) echo "unsupported arch $(uname -m)" >&2; exit 1 ;; esac \
+	&& curl -fsSL "https://github.com/discord/libdave/releases/download/${LIBDAVE_VERSION}%2Fcpp/libdave-Linux-${arch}-boringssl.zip" -o /tmp/libdave.zip \
+	&& mkdir -p /licenses/libdave \
+	&& unzip -j /tmp/libdave.zip 'licenses/*' -d /licenses/libdave \
+	&& rm /tmp/libdave.zip
+
+RUN mkdir -p /licenses/debian && \
+    for lib in /runtime-libs/*; do \
+        pkg=$(dpkg -S "*/$(basename "$lib")" 2>/dev/null | head -1 | cut -d: -f1); \
+        if [ -n "$pkg" ] && [ -f "/usr/share/doc/$pkg/copyright" ]; then \
+            cp "/usr/share/doc/$pkg/copyright" "/licenses/debian/$pkg"; \
+        fi; \
+    done
+
 FROM builder AS sec
 
 ARG GOSEC_VERSION=v2.29.0
@@ -57,6 +79,7 @@ LABEL org.opencontainers.image.title="go-discord-caller" \
 
 COPY --from=builder /bin/runner /
 COPY --from=builder /runtime-libs/ /usr/local/lib/
+COPY --from=builder /licenses/ /licenses/
 
 ENV LD_LIBRARY_PATH=/usr/local/lib
 

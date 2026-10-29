@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Third-party licences in the Docker image**: the image now ships the licence texts of every bundled library under `/licenses`.
+
 ### Changed
 - **Turkish translation**: rewritten from scratch.
 

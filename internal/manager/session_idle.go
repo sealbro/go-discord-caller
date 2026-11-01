@@ -14,6 +14,10 @@ import (
 // granularity, so a 1-minute poll keeps the cost negligible.
 const sessionPresenceInterval = time.Minute
 
+// occupiedReportInterval spaces the log lines that name who keeps a session from
+// going idle, so a long-lived raid does not log on every poll.
+const occupiedReportInterval = 30 * time.Minute
+
 // idleStopTimeout bounds the auto-stop teardown. The session context is torn
 // down inside it, so the stop cannot borrow the session's own context.
 const idleStopTimeout = 30 * time.Second
@@ -41,6 +45,20 @@ func (w *sessionPresenceWatcher) occupied() bool {
 	return slices.ContainsFunc(w.channels, w.probe.HasListeners)
 }
 
+func (w *sessionPresenceWatcher) logOccupants() {
+	for _, ch := range w.channels {
+		users := w.probe.Listeners(ch)
+		if len(users) == 0 {
+			continue
+		}
+		slog.Info("session idle: channel keeps the session alive",
+			slog.String("guildID", w.guildID.String()),
+			slog.String("channelID", ch.String()),
+			slog.Any("userIDs", users),
+		)
+	}
+}
+
 // Run polls every sessionPresenceInterval until ctx is cancelled or until every
 // watched channel has been empty continuously for w.idleTimeout — in which case
 // it stops the session and returns. No-op when idleTimeout <= 0 or no channels
@@ -53,7 +71,7 @@ func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 
-	var emptySince time.Time
+	var emptySince, lastReport time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -61,6 +79,10 @@ func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 		case <-t.C:
 			if w.occupied() {
 				emptySince = time.Time{}
+				if time.Since(lastReport) >= occupiedReportInterval {
+					lastReport = time.Now()
+					w.logOccupants()
+				}
 				continue
 			}
 			if emptySince.IsZero() {

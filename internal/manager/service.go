@@ -397,17 +397,24 @@ type cacheVoiceProbe struct {
 // router to pause destination mixers whose voice channel has no humans to
 // hear the audio.
 func (p *cacheVoiceProbe) HasListeners(channelID snowflake.ID) bool {
+	return len(p.Listeners(channelID)) > 0
+}
+
+// Listeners returns the user IDs of the non-bot members the owner bot's caches
+// place in channelID.
+func (p *cacheVoiceProbe) Listeners(channelID snowflake.ID) []snowflake.ID {
 	caches := p.svc.ownerClient.Caches
+	var users []snowflake.ID
 	for vs := range caches.VoiceStates(p.guildID) {
 		if vs.ChannelID == nil || *vs.ChannelID != channelID {
 			continue
 		}
 		member, ok := caches.Member(p.guildID, vs.UserID)
 		if ok && !p.svc.IsBot(member.User) {
-			return true
+			users = append(users, vs.UserID)
 		}
 	}
-	return false
+	return users
 }
 
 // EnumerateCallers returns the user IDs of cached non-bot members in

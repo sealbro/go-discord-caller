@@ -2,15 +2,15 @@
 title: "Terms of Service — go-discord-caller"
 description: >-
   Terms for the hosted go-discord-caller Discord bot: acceptable use, the
-  consent expected before relaying voice, availability of the demo instance, and
+  consent expected before relaying voice, availability of the hosted service, and
   the absence of warranty.
 ---
 
 # Terms of Service
 
-**Last updated: 1 November 2026**
+**Last updated: 2 November 2026**
 
-These terms apply to the **hosted demo instance** of go-discord-caller — the bot
+These terms apply to the **hosted instance** of go-discord-caller — the bot
 you invite from this site. The source code is separate: it is licensed under the
 [Elastic License 2.0](https://github.com/sealbro/go-discord-caller/blob/main/LICENSE)
 since version 0.13.0 (earlier versions remain under Apache-2.0), and running your
@@ -26,9 +26,10 @@ voice channel and plays it back, live, in other voice channels — including
 channels in other Discord servers when their administrators have joined the same
 relay session.
 
-The hosted instance exists **for evaluation**. It has a limited number of speaker
-bots, it is currently provided free of charge, and it carries no uptime
-commitment. For production use, self-host with your own bot tokens.
+The hosted instance is a production service you can use in your own servers. It
+is currently provided free of charge and has a limited number of speaker bots; at
+peak times, when load is high, its capacity may be limited. It carries no uptime
+commitment — see [Availability and changes](#availability-and-changes).
 
 ## Cost, and what may change
 

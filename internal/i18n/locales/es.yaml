@@ -33,12 +33,13 @@ raid.join_failed: "❌ Error al unirse a la sesión de relay `{{.Code}}`: {{.Err
 raid.no_bound_speakers: "⚠️ No hay bots de voz configurados en este servidor. Ejecuta `/setup` → **Vincular altavoces**, activa un altavoz y elige su canal de voz, luego inténtalo de nuevo.\n_Las vinculaciones son por servidor: un código de relay no traslada la configuración del otro servidor._"
 raid.no_owner_channel: "⚠️ El bot principal no tiene canal de voz; puede que se haya eliminado. Ejecuta `/setup`, elige uno y vuelve a intentarlo."
 raid.no_caller_role: "⚠️ No hay ningún rol de captura configurado. Ejecuta `/setup` → **🎭 Vincular roles** y elige el rol de captura — solo se retransmite a los miembros que lo tienen. Luego inténtalo de nuevo."
+raid.no_deafen_permission: "⚠️ El bot no tiene el permiso **Ensordecer miembros**. Concédelo en Ajustes del servidor → Roles y vuelve a intentarlo."
 raid.start_failed: "❌ Error al iniciar el voice raid: {{.Err}}"
 raid.stop_failed: "❌ Error al detener el voice raid: {{.Err}}"
 raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. Los speakers se están conectando a sus canales."
 raid.started: "🔴 **Voice raid iniciado.** Los speakers se han unido a sus canales."
 raid.started_with_code: "🔴 **Voice raid iniciado.** Los speakers se han unido a sus canales. Código de relay: `{{.Code}}`"
-raid.deafen_unavailable: "⚠️ Consejo: concede al bot el permiso **Ensordecer miembros** y coloca su rol por encima de los bots altavoz para reducir la carga y el riesgo de cortes de audio."
+raid.deafen_unavailable: "⚠️ Consejo: coloca el rol del bot propietario por encima de los roles de los bots altavoz en Ajustes del servidor → Roles para reducir la carga y el riesgo de cortes de audio."
 raid.stopped: "⚫ **Voice raid detenido.** Todos los speakers han abandonado sus canales."
 
 # ── Permissions warning ───────────────────────────────────────────────────────

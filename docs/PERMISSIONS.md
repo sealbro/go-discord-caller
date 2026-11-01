@@ -59,8 +59,10 @@ Discord checks two things before it allows the deafen:
 
 Discord grants the permission at install time, but nobody can set the role
 order from an invite link, so a server admin has to drag the owner bot's role
-above the speaker bots' roles. Without both, the raid still runs: the deafen is
-skipped with a warning, and the speaker bots keep decrypting audio they discard.
+above the speaker bots' roles. Without **Deafen Members**, `/start` and joining
+a relay session are refused. Without the role order the raid still runs: the
+deafen is skipped with a warning, and the speaker bots keep decrypting audio
+they discard.
 
 ## Speaker bots
 

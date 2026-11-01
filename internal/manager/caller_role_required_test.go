@@ -204,3 +204,28 @@ func TestAllowFilterRelaysOnlyCallerRoleHolders(t *testing.T) {
 		t.Error("member without the caller role is relayed")
 	}
 }
+
+// Speakers that must not hear are server-deafened by the owner bot, so a guild
+// where it cannot do that is refused before any bot joins voice.
+func TestRaidRefusedWithoutDeafenPermission(t *testing.T) {
+	f := newCallerRoleFixture(t)
+	f.caches.AddRole(discord.Role{ID: testGuildID, GuildID: testGuildID, Permissions: ChannelAccessPermissions})
+	f.addMember(testGuildID, testBotID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
+
+	if !errors.Is(err, ErrNoDeafenPermission) {
+		t.Errorf("StartVoiceRaid without Deafen Members: err = %v, want ErrNoDeafenPermission", err)
+	}
+	if n := f.joins.Load(); n != 0 {
+		t.Errorf("%d bot(s) joined voice for a raid that must be refused", n)
+	}
+
+	f.m.sessions.Create(roleTestHostCode, roleTestGuestGuildID, guild.RaidModeGuildCaller)
+	_, err = f.m.JoinSession(ctx, testGuildID, cancel, guild.RaidModeAllyListener, roleTestHostCode)
+	if !errors.Is(err, ErrNoDeafenPermission) {
+		t.Errorf("JoinSession without Deafen Members: err = %v, want ErrNoDeafenPermission", err)
+	}
+}

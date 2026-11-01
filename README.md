@@ -200,8 +200,6 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
 
 > The ready-to-use invite URL is also printed to the logs automatically when the bot starts (`owner bot invite URL`).
 
-> ⚠️ **Grant Deafen Members permission — it is the bot's biggest CPU saving.**
-
 > See [Bot permissions](docs/PERMISSIONS.md) for what each permission is used for.
 
 > Speaker bots do **not** need to be added to the server manually — use the `/setup` command after the bot is running to invite them one by one.

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Deafen Members is required to start**: `/start` and joining a relay session are refused until the owner bot has the permission; the tip after a start now only covers moving the owner bot's role above the speakers'.
 - **Third-party licences in the Docker image**: the image now ships the licence texts of every bundled library under `/licenses`.
 - **Why a raid stays active**: with no callers present, a log line now says how many users the bot sees in each occupied channel and how many Discord confirms.
 

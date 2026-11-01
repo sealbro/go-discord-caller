@@ -79,6 +79,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.no_caller_role"))
 					return
 				}
+				if errors.Is(err, manager.ErrNoDeafenPermission) {
+					h.followUp(e, loc.T("raid.no_deafen_permission"))
+					return
+				}
 				// A raid that came up between the command's pre-check and here,
 				// including one this very command raced with.
 				if errors.Is(err, manager.ErrSessionExists) {
@@ -132,6 +136,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			}
 			if errors.Is(err, manager.ErrNoCallerRole) {
 				h.followUp(e, loc.T("raid.no_caller_role"))
+				return
+			}
+			if errors.Is(err, manager.ErrNoDeafenPermission) {
+				h.followUp(e, loc.T("raid.no_deafen_permission"))
 				return
 			}
 			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error())+skipped)

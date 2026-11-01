@@ -33,12 +33,13 @@ raid.join_failed: "❌ Falha ao entrar na sessão de relay `{{.Code}}`: {{.Err}}
 raid.no_bound_speakers: "⚠️ Nenhum bot alto-falante está configurado neste servidor. Execute `/setup` → **Vincular alto-falantes**, ative um alto-falante e escolha o canal de voz dele, depois tente novamente.\n_As vinculações são por servidor — um código de relay não traz a configuração do outro servidor._"
 raid.no_owner_channel: "⚠️ O bot principal não tem canal de voz — ele pode ter sido excluído. Execute `/setup`, escolha um e tente novamente."
 raid.no_caller_role: "⚠️ Nenhum cargo de captura está definido. Execute `/setup` → **🎭 Vincular cargos** e escolha o cargo de captura — só os membros com ele são retransmitidos. Depois tente novamente."
+raid.no_deafen_permission: "⚠️ O bot não tem a permissão **Ensurdecer membros**. Conceda-a em Configurações do servidor → Cargos e tente novamente."
 raid.start_failed: "❌ Falha ao iniciar o voice raid: {{.Err}}"
 raid.stop_failed: "❌ Falha ao parar o voice raid: {{.Err}}"
 raid.joined: "🔴 **Entrou na sessão de relay** `{{.Code}}` como {{.Mode}}. Os speakers estão se conectando aos seus canais."
 raid.started: "🔴 **Voice raid iniciado.** Os speakers entraram em seus canais."
 raid.started_with_code: "🔴 **Voice raid iniciado.** Os speakers entraram em seus canais. Código de relay: `{{.Code}}`"
-raid.deafen_unavailable: "⚠️ Dica: conceda ao bot a permissão **Ensurdecer membros** e mova o cargo dele acima dos bots alto-falante para reduzir a carga e o risco de falhas no áudio."
+raid.deafen_unavailable: "⚠️ Dica: mova o cargo do bot proprietário acima dos cargos dos bots alto-falante em Configurações do servidor → Cargos para reduzir a carga e o risco de falhas no áudio."
 raid.stopped: "⚫ **Voice raid parado.** Todos os speakers saíram dos seus canais."
 
 # ── Permissions warning ───────────────────────────────────────────────────────

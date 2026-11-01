@@ -371,7 +371,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 	}{
 		{name: "relay code", m: &fakeManager{startFn: func(guild.RaidMode) (ally.Code, error) { return "ABCD2345", nil }},
 			want: en.T("raid.started_with_code", "Code", "ABCD2345"), started: true},
-		{name: "deafen unavailable", m: &fakeManager{deafenReadiness: manager.DeafenReadiness{MissingPermission: true}},
+		{name: "deafen unavailable", m: &fakeManager{deafenReadiness: manager.DeafenReadiness{OutrankedBy: []snowflake.ID{1}}},
 			want: en.T("raid.started") + "\n\n" + en.T("raid.deafen_unavailable"), started: true},
 		{name: "skipped speakers", m: &fakeManager{missingFn: func() []manager.ChannelAccessWarning { return warning }},
 			want: en.T("raid.started") + formatSkippedSpeakers(en, warning), started: true},
@@ -381,12 +381,14 @@ func TestStartCommandFollowUps(t *testing.T) {
 		{name: "session exists", m: &fakeManager{startFn: failStart(manager.ErrSessionExists)}, want: en.T("raid.already_active"), started: true},
 		{name: "no owner channel", m: &fakeManager{startFn: failStart(manager.ErrNoOwnerChannel)}, want: en.T("raid.no_owner_channel"), started: true},
 		{name: "no caller role", m: &fakeManager{startFn: failStart(manager.ErrNoCallerRole)}, want: en.T("raid.no_caller_role"), started: true},
+		{name: "no deafen permission", m: &fakeManager{startFn: failStart(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
 		{name: "other error", m: &fakeManager{startFn: failStart(boom)}, want: en.T("raid.start_failed", "Err", "boom"), started: true},
 
 		{name: "join access blocked", opts: withCode, m: &fakeManager{accessFn: func() []manager.ChannelAccessWarning { return warning }},
 			want: en.T("raid.join_blocked_permissions") + formatAccessWarnings(en, warning)},
 		{name: "join no bound speakers", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoBoundSpeakers)}, want: en.T("raid.no_bound_speakers"), started: true},
 		{name: "join no caller role", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoCallerRole)}, want: en.T("raid.no_caller_role"), started: true},
+		{name: "join no deafen permission", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
 		{name: "join session exists", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrSessionExists)}, want: en.T("raid.already_active"), started: true},
 		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE1234", "Err", "boom"), started: true},
 	}

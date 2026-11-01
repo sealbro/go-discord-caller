@@ -43,4 +43,9 @@ var (
 	// or joined before a caller role is bound. Without the role every user in
 	// the captured channel would be relayed, including into other servers.
 	ErrNoCallerRole = errors.New("no caller role is set: run /setup → Bind Roles and pick the role whose members are relayed")
+
+	// ErrNoDeafenPermission is returned when starting or joining a session while
+	// the owner bot lacks the Deafen Members permission in the guild. Speakers
+	// that must not hear would keep decrypting every inbound packet.
+	ErrNoDeafenPermission = errors.New("the owner bot lacks the Deafen Members permission in this server")
 )

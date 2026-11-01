@@ -83,6 +83,7 @@ func (h *CommandHandlers) withGuildButton(fn guildButtonHandler) func(discord.Bu
 		if errMsg != nil {
 			return e.CreateMessage(*errMsg)
 		}
+		h.manager.EnsureGuildReady(guildID)
 		return fn(guildID, h.loc(guildID, e.Locale()), data, e)
 	}
 }
@@ -97,6 +98,7 @@ func (h *CommandHandlers) withGuildSelectMenu(fn guildSelectMenuHandler) func(di
 		if errMsg != nil {
 			return e.CreateMessage(*errMsg)
 		}
+		h.manager.EnsureGuildReady(guildID)
 		return fn(guildID, h.loc(guildID, e.Locale()), data, e)
 	}
 }

@@ -21,6 +21,7 @@ func (h *CommandHandlers) handleSetup(guildID snowflake.ID, loc *i18n.Localizer,
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 
+	h.manager.EnsureGuildReady(guildID)
 	msg, components := h.buildMainSetupMessage(guildID, loc)
 	return e.CreateMessage(discord.MessageCreate{
 		Content:    msg,

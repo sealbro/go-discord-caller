@@ -2,9 +2,11 @@ package manager
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -141,10 +143,16 @@ func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc contex
 		guildID:     session.GuildID,
 		channels:    channels,
 		probe:       &cacheVoiceProbe{svc: m, guildID: session.GuildID},
+		callerRole:  func() snowflake.ID { return m.callerRoleID(session.GuildID) },
 		stop:        func() { m.stopIdleSession(session, cancelFunc) },
 		idleTimeout: m.sessionIdleTimeout,
 	}
 	go w.Run(ctx)
+}
+
+func (m *Service) callerRoleID(guildID snowflake.ID) snowflake.ID {
+	id, _ := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
+	return id
 }
 
 // stopIdleSession runs the same teardown as /stop so the owner's voice conn is
@@ -415,6 +423,20 @@ func (p *cacheVoiceProbe) Listeners(channelID snowflake.ID) []snowflake.ID {
 		}
 	}
 	return users
+}
+
+// InChannel asks Discord, not the cache, whether userID is in channelID right
+// now. A user Discord reports as not in voice is a plain false, not an error.
+func (p *cacheVoiceProbe) InChannel(ctx context.Context, channelID, userID snowflake.ID) (bool, error) {
+	vs, err := p.svc.ownerClient.Rest.GetUserVoiceState(p.guildID, userID, rest.WithCtx(ctx))
+	if err != nil {
+		var restErr *rest.Error
+		if errors.As(err, &restErr) && restErr.Response != nil && restErr.Response.StatusCode == http.StatusNotFound {
+			return false, nil
+		}
+		return false, err
+	}
+	return vs.ChannelID != nil && *vs.ChannelID == channelID, nil
 }
 
 // EnumerateCallers returns the user IDs of cached non-bot members in

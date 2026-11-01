@@ -2,11 +2,9 @@ package manager
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
-	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -121,15 +119,15 @@ func (m *Service) clearActiveRouter(guildID snowflake.ID) {
 	m.activeRouters.Store(&next)
 }
 
-// SetSessionIdleTimeout configures the duration after which a session whose
-// voice channels have all been empty of non-bot users is auto-stopped.
+// SetSessionIdleTimeout configures the duration after which a session with
+// no caller in any of its voice channels is auto-stopped.
 // Pass 0 to disable. Call once at startup, before any session is started.
 func (m *Service) SetSessionIdleTimeout(d time.Duration) {
 	m.sessionIdleTimeout = d
 }
 
-// startSessionIdleWatcher launches a goroutine that stops the session once every
-// voice channel involved in it has been empty of non-bot users continuously for
+// startSessionIdleWatcher launches a goroutine that stops the session once no
+// voice channel involved in it has had a caller continuously for
 // m.sessionIdleTimeout. Safe to call for any session — it no-ops when the
 // timeout is disabled or the session has no bound channels to watch.
 func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc context.CancelFunc, session *guild.Session) {
@@ -424,20 +422,6 @@ func (p *cacheVoiceProbe) Listeners(channelID snowflake.ID) []snowflake.ID {
 		}
 	}
 	return users
-}
-
-// InChannel asks Discord, not the cache, whether userID is in channelID right
-// now. A user Discord reports as not in voice is a plain false, not an error.
-func (p *cacheVoiceProbe) InChannel(ctx context.Context, channelID, userID snowflake.ID) (bool, error) {
-	vs, err := p.svc.ownerClient.Rest.GetUserVoiceState(p.guildID, userID, rest.WithCtx(ctx))
-	if err != nil {
-		var restErr *rest.Error
-		if errors.As(err, &restErr) && restErr.Response != nil && restErr.Response.StatusCode == http.StatusNotFound {
-			return false, nil
-		}
-		return false, err
-	}
-	return vs.ChannelID != nil && *vs.ChannelID == channelID, nil
 }
 
 // EnumerateCallers returns the user IDs of cached non-bot members in

@@ -11,13 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **One bot per voice channel**: `/setup` refuses to bind a bot to a channel another bot already uses, and says which one.
 - **Deafen Members is required to start**: `/start` and joining a relay session are refused until the owner bot has the permission; the tip after a start now only covers moving the owner bot's role above the speakers'.
 - **Third-party licences in the Docker image**: the image now ships the licence texts of every bundled library under `/licenses`.
-- **Why a raid stays active**: with no callers present, a log line now says how many users the bot sees in each occupied channel and how many Discord confirms.
 
 ### Changed
 - **License**: changed from Apache-2.0 to the Elastic License 2.0 starting with 0.13.0 — free to use, modify and self-host, but not to offer as a hosted service. Releases up to and including 0.12.3 remain under Apache-2.0.
 - **Turkish translation**: rewritten from scratch.
 
 ### Fixed
+- **Idle raids with no caller**: a raid now auto-stops after the idle timeout when no one with the caller role is in its channels, instead of staying up for as long as any other member sat in them.
 - **User IDs in logs**: join and leave voice log lines no longer carry the Discord user ID.
 
 ## [0.12.3] - 2026-10-27

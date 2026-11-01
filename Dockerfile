@@ -54,16 +54,9 @@ RUN mkdir -p /licenses/debian && \
 
 FROM builder AS sec
 
-ARG GOSEC_VERSION=v2.29.0
-# UPSTREAM(gosec v2.29.0): bundles golang.org/x/tools v0.49.0, which cannot read
-# Go 1.27.2 export data, so every package fails to type-check and nothing is
-# scanned. Build it against a newer x/tools until a gosec release ships one.
-ARG XTOOLS_VERSION=v0.51.0
+ARG GOSEC_VERSION=v2.30.0
 
-WORKDIR /tmp/gosec
-RUN go mod init gosec-build \
-	&& go get github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION} golang.org/x/tools@${XTOOLS_VERSION} \
-	&& go build -o /go/bin/gosec github.com/securego/gosec/v2/cmd/gosec
+RUN go install github.com/securego/gosec/v2/cmd/gosec@${GOSEC_VERSION}
 
 WORKDIR /src
 RUN gosec -tags=integration,stress ./...

@@ -1,8 +1,10 @@
 package bot
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -685,5 +687,34 @@ func TestVoiceLogLevelIsDebugOutsideARaid(t *testing.T) {
 	}
 	if got := voiceLogLevel(m, idle); got != slog.LevelDebug {
 		t.Errorf("guild without a raid: level = %v, want DEBUG", got)
+	}
+}
+
+func TestVoiceJoinLeaveInfoLogsCarryNoUserID(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	f := &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }}
+	const guildID, userID = snowflake.ID(50), snowflake.ID(918273645)
+	chID := snowflake.ID(1001)
+	generic := &events.GenericGuildVoiceState{
+		GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
+		VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &chID},
+		Member:       discord.Member{User: discord.User{ID: userID}},
+	}
+	onVoiceJoin(f)(&events.GuildVoiceJoin{GenericGuildVoiceState: generic})
+	onVoiceLeave(f)(&events.GuildVoiceLeave{
+		GenericGuildVoiceState: generic,
+		OldVoiceState:          discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: &chID},
+	})
+
+	out := buf.String()
+	if !strings.Contains(out, "user joined voice channel") || !strings.Contains(out, "user left voice channel") {
+		t.Fatalf("expected both join and leave lines at INFO, got:\n%s", out)
+	}
+	if strings.Contains(out, userID.String()) {
+		t.Errorf("INFO log carries the Discord user ID:\n%s", out)
 	}
 }

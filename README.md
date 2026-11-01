@@ -11,9 +11,12 @@ If this project is useful to you, please consider giving it a ⭐ on GitHub — 
 
 ## Try it out
 
-Want to see it in action without hosting anything? Click the **Try the bot** badge above to invite a hosted owner bot to your server, then follow [Discord app setup → step 2](#2-finish-the-bot-setup) to bind roles and add **one speaker bot** via `/setup`. A single speaker is enough to verify the relay end-to-end.
+Don't want to host anything? Click the **Try the bot** badge above to invite the hosted owner bot to your server, then follow [Discord app setup → step 2](#2-finish-the-bot-setup) to bind roles and add speaker bots via `/setup`.
 
-> The hosted instance is intended for evaluation. For production use, self-host with your own owner + speaker bot tokens.
+> The hosted bot is ready to use — invite it and run `/setup`. It is free and runs at
+> the maintainer's expense, so it has a limited number of speakers, and at peak times,
+> when load is high, its capacity may be limited. Want unlimited speakers or full
+> control? Self-host it with your own owner + speaker bot tokens.
 
 ## How it works
 

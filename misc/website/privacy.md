@@ -8,9 +8,9 @@ description: >-
 
 # Privacy Policy
 
-**Last updated: 10 October 2026**
+**Last updated: 2 November 2026**
 
-This policy covers the **hosted demo instance** of go-discord-caller — the bot
+This policy covers the **hosted instance** of go-discord-caller — the bot
 you invite from this site. If you run the software yourself, you are the
 operator and this policy does not apply to your instance; see
 [Self-hosting](#self-hosting) below.

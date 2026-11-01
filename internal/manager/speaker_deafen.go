@@ -43,10 +43,11 @@ import (
 //
 // The catch is permissions. Server deafen is a moderation action, so the owner
 // bot needs DEAFEN_MEMBERS (bit 23) in the guild AND a role above every speaker
-// bot's role; without both, Discord answers 50013 Missing Permissions. Guilds
-// that installed the bot before that permission was added to the invite link
-// simply do not have it, so this must degrade quietly rather than fail a raid —
-// see reconcileSpeakerDeaf.
+// bot's role; without both, Discord answers 50013 Missing Permissions. A raid
+// is refused up front without DEAFEN_MEMBERS (ErrNoDeafenPermission). The role
+// order cannot be fixed from an invite link, and the permission can be revoked
+// mid-raid, so those degrade quietly rather than fail a raid — see
+// reconcileSpeakerDeaf.
 //
 // Two further consequences drive the design below:
 //
@@ -518,9 +519,9 @@ func (d DeafenReadiness) OK() bool {
 }
 
 // CheckDeafenReadiness evaluates, from cache only, whether this guild will get
-// the server-deafen optimisation. Called at raid start so the operator learns
-// about a fixable guild misconfiguration in the /start reply, rather than only
-// from a log line they will never read.
+// the server-deafen optimisation. A missing permission refuses the raid at
+// start; an outranking speaker is only reported in the /start reply, so the
+// operator learns about it rather than only from a log line they will never read.
 //
 // Answering from cache keeps /start free of extra REST round trips; a cache
 // miss reports "fine" rather than crying wolf, since the runtime path degrades

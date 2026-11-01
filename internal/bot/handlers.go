@@ -128,7 +128,6 @@ func onVoiceJoin(m ManagerService) func(*events.GuildVoiceJoin) {
 
 		allowed := m.HasCallerRole(guildID, e.Member.RoleIDs)
 		slog.Log(context.Background(), voiceLogLevel(m, guildID), "user joined voice channel",
-			slog.String("userID", e.Member.User.ID.String()),
 			slog.String("channelID", e.VoiceState.ChannelID.String()),
 			slog.Bool("allowedToSpeak", allowed),
 		)
@@ -156,7 +155,6 @@ func onVoiceLeave(m ManagerService) func(*events.GuildVoiceLeave) {
 		}
 
 		slog.Log(context.Background(), voiceLogLevel(m, guildID), "user left voice channel",
-			slog.String("userID", e.Member.User.ID.String()),
 			slog.String("guildID", guildID.String()),
 		)
 

@@ -1,10 +1,10 @@
 ---
-title: "Free Discord Shot Caller & Voice Relay Bot (Open Source)"
+title: "Free Discord Shot Caller & Voice Relay Bot (Self-Hosted)"
 description: >-
   Self-hosted Discord shot caller and voice relay bot in Go. One shot caller
   speaks and their audio is broadcast live to multiple speaker bots across one or
   many Discord servers, with mix-minus mixing and DAVE end-to-end encryption.
-  Free and open source.
+  Free to self-host.
 ---
 
 # Free, Self-Hosted Discord Shot Caller & Voice Relay Bot
@@ -14,13 +14,13 @@ description: >-
 [:simple-discord: Try the hosted bot (demo)](https://discord.com/discovery/applications/1484911601210495038){ .md-button .md-button--primary }
 [:material-github: View on GitHub](https://github.com/sealbro/go-discord-caller){ .md-button }
 
-*The hosted demo is for evaluation and has a limited number of speakers. It is free to use today, but it runs at the maintainer's expense — limits or paid plans may be introduced to fund more capacity ([terms](terms.md)). Self-hosting is free under Apache-2.0, with unlimited speakers and servers.*
+*The hosted demo is for evaluation and has a limited number of speakers. It is free to use today, but it runs at the maintainer's expense — limits or paid plans may be introduced to fund more capacity ([terms](terms.md)). Self-hosting is free under the Elastic License 2.0, with unlimited speakers and servers.*
 
 ## Why use it
 
 [Free vs paid shot-caller bots →](free-shot-caller-bot.md){ .md-button }
 
-- **Free & open source (Apache-2.0)** — no monthly fee, no trial wall.
+- **Free to self-host (Elastic License 2.0)** — no monthly fee, no trial wall.
 - **Unlimited servers & speakers** — inter-guild relay across any number of Discord servers; one speaker bot per voice channel, as many as you want.
 - **Three caller modes** — one-caller broadcast, hub-and-spoke, or full conference with mix-minus echo prevention.
 - **End-to-end encrypted audio** — uses Discord's DAVE E2EE voice protocol via [godave / libdave](https://github.com/disgoorg/godave).

@@ -1,6 +1,6 @@
 site_name: go-discord-caller
 site_description: >-
-  Free, open-source, self-hosted Discord shot caller and voice relay bot written
+  Free, source-available, self-hosted Discord shot caller and voice relay bot written
   in Go. One shot caller speaks and their voice is broadcast live to multiple
   speaker bots across one or many Discord servers, with mix-minus mixing and DAVE
   end-to-end encryption.
@@ -9,7 +9,7 @@ site_url: https://go-discord-caller.sealbro.dev/
 
 repo_name: sealbro/go-discord-caller
 repo_url: https://github.com/sealbro/go-discord-caller
-copyright: Copyright &copy; sealbro — Apache-2.0
+copyright: Copyright &copy; sealbro — Elastic License 2.0
 
 # Public marketing site sources live in misc/website/; build output goes to misc/www/
 docs_dir: misc/website

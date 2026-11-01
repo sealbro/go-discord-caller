@@ -75,7 +75,7 @@ LABEL org.opencontainers.image.title="go-discord-caller" \
       org.opencontainers.image.url="https://github.com/sealbro/go-discord-caller" \
       org.opencontainers.image.source="https://github.com/sealbro/go-discord-caller" \
       org.opencontainers.image.authors="Alex S. <alexs-oss@pm.me>" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="Elastic-2.0"
 
 COPY --from=builder /bin/runner /
 COPY --from=builder /runtime-libs/ /usr/local/lib/

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`/setup` right after a restart**: the Bind Speakers page no longer shows no speakers while startup seeding is still running. `/setup` now seeds the guild it is opened in, and startup seeds several guilds at once instead of one after another.
+
 ## [0.13.0] - 2026-11-01
 
 ### Added

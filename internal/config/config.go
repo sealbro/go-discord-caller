@@ -39,8 +39,8 @@ type Config struct {
 	// VoiceLogLevel is the minimum level for disgo's voice-layer logs, controlled
 	// by VOICE_LOG_LEVEL. Defaults to off — see telemetry.VoiceLogger for why.
 	VoiceLogLevel slog.Level
-	// SessionIdleTimeout is how long every voice channel in a raid may stay empty
-	// of non-bot users (nobody connected) before the session auto-stops.
+	// SessionIdleTimeout is how long a raid may go without a caller in any of
+	// its voice channels before the session auto-stops.
 	// Default: 10m. Set SESSION_IDLE_TIMEOUT=0 to disable.
 	SessionIdleTimeout time.Duration
 	// Test holds optional test/debug audio overrides

@@ -9,10 +9,27 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
+type fakeOccupancy struct {
+	callers []snowflake.ID
+}
+
+func (f *fakeOccupancy) EnumerateCallers(_, _ snowflake.ID) []snowflake.ID { return f.callers }
+
+func newIdleWatcher(guildID snowflake.ID, probe occupancyProbe) *sessionPresenceWatcher {
+	return &sessionPresenceWatcher{
+		guildID:     guildID,
+		channels:    []snowflake.ID{900},
+		probe:       probe,
+		callerRole:  func() snowflake.ID { return 1 },
+		stop:        func() {},
+		idleTimeout: 10 * time.Millisecond,
+	}
+}
+
 func TestSessionIdle_StopsWhenOnlyNonCallersAreInChannel(t *testing.T) {
-	probe := &fakeOccupancy{listeners: []snowflake.ID{111111}}
+	probe := &fakeOccupancy{}
 	var stopped atomic.Bool
-	w := newReportWatcher(7700004, probe)
+	w := newIdleWatcher(7700004, probe)
 	w.stop = func() { stopped.Store(true) }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
@@ -25,9 +42,9 @@ func TestSessionIdle_StopsWhenOnlyNonCallersAreInChannel(t *testing.T) {
 }
 
 func TestSessionIdle_KeptAliveWhileACallerIsPresent(t *testing.T) {
-	probe := &fakeOccupancy{listeners: []snowflake.ID{111111}, callers: []snowflake.ID{111111}}
+	probe := &fakeOccupancy{callers: []snowflake.ID{111111}}
 	var stopped atomic.Bool
-	w := newReportWatcher(7700005, probe)
+	w := newIdleWatcher(7700005, probe)
 	w.stop = func() { stopped.Store(true) }
 
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)

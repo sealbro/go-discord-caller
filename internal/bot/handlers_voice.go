@@ -79,6 +79,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.no_caller_role"))
 					return
 				}
+				if errors.Is(err, manager.ErrNoDeafenPermission) {
+					h.followUp(e, loc.T("raid.no_deafen_permission"))
+					return
+				}
 				// A raid that came up between the command's pre-check and here,
 				// including one this very command raced with.
 				if errors.Is(err, manager.ErrSessionExists) {
@@ -134,6 +138,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				h.followUp(e, loc.T("raid.no_caller_role"))
 				return
 			}
+			if errors.Is(err, manager.ErrNoDeafenPermission) {
+				h.followUp(e, loc.T("raid.no_deafen_permission"))
+				return
+			}
 			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error())+skipped)
 			return
 		}
@@ -143,9 +151,9 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		} else {
 			msg = loc.T("raid.started")
 		}
-		// The raid works either way, so this is appended to a success message
-		// rather than blocking the start: it is an optimisation the guild is
-		// leaving on the table, not an error.
+		// A missing permission already refused the start, so what is left is the
+		// role order: the raid works either way, and the tip is appended to the
+		// success message rather than blocking it.
 		if readiness := h.manager.CheckDeafenReadiness(guildID); !readiness.OK() {
 			msg += "\n\n" + loc.T("raid.deafen_unavailable")
 		}

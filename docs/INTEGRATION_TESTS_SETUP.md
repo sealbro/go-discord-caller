@@ -54,7 +54,7 @@ Create or reuse a private server. Do **not** use a production guild.
 
 | Bot | Required permissions |
 |-----|---------------------|
-| owner bot | `View Channels`, `Connect`, `Speak`, `Use Voice Activity` — same as production, nothing extra |
+| owner bot | `View Channels`, `Connect`, `Speak`, `Use Voice Activity`, `Deafen Members` — same as production, nothing extra. Without `Deafen Members` the raid is refused, in the guest guild too |
 | speaker bots | same as owner bot |
 | source bots | `View Channels`, `Connect`, `Speak`, `Use Voice Activity` |
 | listener bot | **Administrator** (test guild only) — used as test-admin for E9 / E12 |
@@ -76,7 +76,7 @@ Create a second private
 server. (E5b, E5c, E5d and E5f additionally need source bot 2; E5c needs
 `E2E_SPEAKER2_CHANNEL_ID` in the host guild.)
 
-- Invite owner bot and at least one speaker bot.
+- Invite owner bot and at least one speaker bot. The owner bot's own role in this guild must carry `Deafen Members`: a guest join is refused without it.
 - Create one owner voice channel (`E2E_GUEST_OWNER_CHANNEL_ID`) and one speaker voice channel (`E2E_GUEST_SPEAKER_CHANNEL_ID`).
 - Invite the listener bot.
 - Create a `caller` role in this guild (`E2E_GUEST_CALLER_ROLE_ID`) and assign it to source bot 2, which plays in the guest owner channel. A guest that captures is refused without its own caller role, so E5b, E5d and E5f skip when it is not set.

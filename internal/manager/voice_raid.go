@@ -36,6 +36,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, ErrSessionExists
 	}
 	defer m.starting.end(guestGuildID)
+	if m.CheckDeafenReadiness(guestGuildID).MissingPermission {
+		return guestMode, ErrNoDeafenPermission
+	}
 
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session.guest",
 		trace.WithAttributes(
@@ -269,6 +272,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", ErrSessionExists
 	}
 	defer m.starting.end(guildID)
+	if m.CheckDeafenReadiness(guildID).MissingPermission {
+		return "", ErrNoDeafenPermission
+	}
 	if !m.hasBoundCallerRole(guildID) {
 		return "", ErrNoCallerRole
 	}

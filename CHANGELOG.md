@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **License**: changed from Apache-2.0 to the Elastic License 2.0 starting with 0.13.0 — free to use, modify and self-host, but not to offer as a hosted service. Releases up to and including 0.12.3 remain under Apache-2.0.
 - **Turkish translation**: rewritten from scratch.
 
+### Fixed
+- **User IDs in logs**: join and leave voice log lines no longer carry the Discord user ID.
+
 ## [0.12.3] - 2026-10-27
 
 ### Added

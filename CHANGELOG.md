@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-01
+
 ### Added
 - **One bot per voice channel**: `/setup` refuses to bind a bot to a channel another bot already uses, and says which one.
 - **Deafen Members is required to start**: `/start` and joining a relay session are refused until the owner bot has the permission; the tip after a start now only covers moving the owner bot's role above the speakers'.
@@ -15,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **License**: changed from Apache-2.0 to the Elastic License 2.0 starting with 0.13.0 — free to use, modify and self-host, but not to offer as a hosted service. Releases up to and including 0.12.3 remain under Apache-2.0.
 - **Turkish translation**: rewritten from scratch.
+- **libdave v1.2.2**: the Docker image now bundles libdave v1.2.2, up from v1.1.1.
 
 ### Fixed
 - **Idle raids with no caller**: a raid now auto-stops after the idle timeout when no one with the caller role is in its channels, instead of staying up for as long as any other member sat in them.

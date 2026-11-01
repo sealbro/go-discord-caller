@@ -4,20 +4,70 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
+// seedConcurrency bounds how many guilds are seeded at once. Guilds have
+// independent REST rate-limit buckets, so overlapping them is safe.
+const seedConcurrency = 4
+
+// seedGroup runs one seeding per guild at a time. A caller arriving while one is
+// in flight waits for it instead of repeating its REST lookups.
+type seedGroup struct {
+	mu       sync.Mutex
+	inFlight map[snowflake.ID]chan struct{}
+}
+
+func (g *seedGroup) do(guildID snowflake.ID, fn func()) {
+	g.mu.Lock()
+	if done, ok := g.inFlight[guildID]; ok {
+		g.mu.Unlock()
+		<-done
+		return
+	}
+	if g.inFlight == nil {
+		g.inFlight = make(map[snowflake.ID]chan struct{})
+	}
+	done := make(chan struct{})
+	g.inFlight[guildID] = done
+	g.mu.Unlock()
+
+	defer func() {
+		g.mu.Lock()
+		delete(g.inFlight, guildID)
+		g.mu.Unlock()
+		close(done)
+	}()
+	fn()
+}
+
 // SeedExistingSpeakers registers any pool bots already in each guild and ensures
 // every guild has a persistent relay code. Call on startup and when the owner
 // bot joins a new guild.
 func (m *Service) SeedExistingSpeakers(guildIDs []snowflake.ID) {
+	sem := make(chan struct{}, seedConcurrency)
+	var wg sync.WaitGroup
 	for _, guildID := range guildIDs {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			m.seedGuild(guildID)
+		}()
+	}
+	wg.Wait()
+}
+
+func (m *Service) seedGuild(guildID snowflake.ID) {
+	m.seeding.do(guildID, func() {
 		m.seedGuildSpeakers(guildID, m.ownerBotID)
 		m.warmGuildCache(guildID)
-	}
+	})
 }
 
 // EnsureGuildReady seeds a guild and warms its caches when the detached startup
@@ -32,8 +82,7 @@ func (m *Service) EnsureGuildReady(guildID snowflake.ID) {
 	if seeded {
 		return
 	}
-	m.seedGuildSpeakers(guildID, m.ownerBotID)
-	m.warmGuildCache(guildID)
+	m.seedGuild(guildID)
 }
 
 // HasAvailableToken reports whether the pool has at least one speaker bot

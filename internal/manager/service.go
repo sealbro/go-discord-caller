@@ -49,6 +49,7 @@ type Service struct {
 	starting           startGuard    // one raid start per guild at a time
 	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
 	reportedCallers    reportedCallers
+	seeding            seedGroup
 }
 
 type voiceChannelKey struct{ guildID, channelID snowflake.ID }

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -293,6 +294,32 @@ func TestSetupCommand(t *testing.T) {
 		h := newInteractionHarness(t, &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }})
 		wantEphemeral(t, h.dispatch(slashPayload(memberJSON(permAdmin), "setup")), en.T("setup.blocked_active_raid"))
 	})
+}
+
+func TestSpeakersPageOnGuildNotYetSeeded(t *testing.T) {
+	t.Parallel()
+	var seeded atomic.Bool
+	m := &fakeManager{
+		ensureReadyFn: func(snowflake.ID) { seeded.Store(true) },
+		statusFn: func(g snowflake.ID) guild.Status {
+			if !seeded.Load() {
+				return *guild.NewStatus(g, 0)
+			}
+			return statusWithSpeakers(2, true)(g)
+		},
+	}
+	h := newInteractionHarness(t, m)
+
+	resp := h.dispatch(componentPayload(memberJSON(permAdmin), "/speakers/page/0", componentBtn, ""))
+
+	upd := wantUpdate(t, resp, "")
+	components, err := json.Marshal(upd.Components)
+	if err != nil {
+		t.Fatalf("marshal components: %v", err)
+	}
+	if want := fmt.Sprintf("/speakers/toggle/%s/0", speakerA); !strings.Contains(string(components), want) {
+		t.Errorf("speakers page lists no toggle %q while the guild is still being seeded after a restart: %s", want, components)
+	}
 }
 
 func TestStatusCommandRendersGuildStatus(t *testing.T) {

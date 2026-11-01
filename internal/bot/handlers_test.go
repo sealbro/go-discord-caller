@@ -41,6 +41,7 @@ type fakeManager struct {
 	joinFn          func(guild.RaidMode, ally.Code) (guild.RaidMode, error)
 	accessFn        func() []manager.ChannelAccessWarning
 	missingFn       func() []manager.ChannelAccessWarning
+	ensureReadyFn   func(snowflake.ID)
 	nextSpeakerFn   func() (snowflake.ID, bool)
 	toggleFn        func(snowflake.ID, bool) error
 
@@ -172,7 +173,11 @@ func (f *fakeManager) CheckGuildChannelAccess(snowflake.ID) []manager.ChannelAcc
 	}
 	return nil
 }
-func (f *fakeManager) EnsureGuildReady(snowflake.ID) {}
+func (f *fakeManager) EnsureGuildReady(g snowflake.ID) {
+	if f.ensureReadyFn != nil {
+		f.ensureReadyFn(g)
+	}
+}
 func (f *fakeManager) record(op, target, value string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

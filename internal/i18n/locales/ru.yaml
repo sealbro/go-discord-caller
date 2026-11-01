@@ -20,6 +20,7 @@ err.guild_only: "эту команду можно использовать то�
 err.unexpected_data_type: "неожиданный тип данных взаимодействия"
 err.invalid_speaker_id: "некорректный ID speaker-бота"
 err.speaker_not_found: "❌ Speaker-бот не найден на этом сервере."
+err.channel_taken: "❌ К этому голосовому каналу уже привязан {{.Bot}}. Выберите другой канал."
 err.no_more_tokens: "❌ Все speaker-токены из пула уже добавлены."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────

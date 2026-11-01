@@ -29,6 +29,7 @@ type fakeManager struct {
 	mu sync.Mutex
 
 	deafenReadiness manager.DeafenReadiness
+	bindErr         error
 
 	isBotFn         func(discord.User) bool
 	hasCallerRoleFn func(snowflake.ID, []snowflake.ID) bool
@@ -183,8 +184,9 @@ func (f *fakeManager) BindRole(_ snowflake.ID, rt store.RoleType, role snowflake
 func (f *fakeManager) UnbindRole(_ snowflake.ID, rt store.RoleType) {
 	f.record("unbind-role", string(rt), "")
 }
-func (f *fakeManager) BindChannel(_ snowflake.ID, sp snowflake.ID, ch snowflake.ID) {
+func (f *fakeManager) BindChannel(_ snowflake.ID, sp snowflake.ID, ch snowflake.ID) error {
 	f.record("bind-channel", sp.String(), ch.String())
+	return f.bindErr
 }
 func (f *fakeManager) UnbindChannel(_ snowflake.ID, sp snowflake.ID) {
 	f.record("unbind-channel", sp.String(), "")

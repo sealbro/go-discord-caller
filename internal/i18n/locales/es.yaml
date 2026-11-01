@@ -20,6 +20,7 @@ err.guild_only: "este comando solo se puede usar dentro de un servidor"
 err.unexpected_data_type: "tipo de datos de interacción inesperado"
 err.invalid_speaker_id: "ID de speaker inválido"
 err.speaker_not_found: "❌ Speaker no encontrado en este servidor."
+err.channel_taken: "❌ {{.Bot}} ya está vinculado a ese canal de voz. Elige otro canal."
 err.no_more_tokens: "❌ Todos los tokens de speaker del pool ya han sido añadidos."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────

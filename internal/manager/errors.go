@@ -1,6 +1,10 @@
 package manager
 
-import "errors"
+import (
+	"errors"
+
+	"github.com/disgoorg/snowflake/v2"
+)
 
 // Sentinel errors returned by session lifecycle methods.
 // Callers can use errors.Is to distinguish expected conditions from unexpected
@@ -39,6 +43,11 @@ var (
 	// no voice channel, either never bound or bound to one that was deleted.
 	ErrNoOwnerChannel = errors.New("the owner bot has no voice channel: run /setup and pick one")
 
+	// ErrChannelTaken is returned when binding a bot to a voice channel that
+	// another bot in the guild is already bound to. A second bot there adds a
+	// voice connection but no capture, since only one source per channel is wired.
+	ErrChannelTaken = errors.New("another bot is already bound to this voice channel")
+
 	// ErrNoCallerRole is returned when a session that captures voice is started
 	// or joined before a caller role is bound. Without the role every user in
 	// the captured channel would be relayed, including into other servers.
@@ -49,3 +58,13 @@ var (
 	// that must not hear would keep decrypting every inbound packet.
 	ErrNoDeafenPermission = errors.New("the owner bot lacks the Deafen Members permission in this server")
 )
+
+// ChannelTakenError is the ErrChannelTaken a bind returns, naming the bot that
+// already holds the channel.
+type ChannelTakenError struct {
+	BotID snowflake.ID
+}
+
+func (e *ChannelTakenError) Error() string { return ErrChannelTaken.Error() }
+
+func (e *ChannelTakenError) Is(target error) bool { return target == ErrChannelTaken }

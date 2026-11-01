@@ -138,8 +138,20 @@ func (m *Service) TrySeedMember(guildID, newUserID snowflake.ID) {
 func (m *Service) OwnerBotID() snowflake.ID { return m.ownerBotID }
 
 // BindChannel binds a voice channel to a user (speaker or owner) in a guild.
-func (m *Service) BindChannel(guildID, userID, channelID snowflake.ID) {
+// It returns a *ChannelTakenError (an ErrChannelTaken) when another bot in the guild already uses it.
+func (m *Service) BindChannel(guildID, userID, channelID snowflake.ID) error {
+	m.bindMu.Lock()
+	defer m.bindMu.Unlock()
+	for _, botID := range append([]snowflake.ID{m.ownerBotID}, m.poolSvc.GetIDs()...) {
+		if botID == userID {
+			continue
+		}
+		if bound, ok := m.store.GetBoundChannel(guildID, botID); ok && bound == channelID {
+			return &ChannelTakenError{BotID: botID}
+		}
+	}
 	m.store.BindChannel(guildID, userID, channelID)
+	return nil
 }
 
 // UnbindChannel removes the channel binding for a user in a guild.

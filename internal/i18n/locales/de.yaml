@@ -20,6 +20,7 @@ err.guild_only: "dieser Befehl kann nur innerhalb eines Servers verwendet werden
 err.unexpected_data_type: "unerwarteter Interaktionsdatentyp"
 err.invalid_speaker_id: "ungültige Speaker-ID"
 err.speaker_not_found: "❌ Speaker auf diesem Server nicht gefunden."
+err.channel_taken: "❌ {{.Bot}} ist bereits an diesen Sprachkanal gebunden. Wähle einen anderen Kanal."
 err.no_more_tokens: "❌ Alle Speaker-Tokens aus dem Pool wurden bereits hinzugefügt."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────

@@ -210,7 +210,7 @@ https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions
    - Bind the **capture role** (required) — only members with this role have their voice relayed; `/start` refuses until it is set. A server joining with a relay code needs its own capture role too, unless it only listens
    - Bind the **manager role** — members with this role can use `/start` and `/stop`
    - Bind the **owner bot** to a voice channel
-   - Add speaker bots via the **Add Speaker** button and bind each to a voice channel
+   - Add speaker bots via the **Add Speaker** button and bind each to a voice channel — every bot needs its own channel, `/setup` refuses one that another bot already uses
    - Optionally pin a **language** for the server (otherwise each user sees their own Discord client language)
 2. Run `/start` to begin a voice raid.
 3. Share your relay code (from `/status`) with another server so they can join with `/start code:XXXXXX`.

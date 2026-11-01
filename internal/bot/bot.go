@@ -53,7 +53,7 @@ type SessionManager interface {
 type BindingManager interface {
 	BindRole(guildID snowflake.ID, roleType store.RoleType, roleID snowflake.ID)
 	UnbindRole(guildID snowflake.ID, roleType store.RoleType)
-	BindChannel(guildID, userID, channelID snowflake.ID)
+	BindChannel(guildID, userID, channelID snowflake.ID) error
 	UnbindChannel(guildID, userID snowflake.ID)
 	GetBoundChannel(guildID, userID snowflake.ID) (snowflake.ID, bool)
 	ChannelDeleted(guildID, channelID snowflake.ID)

@@ -3,6 +3,8 @@ package manager
 import (
 	"testing"
 
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
@@ -18,7 +20,7 @@ func TestOwnerBotID(t *testing.T) {
 }
 
 func TestChannelBindingRoundTrip(t *testing.T) {
-	m := newBindingsService()
+	m := bindingsService(store.NewInMemoryStore(), &bot.Client{Caches: cache.New()})
 	const ch snowflake.ID = 77
 
 	m.BindChannel(testGuildID, testBotID, ch)

@@ -20,6 +20,7 @@ err.guild_only: "bu komut yalnızca bir sunucu içinde kullanılabilir"
 err.unexpected_data_type: "beklenmeyen etkileşim veri türü"
 err.invalid_speaker_id: "geçersiz speaker kimliği"
 err.speaker_not_found: "❌ Speaker bu sunucuda bulunamadı."
+err.channel_taken: "❌ {{.Bot}} zaten bu ses kanalına bağlı. Farklı bir kanal seçin."
 err.no_more_tokens: "❌ Havuzdaki tüm speaker token'ları zaten eklendi."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────

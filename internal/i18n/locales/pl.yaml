@@ -20,6 +20,7 @@ err.guild_only: "to polecenie można używać tylko wewnątrz serwera"
 err.unexpected_data_type: "nieoczekiwany typ danych interakcji"
 err.invalid_speaker_id: "nieprawidłowy identyfikator speakera"
 err.speaker_not_found: "❌ Nie znaleziono speakera na tym serwerze."
+err.channel_taken: "❌ {{.Bot}} jest już powiązany z tym kanałem głosowym. Wybierz inny kanał."
 err.no_more_tokens: "❌ Wszystkie tokeny speakerów z puli zostały już dodane."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────

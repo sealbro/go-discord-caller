@@ -42,6 +42,7 @@ type Service struct {
 	poolSvc            pool.PoolService
 	ownerClient        *bot.Client
 	ownerBotID         snowflake.ID
+	bindMu             sync.Mutex
 	test               config.TestConfig
 	sessions           *ally.Manager
 	metrics            *telemetry.Metrics

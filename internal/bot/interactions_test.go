@@ -574,6 +574,17 @@ func TestChannelMenuBindings(t *testing.T) {
 	}
 }
 
+func TestChannelMenuBindingRefusedWhenChannelTaken(t *testing.T) {
+	t.Parallel()
+	who := memberJSON(permAdmin)
+	want := en.T("err.channel_taken", "Bot", "<@"+speakerA.String()+">")
+	for _, customID := range []string{"/owner/bind-channel", fmt.Sprintf("/speakers/bind-channel/%s/0", speakerA)} {
+		m := &fakeManager{statusFn: statusWithSpeakers(1, true), bindErr: &manager.ChannelTakenError{BotID: speakerA}}
+		h := newInteractionHarness(t, m)
+		wantEphemeral(t, h.dispatch(componentPayload(who, customID, componentChan, channelSelectData(boundChannel))), want)
+	}
+}
+
 func TestSpeakerIDMustParse(t *testing.T) {
 	t.Parallel()
 	h := newInteractionHarness(t, &fakeManager{})

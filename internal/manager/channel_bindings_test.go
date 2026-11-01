@@ -169,3 +169,46 @@ func TestReconnectBotChannel_GivesUpWhenOwnerChannelIsGone(t *testing.T) {
 	}()
 	m.ReconnectBotChannel(context.Background(), testGuildID, testBotID)
 }
+
+func TestBindChannel_RefusesChannelTakenByAnotherBot(t *testing.T) {
+	const otherSpeaker = snowflake.ID(501)
+	st := store.NewInMemoryStore()
+	st.BindChannel(testGuildID, bindingsSpeakerID, keptChannel)
+	m := bindingsService(st, &bot.Client{Caches: cache.New()})
+
+	if err := m.BindChannel(testGuildID, otherSpeaker, keptChannel); !errors.Is(err, ErrChannelTaken) {
+		t.Fatalf("speaker onto speaker's channel: err = %v, want ErrChannelTaken", err)
+	}
+	err := m.BindChannel(testGuildID, testBotID, keptChannel)
+	var taken *ChannelTakenError
+	if !errors.As(err, &taken) || !errors.Is(err, ErrChannelTaken) || taken.BotID != bindingsSpeakerID {
+		t.Fatalf("owner onto speaker's channel: err = %v, want ChannelTakenError naming %v", err, bindingsSpeakerID)
+	}
+	assertBound(t, st, otherSpeaker, 0)
+	assertBound(t, st, testBotID, 0)
+}
+
+func TestBindChannel_RefusesSpeakerOntoOwnerChannel(t *testing.T) {
+	st := store.NewInMemoryStore()
+	st.BindChannel(testGuildID, testBotID, keptChannel)
+	m := bindingsService(st, &bot.Client{Caches: cache.New()})
+
+	if err := m.BindChannel(testGuildID, bindingsSpeakerID, keptChannel); !errors.Is(err, ErrChannelTaken) {
+		t.Fatalf("err = %v, want ErrChannelTaken", err)
+	}
+	assertBound(t, st, bindingsSpeakerID, 0)
+}
+
+func TestBindChannel_AllowsRebindingOwnChannelAndOtherGuilds(t *testing.T) {
+	const otherGuild = snowflake.ID(2)
+	st := store.NewInMemoryStore()
+	st.BindChannel(testGuildID, bindingsSpeakerID, keptChannel)
+	m := bindingsService(st, &bot.Client{Caches: cache.New()})
+
+	if err := m.BindChannel(testGuildID, bindingsSpeakerID, keptChannel); err != nil {
+		t.Fatalf("rebinding own channel: %v", err)
+	}
+	if err := m.BindChannel(otherGuild, testBotID, keptChannel); err != nil {
+		t.Fatalf("same channel ID in another guild: %v", err)
+	}
+}

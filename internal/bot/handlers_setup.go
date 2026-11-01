@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"errors"
 	"log/slog"
 	"strconv"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
+	"github.com/sealbro/go-discord-caller/internal/manager"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
@@ -183,7 +185,9 @@ func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, loc *i18n.Loca
 	if len(channels) == 0 {
 		h.manager.UnbindChannel(guildID, speakerID)
 	} else {
-		h.manager.BindChannel(guildID, speakerID, channels[0].ID)
+		if err := h.manager.BindChannel(guildID, speakerID, channels[0].ID); err != nil {
+			return h.bindChannelError(loc, e, err)
+		}
 	}
 
 	msg, components := h.buildSpeakersPageMessage(guildID, loc, page)
@@ -204,11 +208,21 @@ func (h *CommandHandlers) handleBindOwnerChannel(guildID snowflake.ID, loc *i18n
 	if len(channels) == 0 {
 		h.manager.UnbindChannel(guildID, ownerBotID)
 	} else {
-		h.manager.BindChannel(guildID, ownerBotID, channels[0].ID)
+		if err := h.manager.BindChannel(guildID, ownerBotID, channels[0].ID); err != nil {
+			return h.bindChannelError(loc, e, err)
+		}
 	}
 
 	msg, components := h.buildMainSetupMessage(guildID, loc)
 	return e.UpdateMessage(discord.NewMessageUpdate().
 		WithContent(msg).
 		WithComponents(components...))
+}
+
+func (h *CommandHandlers) bindChannelError(loc *i18n.Localizer, e *handler.ComponentEvent, err error) error {
+	var taken *manager.ChannelTakenError
+	if errors.As(err, &taken) {
+		return e.CreateMessage(ephemeral(loc.T("err.channel_taken", "Bot", "<@"+taken.BotID.String()+">")))
+	}
+	return err
 }

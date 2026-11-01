@@ -8,12 +8,13 @@ description: >-
 
 # Terms of Service
 
-**Last updated: 1 October 2026**
+**Last updated: 1 November 2026**
 
 These terms apply to the **hosted demo instance** of go-discord-caller — the bot
 you invite from this site. The source code is separate: it is licensed under the
-[Apache License 2.0](https://github.com/sealbro/go-discord-caller/blob/main/LICENSE),
-and running your own instance is governed by that licence, not by this page.
+[Elastic License 2.0](https://github.com/sealbro/go-discord-caller/blob/main/LICENSE)
+since version 0.13.0 (earlier versions remain under Apache-2.0), and running your
+own instance is governed by that licence, not by this page.
 
 By inviting the bot to a Discord server, you agree to these terms on behalf of
 that server.
@@ -48,10 +49,12 @@ reasonable notice through this site and the project's repository — but no noti
 period is guaranteed.
 
 !!! note "This does not affect the software"
-    The source code is and remains free and open source under the Apache License
-    2.0. That licence cannot be revoked for a version already released, so
-    self-hosting stays free of charge regardless of what happens to the hosted
-    instance. Nothing in this section limits your rights under that licence.
+    Since version 0.13.0 the source code is licensed under the Elastic License
+    2.0: you may use, modify and self-host it free of charge, but not offer it
+    to others as a hosted service. Versions 0.12.3 and earlier remain under the
+    Apache License 2.0, which cannot be revoked for a version already released.
+    Self-hosting stays free of charge regardless of what happens to the hosted
+    instance. Nothing in this section limits your rights under either licence.
 
 ## Who may configure it
 

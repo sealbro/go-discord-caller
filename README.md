@@ -289,3 +289,14 @@ bugs go through the [issue templates](https://github.com/sealbro/go-discord-call
 ## Security
 
 Found a vulnerability? Report it privately — see [SECURITY.md](SECURITY.md). Please don't open a public issue for it.
+
+## License
+
+Since version 0.13.0, go-discord-caller is licensed under the [Elastic License 2.0](LICENSE):
+you may use, modify and self-host it for free, but you may not provide it to others as a
+hosted or managed service. Versions 0.12.3 and earlier remain available under Apache-2.0.
+
+Running your own instance for your own community — your server, your guild, or an
+alliance of guilds you play with — is allowed. What needs a commercial licence is
+offering it as a service to the public or to customers. For a commercial licence,
+[ask the maintainer](https://github.com/sealbro/go-discord-caller/discussions).

@@ -12,6 +12,11 @@ welcome.
 - **Want to translate the bot?** Skip to [Translations](#translations) — no Go
   toolchain, no libdave, no Docker needed.
 
+> **By contributing, you agree** that the maintainer may use, change and
+> relicense your contribution under any terms, including open-source and
+> commercial licences. You keep your copyright. Details:
+> [Licensing your contribution](#licensing-your-contribution).
+
 ## Getting the code to build
 
 This is the part that trips people up, so read it before fighting your
@@ -115,6 +120,24 @@ Partial translations are fine — missing keys fall back to English.
 - Say how you tested it, and which suites you could not run.
 
 Releases and tags are the maintainer's job — don't bump versions in a PR.
+
+## Licensing your contribution
+
+The project is licensed under the [Elastic License 2.0](LICENSE) and is also
+offered under separate commercial licences, and its licence may change in the
+future — including back to an open-source licence. To keep that possible, by
+submitting a contribution you:
+
+- license it under the project's current licence, **and**
+- grant the maintainer, sealbro (Alex S.), a perpetual, worldwide,
+  non-exclusive, royalty-free, irrevocable licence to use, modify and
+  distribute it, and to relicense or sublicense it under any terms, including
+  open-source and commercial licences;
+- confirm the contribution is your own work, or that you have the right to
+  submit it under these terms.
+
+You keep the copyright to your contribution. If you do not agree, please say so
+in the PR before it is merged.
 
 ## Code style
 

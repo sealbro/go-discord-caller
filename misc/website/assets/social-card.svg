@@ -28,7 +28,7 @@
 
   <!-- text column -->
   <text x="80" y="188" font-family="Helvetica,Arial,sans-serif" font-size="30" font-weight="500"
-        fill="#8b93d6" letter-spacing="3">DISCORD VOICE RELAY · OPEN SOURCE</text>
+        fill="#8b93d6" letter-spacing="3">DISCORD VOICE RELAY · SELF-HOSTED</text>
 
   <text x="80" y="294" font-family="Helvetica,Arial,sans-serif" font-size="80" font-weight="700"
         fill="#ffffff">go-discord-caller</text>
@@ -48,7 +48,7 @@
         font-weight="600" fill="#ffffff">Free &amp; self-hosted</text>
 
   <text x="396" y="539" font-family="Helvetica,Arial,sans-serif" font-size="25" fill="#8b93d6">
-    Go · Apache-2.0 · DAVE E2EE
+    Go · Elastic-2.0 · DAVE E2EE
   </text>
 
   <!-- fan-out diagram -->

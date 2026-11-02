@@ -1,7 +1,7 @@
 ---
 title: "Free Discord Shot Caller & Voice Relay Bot (Self-Hosted)"
 description: >-
-  Self-hosted Discord shot caller and voice relay bot in Go. One shot caller
+  Self-hosted Discord shot caller and voice relay bot in Go. One shotcaller
   speaks and their audio is broadcast live to multiple speaker bots across one or
   many Discord servers, with mix-minus mixing and DAVE end-to-end encryption.
   Free to self-host.
@@ -136,7 +136,7 @@ A game-agnostic Discord voice command system — it works for any guild on any t
 
 ## Use cases
 
-- **Gaming guilds & alliances** — a shot caller's voice reaches every squad channel across allied servers during raids, sieges, node wars, and PvP.
+- **Gaming guilds & alliances** — a shotcaller's voice reaches every squad channel across allied servers during raids, sieges, node wars, and PvP.
 - **Events & town halls** — broadcast one speaker to many listening rooms.
 - **Cross-community relays** — link two or more Discord servers under a single voice command with a shared relay code.
 

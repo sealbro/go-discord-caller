@@ -78,6 +78,15 @@ nav:
   - Home: index.md
   - Free Shot Caller Bot: free-shot-caller-bot.md
   - How it works: voice-flow.md
+  - Guides:
+      - Throne and Liberty: guides/throne-and-liberty-shot-caller-bot.md
+      - Albion Online: guides/albion-online-shot-caller-bot.md
+      - Guild Wars 2: guides/guild-wars-2-shot-caller-bot.md
+      - World of Warcraft: guides/world-of-warcraft-shot-caller-bot.md
+      - Where Winds Meet: guides/where-winds-meet-shot-caller-bot.md
+      - Aion 2: guides/aion-2-shot-caller-bot.md
+      - TeamSpeak alternative: guides/teamspeak-alternative.md
+      - Bot in multiple voice channels: guides/bot-in-multiple-voice-channels.md
   - Audio latency: latency.md
   - Metrics: metrics.md
   - Bot permissions: permissions.md
@@ -92,7 +101,8 @@ extra:
     discord shot caller bot, discord voice relay bot, discord voice command system,
     gaming guild voice bot, cross-server voice relay, multi-squad voice coordination,
     pvp voice comms, guild war voice bot, raid voice relay, tactical voice communication,
-    free shot caller bot, paid shot caller alternative, free discord voice bot, self-hosted discord bot
+    free shot caller bot, paid shot caller alternative, discord shotcaller bot, free shotcaller bot,
+    free discord voice bot, self-hosted discord bot
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/sealbro/go-discord-caller

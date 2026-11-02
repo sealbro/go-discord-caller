@@ -7,13 +7,14 @@ description: >-
   encryption, with no plan tiers.
 keywords: >-
   free shot caller bot, source-available shot caller bot, self-hosted shot caller bot,
-  paid shot caller alternative, discord shot caller bot, self-hosted discord voice relay,
+  paid shot caller alternative, discord shot caller bot, free shotcaller bot,
+  discord shotcaller bot, self-hosted discord voice relay,
   discord voice coordination bot, free discord voice relay
 ---
 
 # A Free Shot-Caller Bot vs Paid Shot-Caller Services
 
-Most Discord shot-caller bots are paid, hosted services — a "speak once, reach every squad" workflow gated behind a monthly subscription, with tiers that cap how many servers and parties you can use. **go-discord-caller** gives you the same workflow for free: it's source-available and self-hosted, so you run it with your own Discord bot tokens with no plan tiers, no party limits, and end-to-end encrypted audio.
+Most Discord shot-caller and shotcaller bots are paid, hosted services — a "speak once, reach every squad" workflow gated behind a monthly subscription, with tiers that cap how many servers and parties you can use. **go-discord-caller** gives you the same workflow for free: it's source-available and self-hosted, so you run it with your own Discord bot tokens with no plan tiers, no party limits, and end-to-end encrypted audio.
 
 [:simple-discord: Add the hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576){ .md-button .md-button--primary }
 

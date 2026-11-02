@@ -1,0 +1,26 @@
+# go-discord-caller
+
+> Free, source-available Discord shot caller and voice relay bot written in Go. One caller's voice is relayed live to many squad voice channels across one or many Discord servers, with mix-minus conference mode and DAVE end-to-end encryption. Free to self-host (Elastic License 2.0); a free hosted bot has limited speakers.
+
+## Docs
+
+- [Home](https://go-discord-caller.sealbro.dev/): overview, modes, setup
+- [Free vs paid shot-caller bots](https://go-discord-caller.sealbro.dev/free-shot-caller-bot/)
+- [How it works](https://go-discord-caller.sealbro.dev/voice-flow/)
+- [Audio latency](https://go-discord-caller.sealbro.dev/latency/)
+- [Bot permissions](https://go-discord-caller.sealbro.dev/permissions/)
+
+## Guides
+
+- [Can a Discord bot be in multiple voice channels?](https://go-discord-caller.sealbro.dev/guides/bot-in-multiple-voice-channels/)
+- [TeamSpeak and Mumble alternative](https://go-discord-caller.sealbro.dev/guides/teamspeak-alternative/)
+- [Throne and Liberty](https://go-discord-caller.sealbro.dev/guides/throne-and-liberty-shot-caller-bot/)
+- [Albion Online](https://go-discord-caller.sealbro.dev/guides/albion-online-shot-caller-bot/)
+- [Guild Wars 2](https://go-discord-caller.sealbro.dev/guides/guild-wars-2-shot-caller-bot/)
+- [World of Warcraft](https://go-discord-caller.sealbro.dev/guides/world-of-warcraft-shot-caller-bot/)
+- [Where Winds Meet](https://go-discord-caller.sealbro.dev/guides/where-winds-meet-shot-caller-bot/)
+- [Aion 2](https://go-discord-caller.sealbro.dev/guides/aion-2-shot-caller-bot/)
+
+## Source
+
+- [GitHub](https://github.com/sealbro/go-discord-caller)

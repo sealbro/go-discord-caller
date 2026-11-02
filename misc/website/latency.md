@@ -6,7 +6,7 @@ description: >-
   go-discord-caller.
 keywords: >-
   discord voice bot latency, discord audio delay, voice relay latency,
-  opus frame latency, discord shot caller delay
+  opus frame latency, discord shot caller delay, discord shotcaller delay
 ---
 
 --8<-- "docs/LATENCY.md"

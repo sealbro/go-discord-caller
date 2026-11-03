@@ -7003,7 +7003,38 @@
                   },
                   "unit": "ms"
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "/ avg$/"
+                    },
+                    "properties": [
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "shades",
+                          "fixedColor": "blue"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byRegexp",
+                      "options": "/ max$/"
+                    },
+                    "properties": [
+                      {
+                        "id": "color",
+                        "value": {
+                          "mode": "shades",
+                          "fixedColor": "orange"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "options": {
                 "annotations": {

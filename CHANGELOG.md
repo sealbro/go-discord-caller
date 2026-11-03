@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Voice server RTT metric**: `gdc_voice_server_latency_milliseconds` reports the voice websocket heartbeat round trip per bot, guild and region — the network leg audio takes, unlike the gateway latency gauge.
+
 ### Fixed
 - **`/setup` right after a restart**: the Bind Speakers page no longer shows no speakers while startup seeding is still running. `/setup` now seeds the guild it is opened in, and startup seeds several guilds at once instead of one after another.
 

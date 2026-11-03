@@ -2,9 +2,12 @@ package pool
 
 import (
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
@@ -54,4 +57,57 @@ func ForgetVoiceRegion(botID, guildID snowflake.ID) {
 	if m, ok := regionMetrics.Load(botID); ok {
 		m.(*telemetry.VoiceRegionMetrics).ForgetRegion(guildID, botID)
 	}
+}
+
+// staleAfterHeartbeats is how many heartbeat intervals without an ACK it takes
+// for the last round trip to stop being reported.
+const staleAfterHeartbeats = 2
+
+// ackLatency holds the last heartbeat round trip measured on a voice conn.
+// disgo's Gateway.Latency is no substitute: it is read unsynchronised against
+// the heartbeat goroutine, and until the first ACK it reports the handshake
+// time as if it were a round trip.
+type ackLatency struct {
+	rtt      atomic.Int64 // nanoseconds
+	ackedAt  atomic.Int64 // Unix nanoseconds
+	interval atomic.Int64 // nanoseconds, from the gateway's Hello
+}
+
+// observe learns the heartbeat interval from Hello and times each ACK against
+// the send time its nonce carries, which disgo sets to the send time in Unix
+// milliseconds.
+func (a *ackLatency) observe(op voice.Opcode, data voice.GatewayMessageData) {
+	switch d := data.(type) {
+	case voice.GatewayMessageDataHello:
+		if op == voice.OpcodeHello {
+			a.interval.Store(int64(d.HeartbeatInterval * float64(time.Millisecond)))
+		}
+	case voice.GatewayMessageDataHeartbeatACK:
+		if op == voice.OpcodeHeartbeatACK {
+			now := time.Now()
+			a.rtt.Store(int64(now.Sub(time.UnixMilli(d.T))))
+			a.ackedAt.Store(now.UnixNano())
+		}
+	}
+}
+
+func (a *ackLatency) read() time.Duration {
+	interval := time.Duration(a.interval.Load())
+	if interval > 0 && time.Since(time.Unix(0, a.ackedAt.Load())) > staleAfterHeartbeats*interval {
+		return 0
+	}
+	return time.Duration(a.rtt.Load())
+}
+
+// watchVoiceLatency reports latency for as long as the conn exists, and returns
+// the function that stops it. It is tied to the conn rather than to the region
+// events: a reopened conn keeps its gateway, and the region is forgotten and
+// re-learned around it.
+func watchVoiceLatency(guildID, botID snowflake.ID, latency *ackLatency) func() {
+	m, ok := regionMetrics.Load(botID)
+	if !ok {
+		return func() {}
+	}
+	metrics := m.(*telemetry.VoiceRegionMetrics)
+	return metrics.SetLatencySource(guildID, botID, latency.read)
 }

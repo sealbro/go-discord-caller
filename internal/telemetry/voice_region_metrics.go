@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -33,11 +34,19 @@ import (
 // that timestamp back into the 1 the join expects. The consequence is that a
 // guild genuinely split across regions is reported under one of them — the
 // histograms are per guild, so there is no exact answer to give.
+//
+// gdc.voice.server.latency reports the voice websocket's heartbeat round trip to
+// the same server, under the same labels. The voice UDP stream goes to that
+// host, so this is the closest measure of the network leg that audio takes.
 type VoiceRegionMetrics struct {
 	gauge   metric.Int64ObservableGauge
+	latency metric.Float64ObservableGauge
 	mu      sync.RWMutex
 	regions map[voiceRegionKey]string
+	sources map[voiceRegionKey]*latencySource
 }
+
+type latencySource struct{ read func() time.Duration }
 
 type voiceRegionKey struct {
 	guildID snowflake.ID
@@ -46,6 +55,7 @@ type voiceRegionKey struct {
 
 func (v *VoiceRegionMetrics) init(meter metric.Meter) error {
 	v.regions = make(map[voiceRegionKey]string)
+	v.sources = make(map[voiceRegionKey]*latencySource)
 
 	gauge, err := meter.Int64ObservableGauge("gdc.voice.server.region",
 		metric.WithDescription("Info gauge for the Discord voice region a bot's voice connection landed on; value is always 1. Labels: guild_id, bot_id, region."),
@@ -55,22 +65,71 @@ func (v *VoiceRegionMetrics) init(meter metric.Meter) error {
 	}
 	v.gauge = gauge
 
-	_, err = meter.RegisterCallback(v.observe, gauge)
+	latency, err := meter.Float64ObservableGauge("gdc.voice.server.latency",
+		metric.WithDescription("Voice websocket heartbeat RTT to the Discord voice server a bot's connection landed on. Absent until the first heartbeat ACK. Labels: guild_id, bot_id, region."),
+		metric.WithUnit("ms"),
+	)
+	if err != nil {
+		return err
+	}
+	v.latency = latency
+
+	_, err = meter.RegisterCallback(v.observe, gauge, latency)
 	return err
 }
 
 func (v *VoiceRegionMetrics) observe(_ context.Context, o metric.Observer) error {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
+	type measurement struct {
+		attrs  metric.MeasurementOption
+		source func() time.Duration
+	}
 
+	v.mu.RLock()
+	measurements := make([]measurement, 0, len(v.regions))
 	for key, region := range v.regions {
-		o.ObserveInt64(v.gauge, 1, metric.WithAttributes(
+		attrs := metric.WithAttributes(
 			attribute.String("guild_id", key.guildID.String()),
 			attribute.String("bot_id", key.botID.String()),
 			attribute.String("region", region),
-		))
+		)
+		o.ObserveInt64(v.gauge, 1, attrs)
+		if source := v.sources[key]; source != nil {
+			measurements = append(measurements, measurement{attrs: attrs, source: source.read})
+		}
+	}
+	v.mu.RUnlock()
+
+	// The sources read disgo's gateway, so they run outside the lock.
+	for _, m := range measurements {
+		if latency := m.source(); latency > 0 {
+			o.ObserveFloat64(v.latency, float64(latency.Microseconds())/1000.0, m.attrs)
+		}
 	}
 	return nil
+}
+
+// SetLatencySource registers how to read the heartbeat RTT of the voice
+// connection a bot holds in a guild, and returns the function that drops it once
+// that connection is gone for good. A replacement connection may register before
+// the old one's teardown runs, so the returned function removes the source only
+// while it is still the current one. The reading is exported only while the
+// region is known, and only once it is positive: a source with nothing measured
+// yet reports zero or less.
+func (v *VoiceRegionMetrics) SetLatencySource(guildID, botID snowflake.ID, read func() time.Duration) (forget func()) {
+	key := voiceRegionKey{guildID: guildID, botID: botID}
+	source := &latencySource{read: read}
+
+	v.mu.Lock()
+	v.sources[key] = source
+	v.mu.Unlock()
+
+	return func() {
+		v.mu.Lock()
+		if v.sources[key] == source {
+			delete(v.sources, key)
+		}
+		v.mu.Unlock()
+	}
 }
 
 // SetRegion records the region carried by a VOICE_SERVER_UPDATE endpoint.

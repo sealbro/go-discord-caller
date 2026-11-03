@@ -48,22 +48,29 @@ func (w *voiceReadyWatchers) forget(conn voice.Conn) {
 var defaultReadyWatchers = newVoiceReadyWatchers()
 
 // newConn builds disgo's conn with the Ready dispatcher and a paced audio
-// receiver (see newPacedAudioReceiver) installed, and releases the conn's
-// ready watch, audio sender and audio receiver when disgo removes it. disgo
-// removes a conn it closes itself, such as on a voice-server disconnect, and a
-// later Leave then finds nothing to release. A reopen keeps the conn, and all
-// three.
+// receiver (see newPacedAudioReceiver) installed, and releases everything
+// attached to the conn — ready watch, audio sender, audio receiver and latency
+// source — when disgo removes it. disgo removes a conn it closes itself, such
+// as on a voice-server disconnect, and a later Leave then finds nothing to
+// release. A reopen keeps the conn and all of it.
 func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, removeConn func(), opts ...voice.ConnConfigOpt) voice.Conn {
 	var conn voice.Conn
+	var stopLatency func()
+	latency := &ackLatency{}
 	conn = voice.NewConn(guildID, userID, stateUpdate, func() {
 		removeConn()
+		stopLatency()
 		defaultReadyWatchers.forget(conn)
 		defaultSenders.Close(conn)
 		defaultReceivers.close(conn)
 	}, append(slices.Clip(opts),
-		voice.WithConnEventHandlerFunc(defaultReadyWatchers.handle),
+		voice.WithConnEventHandlerFunc(func(gw voice.Gateway, op voice.Opcode, seq int, data voice.GatewayMessageData) {
+			defaultReadyWatchers.handle(gw, op, seq, data)
+			latency.observe(op, data)
+		}),
 		voice.WithConnAudioReceiverCreateFunc(newPacedAudioReceiver),
 	)...)
+	stopLatency = watchVoiceLatency(guildID, userID, latency)
 	return conn
 }
 

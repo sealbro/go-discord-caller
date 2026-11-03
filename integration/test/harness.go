@@ -103,6 +103,7 @@ func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speak
 	metrics, _ := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
 	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics)
 	h.daveStalls.SetHandler(svc.OnEncryptStall)
+	h.Pool.SetFreshGatewayHandler(svc.OnSpeakerFreshGateway)
 
 	st.BindChannel(guildID, h.OwnerID, ownerChannelID)
 	st.BindRole(guildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)

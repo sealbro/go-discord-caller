@@ -5,10 +5,12 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo"
 	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
@@ -36,11 +38,12 @@ type Service struct {
 	poolClients map[snowflake.ID]*bot.Client
 	extraBots   map[snowflake.ID]extraBot // id → bot tracked for metrics only
 	// verification holds each bot's last fetched verification state.
-	verification map[snowflake.ID]telemetry.BotVerification
-	metrics      *telemetry.PoolMetrics
-	voiceRegion  *telemetry.VoiceRegionMetrics
-	daveStats    *dave.Stats
-	daveStalls   *dave.EncryptStalls
+	verification   map[snowflake.ID]telemetry.BotVerification
+	metrics        *telemetry.PoolMetrics
+	voiceRegion    *telemetry.VoiceRegionMetrics
+	daveStats      *dave.Stats
+	daveStalls     *dave.EncryptStalls
+	onFreshGateway atomic.Pointer[func(botUserID snowflake.ID)]
 }
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
@@ -73,12 +76,28 @@ func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) 
 	s.mu.Unlock()
 }
 
+// SetFreshGatewayHandler registers f to run whenever a speaker's gateway starts
+// a brand-new session. Discord drops a bot's voice state with its old session,
+// so a bot that was in a voice channel is no longer in it, and no voice event
+// follows until Discord reaps the old session minutes later. Set after
+// construction because the manager is built after the pool.
+func (s *Service) SetFreshGatewayHandler(f func(botUserID snowflake.ID)) {
+	s.onFreshGateway.Store(&f)
+}
+
+func (s *Service) freshGateway(botUserID snowflake.ID) {
+	if f := s.onFreshGateway.Load(); f != nil {
+		(*f)(botUserID)
+	}
+}
+
 // newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls) (*bot.Client, error) {
+func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, freshGateway func(snowflake.ID)) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
 	return disgo.New(token,
 		bot.WithEventListeners(VoiceRegionListeners(botUserID, voiceRegion)...),
+		bot.WithEventListeners(bot.NewListenerFunc(func(*events.Ready) { freshGateway(botUserID) })),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
@@ -116,7 +135,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			client, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls)
+			client, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls, s.freshGateway)
 			if err != nil {
 				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
@@ -233,7 +252,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	s.metrics.ReconnectAttempt(ctx, botUserID)
 
-	newClient, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls)
+	newClient, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls, s.freshGateway)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),

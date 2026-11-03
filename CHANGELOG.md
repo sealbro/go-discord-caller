@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Voice server RTT metric**: `gdc_voice_server_latency_milliseconds` reports the voice websocket heartbeat round trip per bot, guild and region — the network leg audio takes, unlike the gateway latency gauge.
 
 ### Fixed
+- **Silent speaker after a gateway reconnect**: a speaker bot whose gateway reconnected with a new session mid-raid stayed silent until Discord expired the old session minutes later. It is now rejoined to its channel as soon as the gateway is back.
 - **`/setup` right after a restart**: the Bind Speakers page no longer shows no speakers while startup seeding is still running. `/setup` now seeds the guild it is opened in, and startup seeds several guilds at once instead of one after another.
 
 ## [0.13.0] - 2026-11-01

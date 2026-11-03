@@ -72,6 +72,29 @@ func encryptStallTarget(selfUserID godave.UserID, conn godave.Callbacks) (guildI
 	return vc.GuildID(), botUserID, true
 }
 
+// OnSpeakerFreshGateway rejoins a speaker whose gateway started a new session.
+// A new session cannot keep the old session's voice state, yet Discord sends
+// no voice event for it until the old session expires, so the bot would sit
+// silent in a dead voice connection. Guilds the bot has no binding in are
+// no-ops inside ReconnectBotChannel.
+func (m *Service) OnSpeakerFreshGateway(botUserID snowflake.ID) {
+	for _, guildID := range m.activeSessionGuilds() {
+		go m.ReconnectBotChannel(context.Background(), guildID, botUserID)
+	}
+}
+
+func (m *Service) activeSessionGuilds() []snowflake.ID {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var ids []snowflake.ID
+	for guildID, st := range m.statuses {
+		if st.HasActiveSession() {
+			ids = append(ids, guildID)
+		}
+	}
+	return ids
+}
+
 // ReconnectBotChannel reconnects a bot to its bound voice channel in the given guild.
 // Called when a bot's voice connection drops or is moved away during an active session.
 // No-op if there is no active session, the bot has no bound channel, or a reconnect

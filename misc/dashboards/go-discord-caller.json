@@ -6743,6 +6743,292 @@
             "version": "13.1.0-24779284961"
           }
         }
+      },
+      "panel-55": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "100 * sum by (region, airport) (label_replace(count_over_time(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\", region=~\"$region\"}[$__range]), \"airport\", \"$1\", \"region\", \"^[a-z]+-([a-z]{3})$\")) / scalar(sum(sum by (region, airport) (label_replace(count_over_time(gdc_voice_server_region{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\", region=~\"$region\"}[$__range]), \"airport\", \"$1\", \"region\", \"^[a-z]+-([a-z]{3})$\"))))",
+                        "instant": true,
+                        "legendFormat": "{{region}}",
+                        "range": false,
+                        "format": "table"
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": [
+                {
+                  "kind": "Transformation",
+                  "group": "formatString",
+                  "spec": {
+                    "options": {
+                      "stringField": "airport",
+                      "substringStart": 0,
+                      "substringEnd": 0,
+                      "format": "Upper Case"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "description": "Where the Discord voice servers are: each marker is a voice region (the airport code in the media server hostname), coloured by its share of voice-connection time over the selected range. Legacy city-named regions without a code are not plotted.",
+          "id": 55,
+          "links": [],
+          "title": "Voice Server Map",
+          "vizConfig": {
+            "kind": "VizConfig",
+            "group": "geomap",
+            "version": "13.1.0-24779284961",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "continuous-GrYlRd"
+                  },
+                  "unit": "percent",
+                  "min": 0,
+                  "max": 100,
+                  "decimals": 1
+                },
+                "overrides": []
+              },
+              "options": {
+                "view": {
+                  "id": "zero",
+                  "lat": 20,
+                  "lon": 10,
+                  "zoom": 1.5,
+                  "allLayers": true
+                },
+                "controls": {
+                  "showZoom": true,
+                  "mouseWheelZoom": false,
+                  "showAttribution": true
+                },
+                "basemap": {
+                  "type": "default",
+                  "name": "Basemap",
+                  "config": {}
+                },
+                "tooltip": {
+                  "mode": "details"
+                },
+                "layers": [
+                  {
+                    "type": "markers",
+                    "name": "Voice regions",
+                    "tooltip": true,
+                    "location": {
+                      "mode": "lookup",
+                      "lookup": "airport",
+                      "gazetteer": "public/gazetteer/airports.geojson"
+                    },
+                    "config": {
+                      "showLegend": true,
+                      "style": {
+                        "color": {
+                          "field": "Value",
+                          "fixed": "green"
+                        },
+                        "opacity": 0.8,
+                        "size": {
+                          "fixed": 12,
+                          "min": 12,
+                          "max": 12
+                        },
+                        "text": {
+                          "field": "region",
+                          "fixed": "",
+                          "mode": "field",
+                          "offsetY": -18
+                        },
+                        "textConfig": {
+                          "fontSize": 12,
+                          "offsetY": -16,
+                          "textAlign": "center",
+                          "textBaseline": "middle"
+                        },
+                        "symbol": {
+                          "mode": "fixed",
+                          "fixed": "img/icons/marker/circle.svg"
+                        },
+                        "rotation": {
+                          "fixed": 0,
+                          "max": 360,
+                          "min": -360,
+                          "mode": "mod"
+                        },
+                        "symbolAlign": {
+                          "horizontal": "center",
+                          "vertical": "center"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      },
+      "panel-56": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "avg by (region) (gdc_voice_server_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\", region=~\"$region\"})",
+                        "instant": false,
+                        "legendFormat": "{{region}} avg",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max by (region) (gdc_voice_server_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\", region=~\"$region\"})",
+                        "instant": false,
+                        "legendFormat": "{{region}} max",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Voice websocket heartbeat RTT to the Discord voice server, per region: average and worst bot. This is the network leg audio takes, unlike gateway latency.",
+          "id": 56,
+          "links": [],
+          "title": "Voice Server Latency by Region",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "smooth",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 50
+                      },
+                      {
+                        "color": "red",
+                        "value": 100
+                      }
+                    ]
+                  },
+                  "unit": "ms"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
       }
     },
     "layout": {
@@ -7436,6 +7722,32 @@
               "width": 12,
               "x": 12,
               "y": 180
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-55"
+              },
+              "height": 12,
+              "width": 12,
+              "x": 0,
+              "y": 188
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-56"
+              },
+              "height": 12,
+              "width": 12,
+              "x": 12,
+              "y": 188
             }
           }
         ]

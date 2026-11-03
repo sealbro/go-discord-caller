@@ -116,3 +116,21 @@ func TestBotOnline_FollowsGuildMembership(t *testing.T) {
 		t.Errorf("after leaving another guild: guild %s dropped from gdc.bot.online", otherGuildID)
 	}
 }
+
+func TestForgetGuild_DropsGuildState(t *testing.T) {
+	t.Parallel()
+	h := newBotOnlineHarness(t)
+	h.joinGuild(testGuildID)
+	h.joinGuild(otherGuildID)
+
+	h.svc.ForgetGuild(context.Background(), testGuildID)
+
+	h.svc.mu.RLock()
+	defer h.svc.mu.RUnlock()
+	if _, kept := h.svc.statuses[testGuildID]; kept {
+		t.Errorf("guild %s state kept after the bot left", testGuildID)
+	}
+	if _, kept := h.svc.statuses[otherGuildID]; !kept {
+		t.Errorf("guild %s state dropped by another guild's leave", otherGuildID)
+	}
+}

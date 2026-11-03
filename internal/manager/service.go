@@ -282,6 +282,9 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 	m.mu.RLock()
 	snap := make([]guildEntry, 0, len(m.statuses))
 	for guildID, st := range m.statuses {
+		if _, joined := m.ownerClient.Caches.Guild(guildID); !joined {
+			continue
+		}
 		var inGuild []snowflake.ID
 		for _, botID := range speakerIDs {
 			if _, ok := st.Speakers[botID]; ok {

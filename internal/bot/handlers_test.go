@@ -105,6 +105,8 @@ func (f *fakeManager) TrySeedMember(g, u snowflake.ID) {
 	defer f.mu.Unlock()
 	f.trySeedCalls = append(f.trySeedCalls, snowflakePair{g, u})
 }
+func (f *fakeManager) ForgetGuild(context.Context, snowflake.ID) {}
+
 func (f *fakeManager) RemoveSpeaker(g, u snowflake.ID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -83,6 +83,7 @@ type SeedManager interface {
 	SeedExistingSpeakers(guildIDs []snowflake.ID)
 	TrySeedMember(guildID, newUserID snowflake.ID)
 	RemoveSpeaker(guildID, userID snowflake.ID)
+	ForgetGuild(ctx context.Context, guildID snowflake.ID)
 }
 
 // LifecycleManager handles startup hooks and graceful shutdown.

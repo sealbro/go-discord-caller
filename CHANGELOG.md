@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-11-03
+
 ### Added
 - **Voice server RTT metric**: `gdc_voice_server_latency_milliseconds` reports the voice websocket heartbeat round trip per bot, guild and region — the network leg audio takes, unlike the gateway latency gauge.
 

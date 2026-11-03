@@ -175,6 +175,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	poolSvc := pool.NewService(&metrics.Pool, &metrics.Voice, daveStats, daveStalls)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
 	daveStalls.SetHandler(managerSvc.OnEncryptStall)
+	poolSvc.SetFreshGatewayHandler(managerSvc.OnSpeakerFreshGateway)
 	managerSvc.SetSessionIdleTimeout(cfg.SessionIdleTimeout)
 
 	bundle, err := i18n.NewBundle()

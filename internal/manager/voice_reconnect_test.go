@@ -8,6 +8,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
@@ -138,5 +139,17 @@ func TestSessionTeardownForgetsStallBackoff(t *testing.T) {
 	rs.clearGuild(testGuildID, []snowflake.ID{testBotID}, testBotID+1)
 	if !rs.stallRejoinDue(testGuildID, testBotID, now.Add(time.Second)) {
 		t.Error("a stall in the next raid was held back by the previous raid's backoff")
+	}
+}
+
+func TestFreshGatewayTargetsOnlyGuildsWithActiveSessions(t *testing.T) {
+	m := newTestService(true)
+	idleGuild := snowflake.ID(1430511050704289836)
+	m.statuses[idleGuild] = &guild.Status{}
+
+	got := m.activeSessionGuilds()
+
+	if len(got) != 1 || got[0] != testGuildID {
+		t.Fatalf("activeSessionGuilds = %v, want only %s", got, testGuildID)
 	}
 }

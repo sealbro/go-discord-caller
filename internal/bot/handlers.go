@@ -21,6 +21,7 @@ func EventListeners(managerSvc ManagerService, syncGuild GuildCommandSyncer) []b
 	return []bot.EventListener{
 		bot.NewListenerFunc(onReady(managerSvc)),
 		bot.NewListenerFunc(onGuildJoin(managerSvc, syncGuild)),
+		bot.NewListenerFunc(onGuildLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberUpdate(managerSvc)),
@@ -61,6 +62,14 @@ func onGuildJoin(m ManagerService, syncGuild GuildCommandSyncer) func(*events.Gu
 			go syncGuild(context.Background(), e.GuildID)
 		}
 		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})
+	}
+}
+
+// onGuildLeave is called when the owner bot is removed from a guild. It does
+// not fire for a guild that merely becomes unavailable during an outage.
+func onGuildLeave(m ManagerService) func(*events.GuildLeave) {
+	return func(e *events.GuildLeave) {
+		go m.ForgetGuild(context.Background(), e.GuildID)
 	}
 }
 

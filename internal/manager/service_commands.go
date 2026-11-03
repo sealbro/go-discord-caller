@@ -1,6 +1,8 @@
 package manager
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -133,6 +135,18 @@ func (m *Service) ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) e
 	sp.Enabled = enabled
 	m.store.SetSpeakerEnabled(guildID, speakerID, enabled)
 	return nil
+}
+
+// ForgetGuild stops the guild's raid and drops its state after the owner bot
+// leaves the server.
+func (m *Service) ForgetGuild(ctx context.Context, guildID snowflake.ID) {
+	if err := m.StopVoiceRaid(ctx, guildID); err != nil && !errors.Is(err, ErrNoActiveSession) {
+		slog.Warn("failed to stop raid of a guild the bot left",
+			slog.String("guildID", guildID.String()), slog.Any("err", err))
+	}
+	m.mu.Lock()
+	delete(m.statuses, guildID)
+	m.mu.Unlock()
 }
 
 // RemoveSpeaker removes a speaker from a guild's status when they leave the server.

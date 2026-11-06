@@ -168,3 +168,53 @@ func TestSourceDepthRecordsFramesAlreadyBuffered(t *testing.T) {
 		}
 	}
 }
+
+func counterTotal(t *testing.T, reader *sdkmetric.ManualReader, name string) (n int64) {
+	t.Helper()
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	for _, sm := range rm.ScopeMetrics {
+		for _, md := range sm.Metrics {
+			if sum, ok := md.Data.(metricdata.Sum[int64]); ok && md.Name == name {
+				for _, dp := range sum.DataPoints {
+					n += dp.Value
+				}
+			}
+		}
+	}
+	return n
+}
+
+// A frame fanned out to several destinations evicts in each of them, which the
+// per-buffer drop callback counts separately; the lost-frame counter counts the
+// frame once.
+func TestSourceFrameLostIsCountedOncePerFrame(t *testing.T) {
+	const lostName = "gdc.opus.source.frames.lost.total"
+	var evictions int
+	destinations := []*SourceBuffer{
+		NewSourceBuffer(func() { evictions++ }),
+		NewSourceBuffer(func() { evictions++ }),
+	}
+	r, reader := receiverWithMetrics(t, FanoutInstall{
+		SourceTargets: map[snowflake.ID][]*SourceBuffer{7: destinations},
+	})
+	frames := generateTestFrames(t, 440, audioSourceCap+1, testAmplitude)
+
+	for i, f := range frames[:audioSourceCap] {
+		receiveAt(t, r, 7, uint32(i*960), f.opus)
+	}
+	if got := counterTotal(t, reader, lostName); got != 0 {
+		t.Fatalf("lost = %d after %d frames that fit, want 0", got, audioSourceCap)
+	}
+
+	receiveAt(t, r, 7, uint32(audioSourceCap*960), frames[audioSourceCap].opus)
+
+	if evictions != len(destinations) {
+		t.Fatalf("evictions = %d, want one per destination (%d)", evictions, len(destinations))
+	}
+	if got := counterTotal(t, reader, lostName); got != 1 {
+		t.Errorf("lost = %d, want 1: one frame was lost however many destinations it fanned out to", got)
+	}
+}

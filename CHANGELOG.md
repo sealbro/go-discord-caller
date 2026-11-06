@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Lost frames per source**: `gdc_opus_source_frames_lost_total` counts each frame lost to a full mixer input once, however many channels it goes to; the dropped-frames metric counts each channel separately.
+
 ## [0.13.1] - 2026-11-03
 
 ### Added

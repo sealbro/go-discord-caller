@@ -14,7 +14,7 @@ import (
 // AudioSenderRegistry tracks the live audio sender behind each voice.Conn so
 // teardown can stop it.
 //
-// disgo (v0.19.3 through master 2d889db) never closes the audio sender when a
+// disgo (v0.19.3 through v0.20.0) never closes the audio sender when a
 // connection is closed:
 //
 //	func (c *connImpl) Close(ctx context.Context) {
@@ -51,7 +51,7 @@ import (
 // func, which is the same Conn disgo later removes — so newConn's removal hook
 // can close exactly the right sender.
 //
-// UPSTREAM(disgo 2d889db): Conn.Close leaves the audio sender running.
+// UPSTREAM(disgo v0.20.0): Conn.Close leaves the audio sender running.
 type AudioSenderRegistry struct {
 	mu      sync.Mutex
 	senders map[voice.Conn]*safeAudioSender
@@ -194,7 +194,8 @@ var senderStartTimeout = 2 * time.Second
 // panic, and cannot race the sender goroutine's start-up. Everything except
 // Close is promoted from the embedded interface.
 //
-// UPSTREAM(disgo 2d889db): defaultAudioSender.Close cancels a func Open has not set yet.
+// UPSTREAM(disgo v0.20.0): defaultAudioSender.Close cancels a func Open has not set yet.
+// Related: https://github.com/disgoorg/disgo/pull/604.
 type safeAudioSender struct {
 	voice.AudioSender
 	once    sync.Once

@@ -3,7 +3,7 @@ module github.com/sealbro/go-discord-caller
 go 1.27.0
 
 require (
-	github.com/disgoorg/disgo v0.19.7-0.20261023185300-5bf95ebe8a0d
+	github.com/disgoorg/disgo v0.20.0
 	github.com/disgoorg/godave v0.3.0
 	github.com/disgoorg/godave/golibdave v0.3.0
 	github.com/disgoorg/omit v1.0.0
@@ -49,7 +49,7 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20261026165753-2ffab32bce7e // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261026165753-2ffab32bce7e // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20261104224025-d1e00e9f33ab // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261104224025-d1e00e9f33ab // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

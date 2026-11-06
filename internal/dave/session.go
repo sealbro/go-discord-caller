@@ -80,6 +80,7 @@ const EncryptStallFrames = 500
 //
 // UPSTREAM(golibdave v0.3.0): executing a transition before the MLS group is
 // established leaves the encryptor with no key ratchet.
+// Fix proposed in https://github.com/disgoorg/godave/pull/5.
 func WithEncryptStall(frames int, notify EncryptStallFunc) Option {
 	return func(o *options) {
 		o.stallFrames = frames

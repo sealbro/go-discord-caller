@@ -54,7 +54,7 @@ func (readySession) Ready() bool { return true }
 
 func (readyConn) DAVE() godave.Session { return readySession{} }
 
-// TestDisgoSpinsOnClosedProvider is a tripwire on disgo (v0.19.3 through 2d889db), not a test of
+// TestDisgoSpinsOnClosedProvider is a tripwire on disgo (v0.19.3 through v0.20.0), not a test of
 // our own behaviour.
 //
 // It documents the upstream half of the 2026-09-07 incident, where one speaker
@@ -80,7 +80,7 @@ func (readyConn) DAVE() godave.Session { return readySession{} }
 // When this test fails, disgo has stopped spinning on provider errors and the
 // registry workaround can be deleted.
 //
-// UPSTREAM-TRIPWIRE(disgo 2d889db): delete AudioSenderRegistry.
+// UPSTREAM-TRIPWIRE(disgo v0.20.0): delete AudioSenderRegistry.
 func TestDisgoSpinsOnClosedProvider(t *testing.T) {
 	t.Parallel()
 

@@ -41,7 +41,7 @@ import (
 // Only Ready is watched, not Resumed: a successful resume keeps the existing
 // UDP socket and needs no repair.
 //
-// UPSTREAM(disgo 2d889db): a transparent voice re-identify swaps in a new UDP conn.
+// UPSTREAM(disgo v0.20.0): a transparent voice re-identify swaps in a new UDP conn.
 func (m *Service) watchVoiceReady(guildID, botUserID snowflake.ID, conn voice.Conn) {
 	pool.OnVoiceReady(conn, func() {
 		go m.reapplyAfterVoiceReady(guildID, botUserID, conn)

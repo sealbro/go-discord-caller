@@ -47,8 +47,8 @@ func (w *voiceReadyWatchers) forget(conn voice.Conn) {
 
 var defaultReadyWatchers = newVoiceReadyWatchers()
 
-// newConn builds disgo's conn with the Ready dispatcher and a paced audio
-// receiver (see newPacedAudioReceiver) installed, and releases everything
+// newConn builds disgo's conn with the Ready dispatcher and an owned audio
+// receiver (see newOwnedAudioReceiver) installed, and releases everything
 // attached to the conn — ready watch, audio sender, audio receiver and latency
 // source — when disgo removes it. disgo removes a conn it closes itself, such
 // as on a voice-server disconnect, and a later Leave then finds nothing to
@@ -68,18 +68,17 @@ func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, re
 			defaultReadyWatchers.handle(gw, op, seq, data)
 			latency.observe(op, data)
 		}),
-		voice.WithConnAudioReceiverCreateFunc(newPacedAudioReceiver),
+		voice.WithConnAudioReceiverCreateFunc(newOwnedAudioReceiver),
 	)...)
 	stopLatency = watchVoiceLatency(guildID, userID, latency)
 	return conn
 }
 
-// VoiceConnOpt installs newConn as a bot's voice conn factory: it paces the
-// audio receiver, dispatches voice Ready to OnVoiceReady watchers and, when
-// disgo removes a conn, forgets its watch and stops its audio sender and
-// receiver. Every client must pass it, or its receivers spin while DAVE is not
-// ready and outlive their conn, OnVoiceReady never fires for its conns, and
-// SafeAudioSenderOpt's senders are never stopped.
+// VoiceConnOpt installs newConn as a bot's voice conn factory: it dispatches
+// voice Ready to OnVoiceReady watchers and, when disgo removes a conn, forgets
+// its watch and stops its audio sender and receiver. Every client must pass it,
+// or its receivers outlive their conn, OnVoiceReady never fires for its conns,
+// and SafeAudioSenderOpt's senders are never stopped.
 func VoiceConnOpt() voice.ManagerConfigOpt {
 	return voice.WithConnCreateFunc(newConn)
 }

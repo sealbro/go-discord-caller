@@ -42,10 +42,9 @@ func (discardReceiver) CleanupUser(snowflake.ID)                           {}
 func (discardReceiver) Close()                                             {}
 
 // Production, 2026-10-25: a host running one raid sat at 100% CPU for hours
-// and every bot's gateway heartbeat rose from ~110 ms to ~545 ms. disgo's
-// receive loop has no pacing of its own and returns straight away while the
-// conn's DAVE session is not ready, so a conn whose session never gets ready
-// spins a core.
+// and every bot's gateway heartbeat rose from ~110 ms to ~545 ms. Until disgo
+// v0.20.0 the receive loop returned straight away while the conn's DAVE
+// session was not ready, so a conn whose session never got ready spun a core.
 func TestAudioReceiverDoesNotSpinWhileDaveNotReady(t *testing.T) {
 	t.Parallel()
 
@@ -122,27 +121,39 @@ func TestAudioReceiverStoppedWhenConnLeaves(t *testing.T) {
 	}
 }
 
-// UPSTREAM-TRIPWIRE(disgo 5bf95eb): when this fails, disgo paces the receive
-// loop itself and newPacedAudioReceiver is obsolete.
-func TestDisgoAudioReceiverStillSpinsWhileDaveNotReady(t *testing.T) {
+// UPSTREAM-TRIPWIRE(disgo v0.20.0): when this fails, disgo stops the audio
+// receiver when it closes the conn and newOwnedAudioReceiver is obsolete.
+func TestDisgoAudioReceiverStillOutlivesItsConn(t *testing.T) {
 	t.Parallel()
+
+	const (
+		guildID   = snowflake.ID(1430511050704289835)
+		channelID = snowflake.ID(1430511051383767101)
+	)
 
 	session := &notReadyDaveSession{release: make(chan struct{})}
 	t.Cleanup(func() { close(session.release) })
 
-	receiver := voice.NewAudioReceiver(slog.New(slog.DiscardHandler), discardReceiver{}, daveConn{dave: session})
-	receiver.Open()
+	vm := voice.NewManager(
+		func(context.Context, snowflake.ID, *snowflake.ID, bool, bool) error { return nil },
+		snowflake.ID(1529403555667251310),
+		voice.WithDaveSessionCreateFunc(func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session {
+			return session
+		}),
+		voice.WithLogger(slog.New(slog.DiscardHandler)),
+	)
+	vm.CreateConn(guildID).SetOpusFrameReceiver(discardReceiver{})
+
+	NewGuildVoice(vm, channelID).Leave(context.Background(), guildID)
+	if vm.GetConn(guildID) != nil {
+		t.Fatal("precondition failed: Leave did not remove the conn")
+	}
 
 	time.Sleep(50 * time.Millisecond)
-	if got := session.checks.Load(); got < 1000 {
-		t.Errorf("disgo's audio receiver checked DAVE readiness only %d times in 50ms — it no longer "+
-			"busy-loops, so newPacedAudioReceiver should be removed", got)
+	before := session.checks.Load()
+	time.Sleep(200 * time.Millisecond)
+	if session.checks.Load() == before {
+		t.Error("disgo's audio receiver stopped after its conn was closed, so newOwnedAudioReceiver " +
+			"and the receiver registry should be removed")
 	}
 }
-
-type daveConn struct {
-	voice.Conn
-	dave godave.Session
-}
-
-func (c daveConn) DAVE() godave.Session { return c.dave }

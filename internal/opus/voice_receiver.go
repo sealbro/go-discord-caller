@@ -358,12 +358,18 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 	// Each sourceTarget gets its own PCM and Opus copy. SourceBuffer.Feed
 	// handles overflow internally (drops oldest + calls its drop func).
 	// No select/done check needed: Feed is synchronous and non-blocking.
+	evicted := false
 	for _, t := range sourceTargets {
 		pcm := GetPCM()[:n*MixerChannels]
 		copy(pcm, v.scratch[:n*MixerChannels])
 		opusCopy := getRecvFrame(len(opusBytes))
 		copy(opusCopy, opusBytes)
-		v.metrics.RecordSourceDepth(t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt}))
+		ahead := t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt})
+		v.metrics.RecordSourceDepth(ahead)
+		evicted = evicted || ahead == audioSourceCap
+	}
+	if evicted {
+		v.metrics.RecordSourceFramesLost()
 	}
 }
 

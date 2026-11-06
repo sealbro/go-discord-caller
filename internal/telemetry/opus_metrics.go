@@ -18,6 +18,7 @@ type OpusMetrics struct {
 	copyQueueDepth    metric.Int64Histogram
 	receiveInterval   metric.Float64Histogram
 	sourceDepth       metric.Int64Histogram
+	sourceFramesLost  metric.Int64Counter
 }
 
 func (o *OpusMetrics) init(meter metric.Meter) (err error) {
@@ -82,6 +83,11 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		metric.WithDescription("Frames already waiting in a user's mixer input when a new frame is fed; 3 means the feed evicted the oldest"),
 		metric.WithUnit("{frame}"),
 		metric.WithExplicitBucketBoundaries(0, 1, 2, 3),
+	); err != nil {
+		return
+	}
+	if o.sourceFramesLost, err = meter.Int64Counter("gdc.opus.source.frames.lost.total",
+		metric.WithDescription("Received frames that evicted an older frame from at least one mixer input; counted once per frame however many destinations it fans out to"),
 	); err != nil {
 		return
 	}
@@ -206,4 +212,13 @@ func (r OpusRecorder) RecordPipelineLatency(ms float64) {
 		return
 	}
 	r.m.pipelineLatency.Record(context.Background(), ms, r.attr)
+}
+
+// RecordSourceFramesLost counts one received frame that evicted an older frame
+// from at least one mixer input it was fed into.
+func (r OpusRecorder) RecordSourceFramesLost() {
+	if r.m == nil {
+		return
+	}
+	r.m.sourceFramesLost.Add(context.Background(), 1, r.attr)
 }

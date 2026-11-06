@@ -93,7 +93,8 @@ the opus pipeline via `FrameDropper`.
 | `gdc.voice.session.start.total`     | Counter       | `gdc_voice_session_start_total`     | `guild_id` | Voice raid starts. |
 | `gdc.voice.session.stop.total`      | Counter       | `gdc_voice_session_stop_total`      | `guild_id` | Voice raid stops. |
 | `gdc.session.speakers`              | Gauge         | `gdc_session_speakers`              | `guild_id` | Speakers (pool speaker bots plus the owner bot, if it joined) in the active raid; reset to `0` on stop. |
-| `gdc.fanout.frames.dropped.total`   | Counter       | `gdc_fanout_frames_dropped_total`   | `guild_id`, `path`, `bot_id` | Opus frames dropped on full channels. `path`: `mixer` / `direct` / `channel_mixer` / `relay_bridge` / `provider` / `receiver`. `bot_id` is the bot whose output queue was full; set on `direct` and `channel_mixer` only. |
+| `gdc.fanout.frames.dropped.total`   | Counter       | `gdc_fanout_frames_dropped_total`   | `guild_id`, `path`, `bot_id` | Opus frames dropped on full channels, per destination buffer. `path`: `mixer` / `direct` / `channel_mixer` / `relay_bridge` / `provider` / `receiver`. `bot_id` is the bot whose output queue was full; set on `direct` and `channel_mixer` only. |
+| `gdc.opus.source.frames.lost.total` | Counter       | `gdc_opus_source_frames_lost_total` | `guild_id` | Frames fed through the voice receiver that evicted an older frame from at least one mixer input, counted once per frame; relay-fed inputs are not included. `path="mixer"` above counts each destination's eviction separately, so with several destination channels it overstates how much speech was lost; use this one for that. |
 | `gdc.session.route_transitions.total` | Counter     | `gdc_session_route_transitions_total` | `guild_id`, `from`, `to` | Auto-router source-mode transitions. `from`/`to`: `off` / `copy` / `mix`. |
 
 ---

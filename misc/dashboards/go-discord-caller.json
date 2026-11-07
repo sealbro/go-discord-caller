@@ -1737,9 +1737,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "rate(gdc_pool_reconnect_attempts_total{origin_prometheus=~\"$origin_prometheus\"}[5m])",
+                        "expr": "sum(increase(gdc_pool_reconnect_attempts_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval]))",
                         "instant": false,
-                        "legendFormat": "Attempts/s",
+                        "legendFormat": "Watchdog attempts",
                         "range": true
                       },
                       "version": "v0"
@@ -1755,14 +1755,32 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "rate(gdc_pool_reconnect_failures_total{origin_prometheus=~\"$origin_prometheus\"}[5m])",
+                        "expr": "sum(increase(gdc_pool_reconnect_failures_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval]))",
                         "instant": false,
-                        "legendFormat": "Failures/s",
+                        "legendFormat": "Watchdog failures",
                         "range": true
                       },
                       "version": "v0"
                     },
                     "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(increase(gdc_gateway_ready_total{origin_prometheus=~\"$origin_prometheus\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Owner READY (re-identifies)",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
                   }
                 }
               ],
@@ -1770,10 +1788,10 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Speaker watchdog reconnects and failures, plus the owner bot's gateway READY events (each one is an IDENTIFY; Discord resets the token after 1000 a day). Counts per interval.",
           "id": 21,
           "links": [],
-          "title": "Pool Reconnect Attempts / Failures",
+          "title": "Gateway Reconnects",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -1791,8 +1809,8 @@
                     "axisPlacement": "auto",
                     "barAlignment": 0,
                     "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 10,
+                    "drawStyle": "bars",
+                    "fillOpacity": 60,
                     "gradientMode": "none",
                     "hideFrom": {
                       "legend": false,
@@ -1801,7 +1819,7 @@
                     },
                     "insertNulls": false,
                     "lineInterpolation": "smooth",
-                    "lineWidth": 2,
+                    "lineWidth": 1,
                     "pointSize": 5,
                     "scaleDistribution": {
                       "type": "linear"
@@ -1831,7 +1849,8 @@
                       }
                     ]
                   },
-                  "unit": "cps"
+                  "unit": "short",
+                  "decimals": 0
                 },
                 "overrides": []
               },
@@ -7007,7 +7026,7 @@
               "transformations": []
             }
           },
-          "description": "Share of 5m samples in 14d where the owner bot and at least one speaker were connected. Missing samples count as down. Target 99.5%.",
+          "description": "Share of 5m samples in 14d where the owner bot and at least one speaker were connected. Missing samples count as down. Target 99%.",
           "id": 57,
           "links": [],
           "title": "SLO Availability (14d)",
@@ -7029,11 +7048,11 @@
                       },
                       {
                         "color": "yellow",
-                        "value": 0.99
+                        "value": 0.98
                       },
                       {
                         "color": "green",
-                        "value": 0.995
+                        "value": 0.99
                       }
                     ]
                   },
@@ -7079,7 +7098,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "1 - (1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[14d:5m])) / (14*24*12)) / 0.005",
+                        "expr": "1 - (1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[14d:5m])) / (14*24*12)) / 0.01",
                         "instant": true,
                         "legendFormat": "budget left",
                         "range": false
@@ -7094,7 +7113,7 @@
               "transformations": []
             }
           },
-          "description": "Share of the 14d downtime allowance for a 99.5% SLO (about 100 min) not yet used. Negative means the SLO is breached.",
+          "description": "Share of the 14d downtime allowance for a 99% SLO (about 200 min) not yet used. Negative means the SLO is breached.",
           "id": 58,
           "links": [],
           "title": "Error Budget Left (14d)",
@@ -7324,7 +7343,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "(1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[1h:5m])) / 12) / 0.005",
+                        "expr": "(1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[1h:5m])) / 12) / 0.01",
                         "instant": false,
                         "legendFormat": "1h burn",
                         "range": true
@@ -7342,7 +7361,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "(1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[6h:5m])) / 72) / 0.005",
+                        "expr": "(1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[6h:5m])) / 72) / 0.01",
                         "instant": false,
                         "legendFormat": "6h burn",
                         "range": true
@@ -7357,7 +7376,7 @@
               "transformations": []
             }
           },
-          "description": "Multiple of the sustainable burn for a 99.5% SLO. The page alerts fire at 14.4x over 1h and 6x over 6h.",
+          "description": "Multiple of the sustainable burn for a 99% SLO. The page alerts fire at 14.4x over 1h and 6x over 6h.",
           "id": 60,
           "links": [],
           "title": "Error Budget Burn Rate",

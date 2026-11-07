@@ -178,6 +178,7 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	}))
 
 	poolSvc := pool.NewService(&metrics.Pool, &metrics.Voice, daveStats, daveStalls)
+	poolSvc.RegisterBot(ownerBotID, "", client)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)
 	daveStalls.SetHandler(managerSvc.OnEncryptStall)
 	poolSvc.SetFreshGatewayHandler(managerSvc.OnSpeakerFreshGateway)
@@ -250,7 +251,6 @@ func (b *Bot) Run(ctx context.Context) error {
 		slog.InfoContext(ctx, "owner bot invite URL",
 			slog.String("url", installOwnerURL(selfUser.ID)),
 		)
-		b.poolSvc.RegisterBot(selfUser.ID, selfUser.Username, b.client)
 	}
 	b.poolSvc.StartVerificationPoll(ctx, time.Hour)
 

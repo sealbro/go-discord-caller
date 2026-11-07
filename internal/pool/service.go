@@ -69,7 +69,8 @@ func NewService(metrics *telemetry.PoolMetrics, voiceRegion *telemetry.VoiceRegi
 // RegisterBot adds a bot to the info and gateway-latency metrics that is not part
 // of the speaker pool (e.g. the owner bot). Pass the bot's client so its gateway
 // heartbeat RTT is reported alongside the pool bots; client may be nil to record
-// the name only. Safe to call concurrently.
+// the name only. An empty name is filled in from the client once its gateway has
+// delivered READY. Safe to call concurrently.
 func (s *Service) RegisterBot(id snowflake.ID, name string, client *bot.Client) {
 	s.mu.Lock()
 	s.extraBots[id] = extraBot{name: name, client: client}
@@ -209,7 +210,13 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 		s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
 	}
 	for id, eb := range s.extraBots {
-		s.metrics.ObserveBotInfo(o, id.String(), eb.name)
+		name := eb.name
+		if name == "" && eb.client != nil {
+			if self, ok := eb.client.Caches.SelfUser(); ok {
+				name = self.Username
+			}
+		}
+		s.metrics.ObserveBotInfo(o, id.String(), name)
 		// Report the owner bot's gateway RTT too, so it appears in the latency
 		// panels alongside the pool bots (it is not part of poolClients).
 		if eb.client == nil || !isConnected(eb.client) {

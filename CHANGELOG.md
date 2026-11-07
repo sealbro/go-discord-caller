@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Owner missing from the bot metrics**: the owner bot is registered as soon as it is built, not after its first READY. A late READY used to leave it out of `gdc_discord_bot` and the gateway latency series until the next restart.
+
 ## [0.14.0] - 2026-11-07
 
 ### Added

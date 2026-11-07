@@ -27,6 +27,8 @@ func (s *encryptingSession) Encrypt(_ uint32, _ []byte, _ []byte) (int, error) {
 	return 0, s.err
 }
 
+func (s *encryptingSession) AddUser(godave.UserID) {}
+
 // fakeConn stands in for the voice.Conn disgo passes as the session callbacks.
 type fakeConn struct{ godave.Callbacks }
 
@@ -208,5 +210,57 @@ func TestEncryptDoesNotCountAsADecryptSender(t *testing.T) {
 	counts, gauge := collectOnce(t, reader)
 	if len(counts) != 0 || len(gauge) != 0 {
 		t.Errorf("decrypt series after encrypts only: %d counter points, %d sender points; want none", len(counts), len(gauge))
+	}
+}
+
+func recordUnsent(session godave.Session, n int) {
+	recorder := session.(UnsentFrameRecorder)
+	for range n {
+		recorder.RecordUnsentFrame()
+	}
+}
+
+// A bot alone in its channel is never ready, so its frames are discarded
+// before Encrypt. They are not failures and must not request a rejoin, but
+// they still have to be visible.
+func TestUnsentFramesOfAloneBotAreCountedApart(t *testing.T) {
+	stats := NewStats()
+	rec := &stallRecorder{}
+	inner := func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return &encryptingSession{} }
+	session := Instrument(inner, stats, WithEncryptStall(10, rec.notify))(slog.Default(), "speaker-1", &fakeConn{})
+
+	recordUnsent(session, 25)
+
+	reader, _ := newReader(t, stats)
+	pts := encryptPoints(t, reader)
+	if got := encryptCount(pts, "speaker-1", outcomeUnsentAlone, reasonNone); got != 25 {
+		t.Errorf("unsent frames of an alone bot = %d, want 25", got)
+	}
+	if got := encryptCount(pts, "speaker-1", outcomeFailure, "not_ready"); got != -1 {
+		t.Errorf("alone bot recorded %d not_ready failures, want none", got)
+	}
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if len(rec.calls) != 0 {
+		t.Errorf("alone bot requested %d rejoins, want 0", len(rec.calls))
+	}
+}
+
+// With company, the same discard is a failure that counts toward a stall.
+func TestUnsentFramesWithCompanyStayFailures(t *testing.T) {
+	stats := NewStats()
+	inner := func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return &encryptingSession{} }
+	session := Instrument(inner, stats)(slog.Default(), "speaker-1", &fakeConn{})
+	session.AddUser("listener")
+
+	recordUnsent(session, 4)
+
+	reader, _ := newReader(t, stats)
+	pts := encryptPoints(t, reader)
+	if got := encryptCount(pts, "speaker-1", outcomeFailure, "not_ready"); got != 4 {
+		t.Errorf("not_ready failures = %d, want 4", got)
+	}
+	if got := encryptCount(pts, "speaker-1", outcomeUnsentAlone, reasonNone); got != -1 {
+		t.Errorf("bot with company recorded %d alone-unsent frames, want none", got)
 	}
 }

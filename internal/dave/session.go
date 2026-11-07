@@ -249,9 +249,11 @@ type UnsentFrameRecorder interface {
 // A bot alone in its channel is not ready either — Discord completes the
 // handshake only once there is a group to share keys with — but nobody can
 // hear it, it becomes ready as soon as someone joins, and a rejoin lands it in
-// the same empty channel. Its unsent frames are neither failures nor a stall.
+// the same empty channel. Its unsent frames are neither failures nor a stall;
+// they are counted apart so that frame loss on an unheard bot stays visible.
 func (s *countingSession) RecordUnsentFrame() {
 	if s.alone() {
+		s.stats.RecordUnsentAlone(s.botUserID)
 		return
 	}
 	s.stats.RecordEncrypt(s.botUserID, ErrNotReady)

@@ -23,6 +23,7 @@ const (
 	outcomePassthrough = "passthrough"
 	outcomeDropped     = "dropped"
 	outcomeFailure     = "failure"
+	outcomeUnsentAlone = "unsent_alone"
 
 	reasonNone = "none"
 )
@@ -214,6 +215,16 @@ func (s *Stats) RecordEncrypt(botUserID string, err error) {
 		botUserID: botUserID,
 		outcome:   outcome(err),
 		reason:    reason(err),
+	}).Add(1)
+}
+
+// RecordUnsentAlone counts one outbound frame discarded because the bot is
+// alone in its channel. It is not an Encrypt outcome and never a failure.
+func (s *Stats) RecordUnsentAlone(botUserID string) {
+	lookup(&s.mu, s.encrypts, encKey{
+		botUserID: botUserID,
+		outcome:   outcomeUnsentAlone,
+		reason:    reasonNone,
 	}).Add(1)
 }
 

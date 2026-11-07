@@ -36,7 +36,7 @@ func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if d.encryptTotal, err = meter.Int64ObservableCounter("gdc.dave.encrypt.total",
-		metric.WithDescription("DAVE outbound frame encryption outcomes. Labels: bot_user_id, outcome (success|failure), reason (failure detail, else none)."),
+		metric.WithDescription("DAVE outbound frame encryption outcomes. Labels: bot_user_id, outcome (success|failure|unsent_alone), reason (failure detail, else none)."),
 	); err != nil {
 		return
 	}

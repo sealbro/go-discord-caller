@@ -1445,6 +1445,42 @@
                     },
                     "refId": "A"
                   }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(rate(gdc_voice_session_stop_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Stops/s",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "sum(rate(gdc_command_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "instant": false,
+                        "legendFormat": "Cmds/s",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
                 }
               ],
               "queryOptions": {},
@@ -1454,7 +1490,7 @@
           "description": "",
           "id": 2,
           "links": [],
-          "title": "Session Start Rate",
+          "title": "Session Start / Stop / Command Rate",
           "vizConfig": {
             "group": "stat",
             "kind": "VizConfig",
@@ -1462,24 +1498,69 @@
               "fieldConfig": {
                 "defaults": {
                   "color": {
-                    "fixedColor": "blue",
-                    "mode": "fixed"
+                    "mode": "palette-classic"
                   },
                   "thresholds": {
                     "mode": "absolute",
                     "steps": [
                       {
-                        "color": "blue",
+                        "color": "green",
                         "value": 0
                       }
                     ]
                   },
                   "unit": "reqps"
                 },
-                "overrides": []
+                "overrides": [
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Starts/s"
+                    },
+                    "properties": [
+                      {
+                        "id": "color",
+                        "value": {
+                          "fixedColor": "blue",
+                          "mode": "fixed"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Stops/s"
+                    },
+                    "properties": [
+                      {
+                        "id": "color",
+                        "value": {
+                          "fixedColor": "purple",
+                          "mode": "fixed"
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "matcher": {
+                      "id": "byName",
+                      "options": "Cmds/s"
+                    },
+                    "properties": [
+                      {
+                        "id": "color",
+                        "value": {
+                          "fixedColor": "green",
+                          "mode": "fixed"
+                        }
+                      }
+                    ]
+                  }
+                ]
               },
               "options": {
-                "colorMode": "background",
+                "colorMode": "value",
                 "graphMode": "area",
                 "justifyMode": "center",
                 "orientation": "auto",
@@ -2626,85 +2707,6 @@
           }
         }
       },
-      "panel-3": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum(rate(gdc_voice_session_stop_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "instant": false,
-                        "legendFormat": "Stops/s",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "",
-          "id": 3,
-          "links": [],
-          "title": "Session Stop Rate",
-          "vizConfig": {
-            "group": "stat",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "fixedColor": "purple",
-                    "mode": "fixed"
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "purple",
-                        "value": 0
-                      }
-                    ]
-                  },
-                  "unit": "reqps"
-                },
-                "overrides": []
-              },
-              "options": {
-                "colorMode": "background",
-                "graphMode": "area",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "percentChangeColorMode": "standard",
-                "reduceOptions": {
-                  "calcs": [
-                    "lastNotNull"
-                  ],
-                  "fields": "",
-                  "values": false
-                },
-                "showPercentChange": false,
-                "textMode": "auto",
-                "wideLayout": true
-              }
-            },
-            "version": "13.1.0-24779284961"
-          }
-        }
-      },
       "panel-30": {
         "kind": "Panel",
         "spec": {
@@ -2798,92 +2800,6 @@
                   "reverse": false,
                   "unit": "ms"
                 }
-              }
-            },
-            "version": "13.1.0-24779284961"
-          }
-        }
-      },
-      "panel-4": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum(rate(gdc_command_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "instant": false,
-                        "legendFormat": "Cmds/s",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "",
-          "id": 4,
-          "links": [],
-          "title": "Command Rate",
-          "vizConfig": {
-            "group": "stat",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "thresholds"
-                  },
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "yellow",
-                        "value": 0.5
-                      },
-                      {
-                        "color": "red",
-                        "value": 2
-                      }
-                    ]
-                  },
-                  "unit": "reqps"
-                },
-                "overrides": []
-              },
-              "options": {
-                "colorMode": "value",
-                "graphMode": "area",
-                "justifyMode": "center",
-                "orientation": "auto",
-                "percentChangeColorMode": "standard",
-                "reduceOptions": {
-                  "calcs": [
-                    "lastNotNull"
-                  ],
-                  "fields": "",
-                  "values": false
-                },
-                "showPercentChange": false,
-                "textMode": "auto",
-                "wideLayout": true
               }
             },
             "version": "13.1.0-24779284961"
@@ -7060,6 +6976,480 @@
             "version": "13.1.0-24779284961"
           }
         }
+      },
+      "panel-57": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[14d:5m])) / (14*24*12)",
+                        "instant": true,
+                        "legendFormat": "availability",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Share of 5m samples in 14d where the owner bot and at least one speaker were connected. Missing samples count as down. Target 99.5%.",
+          "id": 57,
+          "links": [],
+          "title": "SLO Availability (14d)",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "red",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 0.99
+                      },
+                      {
+                        "color": "green",
+                        "value": 0.995
+                      }
+                    ]
+                  },
+                  "unit": "percentunit",
+                  "decimals": 2
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-58": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "1 - (1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[14d:5m])) / (14*24*12)) / 0.005",
+                        "instant": true,
+                        "legendFormat": "budget left",
+                        "range": false
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Share of the 14d downtime allowance for a 99.5% SLO (about 100 min) not yet used. Negative means the SLO is breached.",
+          "id": 58,
+          "links": [],
+          "title": "Error Budget Left (14d)",
+          "vizConfig": {
+            "group": "stat",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "thresholds"
+                  },
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "red",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 0.25
+                      },
+                      {
+                        "color": "green",
+                        "value": 0.5
+                      }
+                    ]
+                  },
+                  "unit": "percentunit",
+                  "decimals": 2
+                },
+                "overrides": []
+              },
+              "options": {
+                "colorMode": "value",
+                "graphMode": "area",
+                "justifyMode": "center",
+                "orientation": "auto",
+                "percentChangeColorMode": "standard",
+                "reduceOptions": {
+                  "calcs": [
+                    "lastNotNull"
+                  ],
+                  "fields": "",
+                  "values": false
+                },
+                "showPercentChange": false,
+                "textMode": "auto",
+                "wideLayout": true
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-59": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[1h:5m])) / 12",
+                        "instant": false,
+                        "legendFormat": "1h",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[6h:5m])) / 72",
+                        "instant": false,
+                        "legendFormat": "6h",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[24h:5m])) / 288",
+                        "instant": false,
+                        "legendFormat": "24h",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "C"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Rolling share of 5m samples where the service worked.",
+          "id": 59,
+          "links": [],
+          "title": "Availability (rolling 1h / 6h / 24h)",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 10,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "off"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "red",
+                        "value": 80
+                      }
+                    ]
+                  },
+                  "unit": "percentunit",
+                  "decimals": 2,
+                  "max": 1
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
+      },
+      "panel-60": {
+        "kind": "Panel",
+        "spec": {
+          "data": {
+            "kind": "QueryGroup",
+            "spec": {
+              "queries": [
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "(1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[1h:5m])) / 12) / 0.005",
+                        "instant": false,
+                        "legendFormat": "1h burn",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "A"
+                  }
+                },
+                {
+                  "kind": "PanelQuery",
+                  "spec": {
+                    "hidden": false,
+                    "query": {
+                      "group": "",
+                      "kind": "DataQuery",
+                      "spec": {
+                        "expr": "(1 - max(count_over_time(((count by (origin_prometheus) (gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"}) - on(origin_prometheus) gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1) and on(origin_prometheus) (gdc_pool_bots_connected{origin_prometheus=~\"$origin_prometheus\"} >= 1))[6h:5m])) / 72) / 0.005",
+                        "instant": false,
+                        "legendFormat": "6h burn",
+                        "range": true
+                      },
+                      "version": "v0"
+                    },
+                    "refId": "B"
+                  }
+                }
+              ],
+              "queryOptions": {},
+              "transformations": []
+            }
+          },
+          "description": "Multiple of the sustainable burn for a 99.5% SLO. The page alerts fire at 14.4x over 1h and 6x over 6h.",
+          "id": 60,
+          "links": [],
+          "title": "Error Budget Burn Rate",
+          "vizConfig": {
+            "group": "timeseries",
+            "kind": "VizConfig",
+            "spec": {
+              "fieldConfig": {
+                "defaults": {
+                  "color": {
+                    "mode": "palette-classic"
+                  },
+                  "custom": {
+                    "axisBorderShow": false,
+                    "axisCenteredZero": false,
+                    "axisColorMode": "text",
+                    "axisLabel": "",
+                    "axisPlacement": "auto",
+                    "barAlignment": 0,
+                    "barWidthFactor": 0.6,
+                    "drawStyle": "line",
+                    "fillOpacity": 20,
+                    "gradientMode": "none",
+                    "hideFrom": {
+                      "legend": false,
+                      "tooltip": false,
+                      "viz": false
+                    },
+                    "insertNulls": false,
+                    "lineInterpolation": "linear",
+                    "lineWidth": 2,
+                    "pointSize": 5,
+                    "scaleDistribution": {
+                      "type": "linear"
+                    },
+                    "showPoints": "auto",
+                    "showValues": false,
+                    "spanNulls": false,
+                    "stacking": {
+                      "group": "A",
+                      "mode": "none"
+                    },
+                    "thresholdsStyle": {
+                      "mode": "line"
+                    }
+                  },
+                  "min": 0,
+                  "thresholds": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "green",
+                        "value": 0
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 6
+                      },
+                      {
+                        "color": "red",
+                        "value": 14.4
+                      }
+                    ]
+                  },
+                  "unit": "none"
+                },
+                "overrides": []
+              },
+              "options": {
+                "annotations": {
+                  "clustering": -1,
+                  "multiLane": false
+                },
+                "legend": {
+                  "calcs": [
+                    "lastNotNull",
+                    "max"
+                  ],
+                  "displayMode": "list",
+                  "placement": "bottom",
+                  "showLegend": true
+                },
+                "tooltip": {
+                  "hideZeros": false,
+                  "mode": "multi",
+                  "sort": "desc"
+                }
+              }
+            },
+            "version": "13.1.0-24779284961"
+          }
+        }
       }
     },
     "layout": {
@@ -7073,9 +7463,9 @@
                 "kind": "ElementReference",
                 "name": "panel-1"
               },
-              "height": 4,
-              "width": 4,
-              "x": 0,
+              "height": 5,
+              "width": 2,
+              "x": 6,
               "y": 0
             }
           },
@@ -7086,20 +7476,7 @@
                 "kind": "ElementReference",
                 "name": "panel-2"
               },
-              "height": 4,
-              "width": 4,
-              "x": 4,
-              "y": 0
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "panel-3"
-              },
-              "height": 4,
+              "height": 5,
               "width": 4,
               "x": 8,
               "y": 0
@@ -7110,24 +7487,11 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "panel-4"
-              },
-              "height": 4,
-              "width": 4,
-              "x": 12,
-              "y": 0
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
                 "name": "panel-5"
               },
-              "height": 4,
-              "width": 4,
-              "x": 16,
+              "height": 5,
+              "width": 2,
+              "x": 12,
               "y": 0
             }
           },
@@ -7138,10 +7502,10 @@
                 "kind": "ElementReference",
                 "name": "panel-38"
               },
-              "height": 4,
-              "width": 4,
-              "x": 20,
-              "y": 8
+              "height": 5,
+              "width": 3,
+              "x": 21,
+              "y": 0
             }
           },
           {
@@ -7151,9 +7515,9 @@
                 "kind": "ElementReference",
                 "name": "panel-6"
               },
-              "height": 4,
-              "width": 4,
-              "x": 20,
+              "height": 5,
+              "width": 2,
+              "x": 14,
               "y": 0
             }
           },
@@ -7165,9 +7529,9 @@
                 "name": "panel-25"
               },
               "height": 8,
-              "width": 12,
+              "width": 6,
               "x": 0,
-              "y": 12
+              "y": 5
             }
           },
           {
@@ -7178,9 +7542,9 @@
                 "name": "panel-27"
               },
               "height": 8,
-              "width": 12,
-              "x": 12,
-              "y": 12
+              "width": 8,
+              "x": 0,
+              "y": 37
             }
           },
           {
@@ -7191,9 +7555,9 @@
                 "name": "panel-7"
               },
               "height": 8,
-              "width": 12,
-              "x": 0,
-              "y": 20
+              "width": 6,
+              "x": 6,
+              "y": 5
             }
           },
           {
@@ -7204,9 +7568,9 @@
                 "name": "panel-8"
               },
               "height": 8,
-              "width": 12,
-              "x": 12,
-              "y": 20
+              "width": 6,
+              "x": 18,
+              "y": 61
             }
           },
           {
@@ -7217,9 +7581,9 @@
                 "name": "panel-12"
               },
               "height": 8,
-              "width": 12,
-              "x": 0,
-              "y": 28
+              "width": 8,
+              "x": 8,
+              "y": 37
             }
           },
           {
@@ -7230,9 +7594,9 @@
                 "name": "panel-13"
               },
               "height": 8,
-              "width": 12,
-              "x": 12,
-              "y": 28
+              "width": 8,
+              "x": 16,
+              "y": 37
             }
           },
           {
@@ -7245,7 +7609,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 36
+              "y": 45
             }
           },
           {
@@ -7258,7 +7622,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 36
+              "y": 45
             }
           },
           {
@@ -7271,7 +7635,7 @@
               "height": 8,
               "width": 8,
               "x": 0,
-              "y": 44
+              "y": 53
             }
           },
           {
@@ -7284,7 +7648,7 @@
               "height": 8,
               "width": 8,
               "x": 8,
-              "y": 44
+              "y": 53
             }
           },
           {
@@ -7297,7 +7661,7 @@
               "height": 8,
               "width": 8,
               "x": 16,
-              "y": 44
+              "y": 53
             }
           },
           {
@@ -7308,9 +7672,9 @@
                 "name": "panel-11"
               },
               "height": 8,
-              "width": 24,
+              "width": 6,
               "x": 0,
-              "y": 52
+              "y": 61
             }
           },
           {
@@ -7321,9 +7685,9 @@
                 "name": "panel-9"
               },
               "height": 8,
-              "width": 12,
-              "x": 0,
-              "y": 60
+              "width": 6,
+              "x": 6,
+              "y": 61
             }
           },
           {
@@ -7334,9 +7698,9 @@
                 "name": "panel-10"
               },
               "height": 8,
-              "width": 12,
+              "width": 6,
               "x": 12,
-              "y": 60
+              "y": 61
             }
           },
           {
@@ -7349,7 +7713,7 @@
               "height": 4,
               "width": 6,
               "x": 0,
-              "y": 68
+              "y": 13
             }
           },
           {
@@ -7360,9 +7724,9 @@
                 "name": "panel-20"
               },
               "height": 8,
-              "width": 18,
-              "x": 6,
-              "y": 68
+              "width": 6,
+              "x": 12,
+              "y": 13
             }
           },
           {
@@ -7375,7 +7739,7 @@
               "height": 4,
               "width": 6,
               "x": 0,
-              "y": 72
+              "y": 17
             }
           },
           {
@@ -7388,7 +7752,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 76
+              "y": 69
             }
           },
           {
@@ -7401,7 +7765,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 76
+              "y": 69
             }
           },
           {
@@ -7412,9 +7776,9 @@
                 "name": "panel-21"
               },
               "height": 8,
-              "width": 24,
-              "x": 0,
-              "y": 84
+              "width": 6,
+              "x": 6,
+              "y": 13
             }
           },
           {
@@ -7427,7 +7791,7 @@
               "height": 4,
               "width": 6,
               "x": 0,
-              "y": 92
+              "y": 21
             }
           },
           {
@@ -7440,7 +7804,7 @@
               "height": 8,
               "width": 18,
               "x": 6,
-              "y": 92
+              "y": 21
             }
           },
           {
@@ -7453,7 +7817,7 @@
               "height": 4,
               "width": 6,
               "x": 0,
-              "y": 96
+              "y": 25
             }
           },
           {
@@ -7464,9 +7828,9 @@
                 "name": "panel-31"
               },
               "height": 8,
-              "width": 24,
-              "x": 0,
-              "y": 104
+              "width": 6,
+              "x": 18,
+              "y": 13
             }
           },
           {
@@ -7477,9 +7841,9 @@
                 "name": "panel-32"
               },
               "height": 8,
-              "width": 8,
+              "width": 12,
               "x": 0,
-              "y": 4
+              "y": 29
             }
           },
           {
@@ -7490,9 +7854,9 @@
                 "name": "panel-36"
               },
               "height": 8,
-              "width": 8,
-              "x": 8,
-              "y": 4
+              "width": 12,
+              "x": 12,
+              "y": 29
             }
           },
           {
@@ -7502,10 +7866,10 @@
                 "kind": "ElementReference",
                 "name": "panel-33"
               },
-              "height": 4,
-              "width": 8,
+              "height": 5,
+              "width": 2,
               "x": 16,
-              "y": 4
+              "y": 0
             }
           },
           {
@@ -7515,10 +7879,10 @@
                 "kind": "ElementReference",
                 "name": "panel-34"
               },
-              "height": 4,
-              "width": 4,
-              "x": 16,
-              "y": 8
+              "height": 5,
+              "width": 3,
+              "x": 18,
+              "y": 0
             }
           },
           {
@@ -7531,7 +7895,7 @@
               "height": 8,
               "width": 24,
               "x": 0,
-              "y": 112
+              "y": 77
             }
           },
           {
@@ -7544,7 +7908,7 @@
               "height": 8,
               "width": 24,
               "x": 0,
-              "y": 120
+              "y": 85
             }
           },
           {
@@ -7557,7 +7921,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 131
+              "y": 96
             }
           },
           {
@@ -7570,7 +7934,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 131
+              "y": 96
             }
           },
           {
@@ -7583,7 +7947,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 139
+              "y": 104
             }
           },
           {
@@ -7596,7 +7960,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 139
+              "y": 104
             }
           },
           {
@@ -7609,7 +7973,7 @@
               "height": 8,
               "width": 8,
               "x": 0,
-              "y": 147
+              "y": 112
             }
           },
           {
@@ -7622,7 +7986,7 @@
               "height": 8,
               "width": 8,
               "x": 8,
-              "y": 147
+              "y": 112
             }
           },
           {
@@ -7635,7 +7999,7 @@
               "height": 8,
               "width": 8,
               "x": 16,
-              "y": 147
+              "y": 112
             }
           },
           {
@@ -7648,7 +8012,7 @@
               "height": 8,
               "width": 8,
               "x": 16,
-              "y": 163
+              "y": 128
             }
           },
           {
@@ -7661,7 +8025,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 155
+              "y": 120
             }
           },
           {
@@ -7674,7 +8038,7 @@
               "height": 3,
               "width": 24,
               "x": 0,
-              "y": 128
+              "y": 93
             }
           },
           {
@@ -7687,7 +8051,7 @@
               "height": 8,
               "width": 8,
               "x": 0,
-              "y": 163
+              "y": 128
             }
           },
           {
@@ -7700,7 +8064,7 @@
               "height": 8,
               "width": 8,
               "x": 8,
-              "y": 163
+              "y": 128
             }
           },
           {
@@ -7713,7 +8077,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 155
+              "y": 120
             }
           },
           {
@@ -7726,7 +8090,7 @@
               "height": 9,
               "width": 24,
               "x": 0,
-              "y": 171
+              "y": 156
             }
           },
           {
@@ -7739,7 +8103,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 180
+              "y": 136
             }
           },
           {
@@ -7752,7 +8116,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 180
+              "y": 136
             }
           },
           {
@@ -7765,7 +8129,7 @@
               "height": 12,
               "width": 12,
               "x": 0,
-              "y": 188
+              "y": 144
             }
           },
           {
@@ -7778,7 +8142,59 @@
               "height": 12,
               "width": 12,
               "x": 12,
-              "y": 188
+              "y": 144
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-57"
+              },
+              "height": 5,
+              "width": 3,
+              "x": 0,
+              "y": 0
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-58"
+              },
+              "height": 5,
+              "width": 3,
+              "x": 3,
+              "y": 0
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-59"
+              },
+              "height": 8,
+              "width": 6,
+              "x": 12,
+              "y": 5
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-60"
+              },
+              "height": 8,
+              "width": 6,
+              "x": 18,
+              "y": 5
             }
           }
         ]

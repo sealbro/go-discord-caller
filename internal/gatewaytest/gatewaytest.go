@@ -4,6 +4,7 @@ package gatewaytest
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,6 +21,14 @@ const (
 	opInvalidSession = 9
 	opHello          = 10
 	opHeartbeatAck   = 11
+)
+
+const (
+	heartbeatIntervalMillis = 41250
+	invalidateAfter         = 500 * time.Millisecond
+	identifiesWanted        = 4
+	identifiesDeadline      = 40 * time.Second
+	requiredGrowth          = 2
 )
 
 type frame struct {
@@ -46,7 +55,7 @@ func IdentifyingGateway(t testing.TB) (wsURL string, identifies <-chan time.Time
 		defer func() { _ = conn.Close() }()
 
 		send := func(f frame) bool { return conn.WriteJSON(f) == nil }
-		if !send(frame{Op: opHello, D: json.RawMessage(`{"heartbeat_interval":41250}`)}) {
+		if !send(frame{Op: opHello, D: json.RawMessage(fmt.Sprintf(`{"heartbeat_interval":%d}`, heartbeatIntervalMillis))}) {
 			return
 		}
 		for {
@@ -67,7 +76,7 @@ func IdentifyingGateway(t testing.TB) (wsURL string, identifies <-chan time.Time
 				if !send(frame{Op: opDispatch, T: "READY", S: 1, D: json.RawMessage(ready)}) {
 					return
 				}
-				time.Sleep(500 * time.Millisecond)
+				time.Sleep(invalidateAfter)
 				if !send(frame{Op: opInvalidSession, D: json.RawMessage(`false`)}) {
 					return
 				}
@@ -79,26 +88,25 @@ func IdentifyingGateway(t testing.TB) (wsURL string, identifies <-chan time.Time
 }
 
 // RequireGrowingGaps fails unless the gaps between consecutive IDENTIFYs grow:
-// the last of the first four must be at least twice the first.
+// the last gap of the first few must be at least twice the first.
 func RequireGrowingGaps(t testing.TB, identifies <-chan time.Time) {
 	t.Helper()
-	const wanted = 4
 	var arrived []time.Time
-	deadline := time.After(40 * time.Second)
-	for len(arrived) < wanted {
+	deadline := time.After(identifiesDeadline)
+	for len(arrived) < identifiesWanted {
 		select {
 		case at := <-identifies:
 			arrived = append(arrived, at)
 		case <-deadline:
-			t.Fatalf("gateway was identified only %d times in 40s, want %d", len(arrived), wanted)
+			t.Fatalf("gateway was identified only %d times in %v, want %d", len(arrived), identifiesDeadline, identifiesWanted)
 		}
 	}
 
 	firstGap := arrived[1].Sub(arrived[0])
-	lastGap := arrived[wanted-1].Sub(arrived[wanted-2])
-	if lastGap < 2*firstGap {
+	lastGap := arrived[identifiesWanted-1].Sub(arrived[identifiesWanted-2])
+	if lastGap < requiredGrowth*firstGap {
 		t.Fatalf("reconnect backoff must grow while the session keeps being invalidated: "+
 			"gap between IDENTIFY 1 and 2 was %v, between IDENTIFY %d and %d was %v",
-			firstGap.Round(10*time.Millisecond), wanted-1, wanted, lastGap.Round(10*time.Millisecond))
+			firstGap.Round(10*time.Millisecond), identifiesWanted-1, identifiesWanted, lastGap.Round(10*time.Millisecond))
 	}
 }

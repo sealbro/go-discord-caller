@@ -24,13 +24,12 @@ const (
 type identifyBackoff struct {
 	botID  snowflake.ID
 	mu     sync.Mutex
-	now    func() time.Time
 	last   time.Time
 	streak int
 }
 
 func newIdentifyBackoff(botID snowflake.ID) *identifyBackoff {
-	return &identifyBackoff{botID: botID, now: time.Now}
+	return &identifyBackoff{botID: botID}
 }
 
 // IdentifyBackoffOpt installs a fresh IDENTIFY backoff on a bot's gateway. Install
@@ -41,7 +40,7 @@ func IdentifyBackoffOpt(botID snowflake.ID) bot.ConfigOpt {
 
 func (b *identifyBackoff) Wait(ctx context.Context, _ int) error {
 	b.mu.Lock()
-	now := b.now()
+	now := time.Now()
 	wait := b.reserve(now).Sub(now)
 	b.mu.Unlock()
 

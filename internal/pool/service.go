@@ -92,7 +92,8 @@ func (s *Service) freshGateway(botUserID snowflake.ID) {
 	}
 }
 
-// newPoolClient builds a disgo client for a speaker bot token.
+// newPoolClient builds a disgo client for a speaker bot token. extra options are
+// applied last, so tests can point the gateway at a fake server.
 func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, freshGateway func(snowflake.ID), extra ...bot.ConfigOpt) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 

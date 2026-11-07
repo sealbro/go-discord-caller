@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Lost frames per source**: `gdc_opus_source_frames_lost_total` counts each frame lost to a full mixer input once, however many channels it goes to; the dropped-frames metric counts each channel separately.
+- **Alone-bot unsent frames**: `gdc_dave_encrypt_total` counts frames discarded while a speaker is alone in its channel as `outcome="unsent_alone"`, apart from failures.
 
 ## [0.13.1] - 2026-11-03
 

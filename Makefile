@@ -1,7 +1,7 @@
 MODULE := github.com/sealbro/go-discord-caller
 
 # Packages included in coverage: everything except cmd/ and integration/.
-COVER_PKGS := $(shell go list ./... | grep -v -E '^$(MODULE)/(cmd|integration)(/|$$)' | grep -v '$(MODULE)/internal/telemetry')
+COVER_PKGS := $(shell go list ./... | grep -v -E '^$(MODULE)/(cmd|integration)(/|$$)' | grep -v '$(MODULE)/internal/telemetry' | grep -v '$(MODULE)/internal/gatewaytest')
 COVER_PKGS_CSV := $(shell echo $(COVER_PKGS) | tr ' ' ',')
 
 STRESS_DURATION ?=

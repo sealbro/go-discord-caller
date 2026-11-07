@@ -92,23 +92,25 @@ func (s *Service) freshGateway(botUserID snowflake.ID) {
 	}
 }
 
-// newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, freshGateway func(snowflake.ID)) (*bot.Client, error) {
+// newPoolClient builds a disgo client for a speaker bot token. extra options are
+// applied last, so tests can point the gateway at a fake server.
+func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, freshGateway func(snowflake.ID), extra ...bot.ConfigOpt) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
-	return disgo.New(token,
+	return disgo.New(token, append([]bot.ConfigOpt{
 		bot.WithEventListeners(VoiceRegionListeners(botUserID, voiceRegion)...),
 		bot.WithEventListeners(bot.NewListenerFunc(func(*events.Ready) { freshGateway(botUserID) })),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
+		IdentifyBackoffOpt(botUserID),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
 			SafeAudioSenderOpt(),
 			VoiceConnOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
-	)
+	}, extra...)...)
 }
 
 // ConnectPool pre-connects all gateways in the pool concurrently and waits

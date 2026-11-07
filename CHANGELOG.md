@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Gateway re-identify loop burning the daily IDENTIFY budget**: owner and speaker gateways now wait longer between IDENTIFYs while the session keeps being invalidated (1 s, 2 s, 4 s, up to 5 min), instead of reconnecting every second and getting the bot token reset after 1,000 in a day.
 - **Owner missing from the bot metrics**: the owner bot is registered as soon as it is built, not after its first READY. A late READY used to leave it out of `gdc_discord_bot` and the gateway latency series until the next restart.
 
 ## [0.14.0] - 2026-11-07

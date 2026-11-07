@@ -44,6 +44,7 @@ test-unit:
 	go test --race -covermode=atomic -coverprofile=unit.out \
 		-coverpkg=$(COVER_PKGS_CSV) \
 		./internal/...
+	go test -run SlowsDown ./internal/bot ./internal/pool
 
 test-integration:
 	go test --tags=integration --timeout=15m -covermode=atomic -coverprofile=coverage.out \

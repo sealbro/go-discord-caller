@@ -102,6 +102,7 @@ func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, dave
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
+		IdentifyBackoffOpt(),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
 			SafeAudioSenderOpt(),

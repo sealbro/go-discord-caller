@@ -1,10 +1,13 @@
-package bot
+package pool
 
 import (
 	"context"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/disgoorg/disgo/bot"
+	"github.com/disgoorg/disgo/gateway"
 )
 
 const (
@@ -26,6 +29,12 @@ type identifyBackoff struct {
 
 func newIdentifyBackoff() *identifyBackoff {
 	return &identifyBackoff{now: time.Now}
+}
+
+// IdentifyBackoffOpt installs a fresh IDENTIFY backoff on a bot's gateway. Install
+// it on every client: each token has its own daily IDENTIFY budget.
+func IdentifyBackoffOpt() bot.ConfigOpt {
+	return bot.WithGatewayConfigOpts(gateway.WithIdentifyRateLimiter(newIdentifyBackoff()))
 }
 
 func (b *identifyBackoff) Wait(ctx context.Context, _ int) error {

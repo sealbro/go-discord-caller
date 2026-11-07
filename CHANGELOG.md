@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Gateway re-identify counter**: `gdc_gateway_ready_total` counts the owner bot's READY events, so a reconnect loop shows up before Discord resets the token.
 - **Lost frames per source**: `gdc_opus_source_frames_lost_total` counts each frame lost to a full mixer input once, however many channels it goes to; the dropped-frames metric counts each channel separately.
+- **Alone-bot unsent frames**: `gdc_dave_encrypt_total` counts frames discarded while a speaker is alone in its channel as `outcome="unsent_alone"`, apart from failures.
 
 ### Fixed
 - **Reconnect loop flooding Discord's API**: when the owner gateway re-identifies repeatedly, guild seeding is skipped until it settles instead of re-fetching every server's channels on each reconnect.

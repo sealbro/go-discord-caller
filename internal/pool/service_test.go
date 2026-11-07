@@ -325,6 +325,40 @@ func TestPoolMetricsReportConnectionState(t *testing.T) {
 	}
 }
 
+func TestRegisteredBotNameIsFilledInOnceItsSelfUserIsKnown(t *testing.T) {
+	t.Parallel()
+	const owner snowflake.ID = 741
+	s, reader := newMetricsService(t)
+	client, _ := clientWithGateway(gateway.StatusDisconnected, 0)
+	s.RegisterBot(owner, "", client)
+	s.StartMetrics()
+
+	nameOf := func() string {
+		for _, scope := range collect(t, reader).ScopeMetrics {
+			for _, m := range scope.Metrics {
+				if gauge, ok := m.Data.(metricdata.Gauge[int64]); ok && m.Name == "gdc.discord.bot" {
+					for _, dp := range gauge.DataPoints {
+						if id, _ := dp.Attributes.Value("bot_id"); id.AsString() == owner.String() {
+							name, _ := dp.Attributes.Value("bot_name")
+							return name.AsString()
+						}
+					}
+				}
+			}
+		}
+		t.Fatalf("bot %s missing from gdc.discord.bot", owner)
+		return ""
+	}
+
+	if got := nameOf(); got != "" {
+		t.Fatalf("name before READY = %q, want empty", got)
+	}
+	client.Caches.SetSelfUser(discord.OAuth2User{User: discord.User{ID: owner, Username: "owner"}})
+	if got := nameOf(); got != "owner" {
+		t.Errorf("name after READY = %q, want %q", got, "owner")
+	}
+}
+
 func TestShutdownClosesEveryGateway(t *testing.T) {
 	t.Parallel()
 	s, _ := newMetricsService(t)

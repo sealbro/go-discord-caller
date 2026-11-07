@@ -35,7 +35,7 @@ var ownerInviteDocs = []string{
 // TestOwnerPermissions pins the owner bot's bitmask, which is botPermissions
 // plus DEAFEN_MEMBERS and the server-facing permissions.
 func TestOwnerPermissions(t *testing.T) {
-	const want discord.Permissions = 351843765984576
+	const want discord.Permissions = 281475021800704
 	if ownerPermissions != want {
 		t.Errorf("ownerPermissions = %d, want %d; also update every file in ownerInviteDocs", ownerPermissions, want)
 	}
@@ -117,10 +117,6 @@ var permissionSpecs = []struct {
 	{"USE_VAD", discord.PermissionUseVAD, true, true},
 	{"PRIORITY_SPEAKER", discord.PermissionPrioritySpeaker, true, true},
 	{"DEAFEN_MEMBERS", discord.PermissionDeafenMembers, true, false},
-	{"ADD_REACTIONS", discord.PermissionAddReactions, true, false},
-	{"SEND_MESSAGES", discord.PermissionSendMessages, true, false},
-	{"SEND_TTS_MESSAGES", discord.PermissionSendTTSMessages, true, false},
-	{"SEND_VOICE_MESSAGES", discord.PermissionSendVoiceMessages, true, false},
 	{"SET_VOICE_CHANNEL_STATUS", discord.PermissionSetVoiceChannelStatus, true, false},
 }
 

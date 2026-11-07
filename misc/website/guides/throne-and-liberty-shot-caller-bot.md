@@ -10,7 +10,7 @@ keywords: >-
 
 **go-discord-caller** relays your shot caller's voice live to every squad voice channel, across one or many Discord servers. It is built for Throne and Liberty guild wars and sieges, and works the same for any game.
 
-[:simple-discord: Add the hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576){ .md-button .md-button--primary }
+[:simple-discord: Add the hosted bot](https://discord.com/discovery/applications/1484911601210495038){ .md-button .md-button--primary }
 [:material-github: Self-host it](https://github.com/sealbro/go-discord-caller){ .md-button }
 
 *The hosted bot is free to use and has a limited number of speakers; at peak times, when load is high, capacity may be limited ([terms](../terms.md)). Self-hosting is free under the Elastic License 2.0 with unlimited speakers and servers.*
@@ -30,7 +30,7 @@ Large Throne and Liberty fights are decided by who hears the call first. Guild w
 
 ## Set it up in a few minutes
 
-1. [Add the hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576) to your server, or [self-host it](https://github.com/sealbro/go-discord-caller).
+1. [Add the hosted bot](https://discord.com/discovery/applications/1484911601210495038) to your server, or [self-host it](https://github.com/sealbro/go-discord-caller).
 2. Run `/setup`: pick the role that may speak (the capture role) and the role that may start sessions.
 3. Bind one speaker bot to each squad voice channel.
 4. Join the command channel and run `/start`. Anyone with the capture role who speaks is heard in every bound squad channel.

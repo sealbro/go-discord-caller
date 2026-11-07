@@ -16,7 +16,7 @@ keywords: >-
 
 Most Discord shot-caller and shotcaller bots are paid, hosted services — a "speak once, reach every squad" workflow gated behind a monthly subscription, with tiers that cap how many servers and parties you can use. **go-discord-caller** gives you the same workflow for free: it's source-available and self-hosted, so you run it with your own Discord bot tokens with no plan tiers, no party limits, and end-to-end encrypted audio.
 
-[:simple-discord: Add the hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576){ .md-button .md-button--primary }
+[:simple-discord: Add the hosted bot](https://discord.com/discovery/applications/1484911601210495038){ .md-button .md-button--primary }
 
 *The hosted bot is free to use; at peak times, when load is high, capacity may be limited — see the [terms](terms.md). The software itself is free to self-host under the Elastic License 2.0 — self-hosting has no fee, now or later.*
 [:material-github: Self-host it (GitHub)](https://github.com/sealbro/go-discord-caller){ .md-button }
@@ -56,6 +56,6 @@ docker run -d \
   sealbro/go-discord-caller
 ```
 
-Create one owner bot and one or more speaker bots in the [Discord Developer Portal](https://discord.com/developers/applications), drop the tokens in, and run `/setup` in your server. Prefer not to host at all? Use the [hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576) instead.
+Create one owner bot and one or more speaker bots in the [Discord Developer Portal](https://discord.com/developers/applications), drop the tokens in, and run `/setup` in your server. Prefer not to host at all? Use the [hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=281475021800704) instead.
 
 See the [full setup guide on GitHub](https://github.com/sealbro/go-discord-caller#discord-app-setup) and [how it works](voice-flow.md).

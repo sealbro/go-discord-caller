@@ -28,7 +28,7 @@ Yes. `/start mode:many` is a conference where everyone hears everyone except the
 
 ## Set it up in a few minutes
 
-1. [Add the hosted bot](https://discord.com/oauth2/authorize?client_id=1484911601210495038&scope=bot&permissions=351843765984576) to your server, or [self-host it](https://github.com/sealbro/go-discord-caller).
+1. [Add the hosted bot](https://discord.com/discovery/applications/1484911601210495038) to your server, or [self-host it](https://github.com/sealbro/go-discord-caller).
 2. Run `/setup`: pick the role that may speak (the capture role) and the role that may start sessions.
 3. Bind one speaker bot to each squad voice channel.
 4. Join the command channel and run `/start`. Anyone with the capture role who speaks is heard in every bound squad channel.

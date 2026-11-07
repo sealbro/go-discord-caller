@@ -7,7 +7,7 @@ User mic
   │  +20ms  Opus frame accumulation (Discord client)
   ▼
 [Discord voice server]
-  │  +65ms  UDP network (inbound)
+  │  +½ RTT  voice UDP leg in (region-dependent: ~8ms in Europe, see the regional table)
   ▼
 [VoiceReceiver]  decode + fanout inline (on disgo's UDP goroutine)
   │  +0.2ms allowUser lookup, Opus decode, dispatch to SourceBuffer.Feed (gdc_opus_receive_duration ~0.2ms avg)
@@ -22,11 +22,11 @@ User mic
   │  +0ms   provider channel queue ≈0 (passthrough) + disgo sender
   ▼
 [Discord voice server]
-  │  +65ms  UDP network (outbound)
+  │  +½ RTT  voice UDP leg out
   ▼
 [Listener's Discord client]  Opus decode → speakers
 
-Total: ~185ms (single guild, many-callers/mix mode; copy mode skips the mixer queue and is lower — see `gdc.opus.copy.queue_depth`)
+Total: client legs + voice RTT + ~25ms pipeline — roughly 80–140ms in Europe (single guild, many-callers/mix mode; copy mode skips the mixer queue and is lower — see `gdc.opus.copy.queue_depth`)
 ```
 
 ---
@@ -36,16 +36,16 @@ Total: ~185ms (single guild, many-callers/mix mode; copy mode skips the mixer qu
 | Hop                                       | Typical    | Notes                                                                                                    |
 |-------------------------------------------|------------|----------------------------------------------------------------------------------------------------------|
 | User mic → Discord voice server           | 20–50ms    | 20ms fixed frame accumulation + network                                                                  |
-| Discord voice server → `VoiceReceiver`    | 20–55ms    | Voice UDP leg, same region as voice server                                                               |
+| Discord voice server → `VoiceReceiver`    | ½ voice RTT | Voice UDP leg to the host running the bot; `gdc_voice_server_latency_milliseconds` is the full round trip (~15ms in `c-ams`) |
 | `allowUser` + Opus decode + fanout `Feed` | ~0.2ms     | Inline on disgo UDP goroutine, no channel hop; measured `gdc_opus_receive_duration` ~0.2ms avg          |
 | `SourceBuffer` ring → `Mixer.tick`        | **22ms (p95 47ms)** | `gdc.mixer.pipeline.latency` (Prom: `gdc_mixer_pipeline_latency_milliseconds`); ceiling = `audioSourceCap`×20ms = 60ms; measured over 30 days: p50 22ms / p95 47ms / p99 57ms, mean 24ms; producer-side overflow keeps near live edge |
 | Mixer tick processing + encode            | <1ms       | `gdc_mixer_tick_duration` p95 ~0.7ms, p99 ~1.5ms; 0ms on single-source passthrough                       |
 | `VoiceProvider` channel queue             | ~0ms       | `gdc_opus_provide_duration` ≈0 (passthrough); drain threshold 3 frames = 60ms cap                       |
-| `VoiceProvider` → Discord voice server    | 20–55ms    | |
+| `VoiceProvider` → Discord voice server    | ½ voice RTT | Same leg, outbound |
 | Discord voice server → listener client    | 20–50ms    | |
-| **Total (single guild)**                  | **~185ms** | Discord network dominates; in-process pipeline measures ~25ms                                            |
+| **Total (single guild)**                  | **~80–140ms in Europe** | Client legs (40–100ms) + voice RTT + in-process pipeline (~25ms); the bot's two legs add one full voice RTT: ~15ms in `c-ams`, ~100–127ms in the US, ~165–245ms in Asia |
 
-**Inter-guild relay** (`ally.Session` → relay mixer → guest `VoiceProvider`) adds ~60ms on top (extra mixer tick alignment + guest guild network leg) → **~245ms total**.
+**Inter-guild relay** (`ally.Session` → relay mixer → guest `VoiceProvider`) adds one more mixer stage (relay mixer tick alignment, up to 20ms plus its queue) and replaces the outbound leg with the guest guild's own voice leg, so the bot legs become half the host guild's voice RTT plus half the guest guild's.
 
 ---
 
@@ -55,7 +55,7 @@ Total: ~185ms (single guild, many-callers/mix mode; copy mode skips the mixer qu
 `RaidModeOneCaller` no longer statically bypasses the pipeline. As of the auto-switch pipeline (commit #37), `OneCallerPipeline` (`internal/manager/pipeline/one_caller.go`) builds an **always-on mixer graph** — per-speaker-channel mixers plus the relay mixer, created up-front and started paused — and a `router` (`internal/manager/router`) flips the owner source between two modes based on the live caller count in the owner channel:
 
 - **Copy mode** (single caller): the owner's `FanoutHandle` is installed with raw `OpusTargets` per speaker `chOut` plus an `OpusCallback` that calls `ally.Session.BroadcastFromGuild` — all inline on disgo's UDP goroutine. No decode, no mix, no re-encode, no fanout goroutine. Mixers stay paused, so the mixer queue wait above does not apply — the fast path. Its only in-process wait is the speaker's output queue, which disgo drains one frame per 20 ms; `gdc.opus.copy.queue_depth` (Prom: `gdc_opus_copy_queue_depth`) records how many frames were already queued ahead of each copied frame, so 0 / 1 / 2 ahead ≈ under 20 / 20–40 / 40–60 ms.
-- **Mix mode** (multiple callers): the source decodes into the per-channel and relay mixers via `SourceBuffer`, picking up the full mixer budget above (~185ms).
+- **Mix mode** (multiple callers): the source decodes into the per-channel and relay mixers via `SourceBuffer`, picking up the full mixer budget above.
 
 The `FanoutHandle` is wired by `routerInstallBuilder` (`internal/manager/pipeline/install.go`), not the old `installFanoutDirect` — that function no longer exists. `router.Recompute` decides the mode at session start (`start` closure) and on every caller join/leave, so the latency profile of a OneCaller session is dynamic, not fixed. The same copy/mix split applies to the `RaidModeOneManyGuildCaller` / `StarCaller` topologies.
 
@@ -76,7 +76,23 @@ Channel mixers pause after `DrainIdleTimeout` (5s) with no input frames (`intern
 ### Gateway latency ≠ audio latency
 The `gdc.bot.gateway.latency` metric (Prometheus: `gdc_bot_gateway_latency_milliseconds`, gauge, labelled `bot_id`) measures the WebSocket **control channel** heartbeat RTT only. Voice audio is transmitted over a separate **UDP** connection — gateway latency is not a measure of audio delay. The closer proxy for the audio network leg is `gdc.voice.server.latency` (`gdc_voice_server_latency_milliseconds`, labelled `guild_id`, `bot_id`, `region`): the heartbeat RTT of the voice websocket to the voice server the bot's audio is sent to.
 
-Current observed gateway latency (median per bot, `gdc_bot_gateway_latency_milliseconds`, 30d): **~104–106ms** for every bot — the owner and all speakers now run from the same host. This is consistent with a geographically distant Discord region and is unrelated to the audio pipeline delay. It does however confirm that the network round-trip component of the audio path (two Discord voice server hops) contributes at least **65–90ms** of irreducible latency — the floor below which end-to-end audio latency cannot be reduced regardless of pipeline optimisations.
+Gateway latency (median per bot, 30d): **~105–112ms** for most bots and **~147–153ms** for the three newest, all from the same host. That host reaches its voice server in `c-ams` in ~15ms, so the gateway origin sits much farther from it than the voice servers do. This is on Discord's side and is unrelated to the audio pipeline delay; it affects the join handshake and how quickly voice-state events arrive, not audio. The gauge is reported once measured: zero before a bot's first heartbeat ACK, and absent while a later heartbeat is awaiting its ACK.
+
+**Voice server latency by region** (`gdc_voice_server_latency_milliseconds`, 30d average) is the audio network leg. Audio crosses it twice (in and out), so one full RTT lands on every relayed word:
+
+| Region | Avg RTT |
+|--------|---------|
+| `c-fra` | 11ms |
+| `c-ams`, `c-cdg` | 15–17ms |
+| `c-mxp`, `c-lhr`, `c-mrs`, `c-waw` | 20–28ms |
+| `c-arn`, `c-hel`, `c-otp` | 41–43ms |
+| `c-iad` (US East) | 101ms |
+| `us-south` | 127ms |
+| `c-sin` (Singapore) | 164ms |
+| `c-hkg` (Hong Kong) | 198ms |
+| `c-nrt` (Tokyo) | 245ms |
+
+Guilds in Europe sit within 45ms. Guilds in the US and Asia pay 100–245ms on top of the pipeline, with peaks to ~840ms. Only a voice process in or near the guild's region reduces this; the channel's `rtc_region` setting does not, because it moves the voice server away from the users.
 
 ---
 
@@ -123,7 +139,7 @@ After Phase 3 the pipeline floor is dominated by Discord's network and frame cad
 
 | Component                                | Contribution | Reducible?                              |
 |------------------------------------------|--------------|-----------------------------------------|
-| Two Discord UDP hops (region-dependent)  | 65–110ms     | Pick a region closer to Discord servers |
+| Two Discord UDP hops (one voice RTT)     | 10–45ms in Europe, 100–245ms in the US and Asia | Only by running the voice process near the guild's region |
 | Discord client 20ms Opus frame buildup   | 20ms         | No — protocol-fixed                     |
 | Mixer tick alignment (next 20ms boundary)| 0–20ms       | No without changing frame size          |
 | Mixer queue (`SourceBuffer`)             | 0–60ms       | Already capped; lowering hurts jitter   |

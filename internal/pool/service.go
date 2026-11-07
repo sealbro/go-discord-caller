@@ -206,10 +206,7 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 			continue
 		}
 		connected++
-		// Emit per-bot gateway heartbeat RTT.
-		// Latency() returns 0 until the first heartbeat ACK is received.
-		latMs := float64(c.Gateway.Latency().Milliseconds())
-		s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+		s.observeGatewayLatency(o, id, c)
 	}
 	for id, eb := range s.extraBots {
 		name := eb.name
@@ -224,8 +221,7 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 		if eb.client == nil || !isConnected(eb.client) {
 			continue
 		}
-		latMs := float64(eb.client.Gateway.Latency().Milliseconds())
-		s.metrics.ObserveGatewayLatency(o, id.String(), latMs)
+		s.observeGatewayLatency(o, id, eb.client)
 	}
 	for id, v := range s.verification {
 		s.metrics.ObserveBotVerification(o, id.String(), v)
@@ -233,6 +229,16 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 	s.mu.RUnlock()
 	s.metrics.ObservePoolBots(o, total, connected)
 	return nil
+}
+
+// observeGatewayLatency reports the heartbeat RTT unless a beat is in flight.
+// disgo computes it as last ACK minus last beat sent, which is negative (about
+// minus one heartbeat interval) until that beat is acknowledged. Zero, before the
+// first ACK, is still reported: the availability SLO counts these series.
+func (s *Service) observeGatewayLatency(o metric.Observer, id snowflake.ID, c *bot.Client) {
+	if latency := c.Gateway.Latency(); latency >= 0 {
+		s.metrics.ObserveGatewayLatency(o, id.String(), float64(latency.Milliseconds()))
+	}
 }
 
 // Reconnect attempts to open the gateway for a bot whose connection failed.

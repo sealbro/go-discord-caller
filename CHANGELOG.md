@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-11-07
+
 ### Added
 - **Gateway re-identify counter**: `gdc_gateway_ready_total` counts the owner bot's READY events, so a reconnect loop shows up before Discord resets the token.
 - **Lost frames per source**: `gdc_opus_source_frames_lost_total` counts each frame lost to a full mixer input once, however many channels it goes to; the dropped-frames metric counts each channel separately.
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Smaller owner bot invite**: the owner bot no longer asks for Add Reactions, Send Messages, Send TTS Messages or Send Voice Messages, which it never used. Servers that already installed it keep their current permissions; only new installs get the smaller set.
+- **Dependencies**: Go dependencies updated to their latest versions.
 
 ## [0.13.1] - 2026-11-03
 

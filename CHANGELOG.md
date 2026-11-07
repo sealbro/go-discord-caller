@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Reconnect loop flooding Discord's API**: when the owner gateway re-identifies repeatedly, guild seeding is skipped until it settles instead of re-fetching every server's channels on each reconnect.
 
+### Changed
+- **Smaller owner bot invite**: the owner bot no longer asks for Add Reactions, Send Messages, Send TTS Messages or Send Voice Messages, which it never used. Servers that already installed it keep their current permissions; only new installs get the smaller set.
+
 ## [0.13.1] - 2026-11-03
 
 ### Added

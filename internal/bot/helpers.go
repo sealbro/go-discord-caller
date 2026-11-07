@@ -75,10 +75,6 @@ const botPermissions discord.Permissions = discord.PermissionViewChannel |
 // skipped with a warning.
 const ownerPermissions = botPermissions |
 	discord.PermissionDeafenMembers |
-	discord.PermissionAddReactions |
-	discord.PermissionSendMessages |
-	discord.PermissionSendTTSMessages |
-	discord.PermissionSendVoiceMessages |
 	discord.PermissionSetVoiceChannelStatus
 
 func installOwnerURL(clientID snowflake.ID) string {

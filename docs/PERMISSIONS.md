@@ -19,18 +19,14 @@ post in text channels.
 | Speak | `SPEAK` | 21 | `2097152` | ✓ | ✓ | Playing audio (the owner bot plays it in a guest server) |
 | Use Voice Activity | `USE_VAD` | 25 | `33554432` | ✓ | ✓ | Transmitting in channels that require push-to-talk |
 | Deafen Members | `DEAFEN_MEMBERS` | 23 | `8388608` | ✓ | | Server-deafening speaker bots that do not need to hear |
-| Add Reactions | `ADD_REACTIONS` | 6 | `64` | ✓ | | Not used today; requested for upcoming features |
 | Priority Speaker | `PRIORITY_SPEAKER` | 8 | `256` | ✓ | ✓ | Not used today |
-| Send Messages | `SEND_MESSAGES` | 11 | `2048` | ✓ | | Not used today |
-| Send TTS Messages | `SEND_TTS_MESSAGES` | 12 | `4096` | ✓ | | Not used today |
-| Send Voice Messages | `SEND_VOICE_MESSAGES` | 46 | `70368744177664` | ✓ | | Not used today |
 | Set Voice Channel Status | `SET_VOICE_CHANNEL_STATUS` | 48 | `281474976710656` | ✓ | | Not used today |
 
 Each bot's permission integer is the sum of the values in its column:
 
 | Bot | `permissions=` |
 |---|---|
-| Owner | `351843765984576` |
+| Owner | `281475021800704` |
 | Speaker | `36701440` |
 
 ## Owner bot
@@ -38,7 +34,7 @@ Each bot's permission integer is the sum of the values in its column:
 Invite it with:
 
 ```text
-https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions=351843765984576
+https://discord.com/oauth2/authorize?client_id=<client_id>&scope=bot&permissions=281475021800704
 ```
 
 The same URL is printed to the logs when the bot starts (`owner bot invite URL`).
@@ -94,7 +90,7 @@ bot's app → **Installation**:
 3. **Default Install Settings → Guild Install**: scopes `bot` and
    `applications.commands`, and tick the owner permissions from the table above.
 4. Save, and check that the link the portal shows ends in
-   `permissions=351843765984576`.
+   `permissions=281475021800704`.
 
 ## Changing the permission set
 

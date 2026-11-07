@@ -21,6 +21,7 @@ type PoolMetrics struct {
 	verifyBlocked     metric.Int64ObservableGauge
 	reconnectAttempts metric.Int64Counter
 	reconnectFailures metric.Int64Counter
+	gatewayReady      metric.Int64Counter
 }
 
 func (p *PoolMetrics) init(meter metric.Meter) (err error) {
@@ -73,6 +74,11 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 	}
 	if p.reconnectFailures, err = meter.Int64Counter("gdc.pool.reconnect.failures.total",
 		metric.WithDescription("Watchdog gateway reconnect failures."),
+	); err != nil {
+		return
+	}
+	if p.gatewayReady, err = meter.Int64Counter("gdc.gateway.ready.total",
+		metric.WithDescription("Gateway READY events received. Each one follows an IDENTIFY, which Discord caps per day; a steady climb means a reconnect loop."),
 	); err != nil {
 		return
 	}
@@ -170,4 +176,15 @@ func (p *PoolMetrics) ReconnectAttempt(ctx context.Context, botID snowflake.ID) 
 // ReconnectFailed records one failed watchdog reconnect attempt for botID.
 func (p *PoolMetrics) ReconnectFailed(ctx context.Context, botID snowflake.ID) {
 	p.reconnectFailures.Add(ctx, 1, metric.WithAttributes(attribute.String("bot_id", botID.String())))
+}
+
+// GatewayReady records one READY event for botID, seeding the series at zero
+// first so a bot that never re-identifies still shows a flat line.
+func (p *PoolMetrics) GatewayReady(ctx context.Context, botID snowflake.ID) {
+	p.gatewayReady.Add(ctx, 1, metric.WithAttributes(attribute.String("bot_id", botID.String())))
+}
+
+// SeedGatewayReady creates the READY series for botID at zero.
+func (p *PoolMetrics) SeedGatewayReady(ctx context.Context, botID snowflake.ID) {
+	p.gatewayReady.Add(ctx, 0, metric.WithAttributes(attribute.String("bot_id", botID.String())))
 }

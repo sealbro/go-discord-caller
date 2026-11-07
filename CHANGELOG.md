@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Lost frames per source**: `gdc_opus_source_frames_lost_total` counts each frame lost to a full mixer input once, however many channels it goes to; the dropped-frames metric counts each channel separately.
 
+### Changed
+- **Smaller owner bot invite**: the owner bot no longer asks for Add Reactions, Send Messages, Send TTS Messages or Send Voice Messages, which it never used. Servers that already installed it keep their current permissions; only new installs get the smaller set.
+
 ## [0.13.1] - 2026-11-03
 
 ### Added

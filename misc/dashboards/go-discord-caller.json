@@ -30,6 +30,56 @@
             "version": "v0"
           }
         }
+      },
+      {
+        "kind": "AnnotationQuery",
+        "spec": {
+          "enable": true,
+          "hide": false,
+          "iconColor": "orange",
+          "name": "Restarts",
+          "query": {
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "group": "prometheus",
+            "kind": "DataQuery",
+            "spec": {
+              "expr": "(resets(gdc_process_cpu_time_seconds_total{origin_prometheus=~\"$origin_prometheus\"}[5m]) > 0) * on(origin_prometheus) group_left(version, revision) clamp_max(topk by (origin_prometheus) (1, timestamp(gdc_build_info{origin_prometheus=~\"$origin_prometheus\"})), 1)",
+              "step": "5m"
+            },
+            "version": "v0"
+          },
+          "legacyOptions": {
+            "titleFormat": "Restart · {{version}}",
+            "textFormat": "{{origin_prometheus}} · {{revision}}"
+          }
+        }
+      },
+      {
+        "kind": "AnnotationQuery",
+        "spec": {
+          "enable": true,
+          "hide": false,
+          "iconColor": "purple",
+          "name": "Version changes",
+          "query": {
+            "datasource": {
+              "name": "grafanacloud-prom"
+            },
+            "group": "prometheus",
+            "kind": "DataQuery",
+            "spec": {
+              "expr": "max by (version, revision) (gdc_build_info{origin_prometheus=~\"$origin_prometheus\"}) unless max by (version, revision) (gdc_build_info{origin_prometheus=~\"$origin_prometheus\"} offset 5m)",
+              "step": "5m"
+            },
+            "version": "v0"
+          },
+          "legacyOptions": {
+            "titleFormat": "Version {{version}}",
+            "textFormat": "{{revision}}"
+          }
+        }
       }
     ],
     "cursorSync": "Tooltip",

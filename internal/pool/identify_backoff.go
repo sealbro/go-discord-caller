@@ -8,6 +8,7 @@ import (
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/gateway"
+	"github.com/disgoorg/snowflake/v2"
 )
 
 const (
@@ -21,20 +22,21 @@ const (
 // ready but keeps being invalidated would otherwise be re-identified every
 // second and spend Discord's 1,000 IDENTIFYs a day, which resets the token.
 type identifyBackoff struct {
+	botID  snowflake.ID
 	mu     sync.Mutex
 	now    func() time.Time
 	last   time.Time
 	streak int
 }
 
-func newIdentifyBackoff() *identifyBackoff {
-	return &identifyBackoff{now: time.Now}
+func newIdentifyBackoff(botID snowflake.ID) *identifyBackoff {
+	return &identifyBackoff{botID: botID, now: time.Now}
 }
 
 // IdentifyBackoffOpt installs a fresh IDENTIFY backoff on a bot's gateway. Install
 // it on every client: each token has its own daily IDENTIFY budget.
-func IdentifyBackoffOpt() bot.ConfigOpt {
-	return bot.WithGatewayConfigOpts(gateway.WithIdentifyRateLimiter(newIdentifyBackoff()))
+func IdentifyBackoffOpt(botID snowflake.ID) bot.ConfigOpt {
+	return bot.WithGatewayConfigOpts(gateway.WithIdentifyRateLimiter(newIdentifyBackoff(botID)))
 }
 
 func (b *identifyBackoff) Wait(ctx context.Context, _ int) error {
@@ -47,6 +49,7 @@ func (b *identifyBackoff) Wait(ctx context.Context, _ int) error {
 		return nil
 	}
 	slog.Warn("gateway is being re-identified; delaying the next IDENTIFY",
+		slog.String("botID", b.botID.String()),
 		slog.Duration("delay", wait),
 	)
 	timer := time.NewTimer(wait)

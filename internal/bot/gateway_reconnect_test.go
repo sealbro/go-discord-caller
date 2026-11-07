@@ -20,11 +20,8 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/gatewaytest"
 )
 
-// Production, 2026-11-07: a gateway that kept dropping the owner after READY was
-// re-identified every few seconds for 90 minutes. That used up Discord's 1,000
-// IDENTIFYs a day, which resets the bot token and left the bot offline. disgo
-// restarts its reconnect backoff at one second after every READY, so a gateway
-// that is ready but unstable is never slowed down.
+// A gateway that reaches READY and is then invalidated must be re-identified at
+// growing intervals: disgo restarts its own reconnect backoff after every READY.
 func TestGatewaySlowsDownWhenSessionKeepsBeingInvalidated(t *testing.T) {
 	wsURL, identifies := gatewaytest.IdentifyingGateway(t)
 

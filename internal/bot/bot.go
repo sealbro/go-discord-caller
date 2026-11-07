@@ -340,7 +340,7 @@ func NewOwnerClient(token string, daveStats *dave.Stats, daveStalls *dave.Encryp
 		bot.WithCacheConfigOpts(ownerCacheOpts(&caches)...),
 		bot.WithEventListeners(ownerCacheListeners()...),
 		ownerGatewayHandlers(),
-		pool.IdentifyBackoffOpt(),
+		pool.IdentifyBackoffOpt(botUserID),
 		bot.WithVoiceManagerConfigOpts(
 			voice.WithDaveSessionCreateFunc(dave.Instrument(golibdave.NewSession, daveStats, daveStalls.Option())),
 			pool.SafeAudioSenderOpt(),

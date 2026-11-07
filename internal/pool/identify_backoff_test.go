@@ -6,7 +6,7 @@ import (
 )
 
 func TestIdentifyBackoffDoublesSpacingAndCaps(t *testing.T) {
-	b := newIdentifyBackoff()
+	b := newIdentifyBackoff(0)
 	now := time.Unix(0, 0)
 
 	if got := b.reserve(now); !got.Equal(now) {
@@ -25,7 +25,7 @@ func TestIdentifyBackoffDoublesSpacingAndCaps(t *testing.T) {
 }
 
 func TestIdentifyBackoffForgetsAfterStableStretch(t *testing.T) {
-	b := newIdentifyBackoff()
+	b := newIdentifyBackoff(0)
 	now := time.Unix(0, 0)
 	for i := 0; i < 8; i++ {
 		now = b.reserve(now)

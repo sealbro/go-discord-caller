@@ -93,10 +93,10 @@ func (s *Service) freshGateway(botUserID snowflake.ID) {
 }
 
 // newPoolClient builds a disgo client for a speaker bot token.
-func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, freshGateway func(snowflake.ID)) (*bot.Client, error) {
+func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls, freshGateway func(snowflake.ID), extra ...bot.ConfigOpt) (*bot.Client, error) {
 	botUserID, _ := guild.BotUserID(token)
 
-	return disgo.New(token,
+	return disgo.New(token, append([]bot.ConfigOpt{
 		bot.WithEventListeners(VoiceRegionListeners(botUserID, voiceRegion)...),
 		bot.WithEventListeners(bot.NewListenerFunc(func(*events.Ready) { freshGateway(botUserID) })),
 		bot.WithGatewayConfigOpts(
@@ -108,7 +108,7 @@ func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, dave
 			VoiceConnOpt(),
 			voice.WithLogger(telemetry.VoiceLogger(botUserID)),
 		),
-	)
+	}, extra...)...)
 }
 
 // ConnectPool pre-connects all gateways in the pool concurrently and waits

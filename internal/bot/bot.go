@@ -172,6 +172,10 @@ func New(cfg *config.Config, st store.Store, meter metric.Meter) (*Bot, error) {
 	// Registered here rather than in NewOwnerClient because the metrics are
 	// built after the client — same reason as the Ready listener above.
 	client.AddEventListeners(pool.VoiceRegionListeners(ownerBotID, &metrics.Voice)...)
+	metrics.Pool.SeedGatewayReady(context.Background(), ownerBotID)
+	client.AddEventListeners(bot.NewListenerFunc(func(*events.Ready) {
+		metrics.Pool.GatewayReady(context.Background(), ownerBotID)
+	}))
 
 	poolSvc := pool.NewService(&metrics.Pool, &metrics.Voice, daveStats, daveStalls)
 	managerSvc := manager.NewService(st, poolSvc, client, ownerBotID, cfg.Test, metrics)

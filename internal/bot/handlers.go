@@ -19,7 +19,7 @@ type GuildCommandSyncer func(ctx context.Context, guildID snowflake.ID)
 // Called by the production bot and by the E2E harness so both use identical handler logic.
 func EventListeners(managerSvc ManagerService, syncGuild GuildCommandSyncer) []bot.EventListener {
 	return []bot.EventListener{
-		bot.NewListenerFunc(onReady(managerSvc)),
+		bot.NewListenerFunc(onReady(managerSvc, newReadyGuard())),
 		bot.NewListenerFunc(onGuildJoin(managerSvc, syncGuild)),
 		bot.NewListenerFunc(onGuildLeave(managerSvc)),
 		bot.NewListenerFunc(onGuildMemberAdd(managerSvc)),
@@ -34,9 +34,20 @@ func EventListeners(managerSvc ManagerService, syncGuild GuildCommandSyncer) []b
 
 // onReady is called when the bot has connected and is ready.
 // It seeds the speaker list with any pool bots already joined to each guild.
-func onReady(m ManagerService) func(*events.Ready) {
+func onReady(m ManagerService, guard *readyGuard) func(*events.Ready) {
 	return func(e *events.Ready) {
 		slog.Info("bot is ready", slog.String("username", e.User.Username))
+
+		allowed, tripped := guard.admit()
+		if tripped {
+			slog.Error("gateway keeps re-identifying; skipping guild seeding until it settles",
+				slog.String("username", e.User.Username),
+				slog.Duration("window", guard.window),
+			)
+		}
+		if !allowed {
+			return
+		}
 
 		guildIDs := make([]snowflake.ID, 0, len(e.Guilds))
 		for _, g := range e.Guilds {

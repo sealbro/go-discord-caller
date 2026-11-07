@@ -78,6 +78,7 @@ the last known value.
 | `gdc.bot.verification_blocked`   | ObservableGauge | `gdc_bot_verification_blocked`   | `bot_id` | `1` when Discord has blocked verification because of unusual growth. |
 | `gdc.pool.reconnect.attempts.total` | Counter | `gdc_pool_reconnect_attempts_total` | `bot_id` | Watchdog gateway reconnect attempts. |
 | `gdc.pool.reconnect.failures.total` | Counter | `gdc_pool_reconnect_failures_total` | `bot_id` | Watchdog gateway reconnect failures. |
+| `gdc.gateway.ready.total` | Counter | `gdc_gateway_ready_total` | `bot_id` | Gateway READY events of the owner bot. Each follows an IDENTIFY, and Discord resets a bot's token after 1000 in a day: alert on `increase(gdc_gateway_ready_total[10m]) > 10`. |
 
 ---
 

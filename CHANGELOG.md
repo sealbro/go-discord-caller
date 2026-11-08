@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **First raid after a restart missing from session counts**: a guild's session start and stop counters now begin at zero, so Prometheus counts its first raid. Before, a guild with one raid since the last restart showed no sessions.
 - **Gateway latency dipping to about −41 s**: `gdc_bot_gateway_latency_milliseconds` is no longer reported while a heartbeat is waiting for its reply, which made averages meaningless. The gateway latency panels ignore non-positive values.
 
 ## [0.14.1] - 2026-11-07

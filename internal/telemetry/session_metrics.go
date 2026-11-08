@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"sync"
 
 	"github.com/disgoorg/snowflake/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -17,6 +18,8 @@ type SessionMetrics struct {
 	mode             metric.Int64Gauge
 	dropped          metric.Int64Counter
 	routeTransitions metric.Int64Counter
+
+	primed sync.Map // guild ID -> struct{}
 }
 
 func (s *SessionMetrics) init(meter metric.Meter) (err error) {
@@ -56,6 +59,19 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	return nil
+}
+
+// PrimeGuild exports guildID's start and stop counters at zero. A counter
+// series born holding 1 has no earlier sample, so Prometheus' increase() misses
+// the guild's first raid since the process started. Call it from a collection
+// that runs before any raid; repeat calls are no-ops.
+func (s *SessionMetrics) PrimeGuild(ctx context.Context, guildID snowflake.ID) {
+	if _, seen := s.primed.LoadOrStore(guildID, struct{}{}); seen {
+		return
+	}
+	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
+	s.starts.Add(ctx, 0, attrs)
+	s.stops.Add(ctx, 0, attrs)
 }
 
 // SessionStarted records the start of a voice raid: increments active counter,

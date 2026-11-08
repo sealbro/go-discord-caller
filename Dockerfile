@@ -17,6 +17,9 @@ RUN apt-get update \
 	&& chmod +x /tmp/godave/scripts/libdave_install.sh \
 	&& /bin/bash /tmp/godave/scripts/libdave_install.sh $LIBDAVE_VERSION
 
+RUN test -f /root/.local/lib/libdave.so \
+	|| { echo "libdave install failed: /root/.local/lib/libdave.so is missing" >&2; exit 1; }
+
 ENV PKG_CONFIG_PATH="/root/.local/lib/pkgconfig"
 
 RUN CGO_ENABLED=1 go build \

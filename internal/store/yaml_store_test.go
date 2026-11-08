@@ -423,3 +423,12 @@ func unmarshalYAML(data []byte) error {
 	}
 	return ts.load()
 }
+
+func TestSyncDir(t *testing.T) {
+	if err := syncDir(t.TempDir()); err != nil {
+		t.Errorf("syncDir on a real directory = %v", err)
+	}
+	if err := syncDir(filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Error("syncDir on a missing directory must fail")
+	}
+}

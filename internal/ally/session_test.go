@@ -102,3 +102,37 @@ func TestSession_RemoveGuildDropsItsObserver(t *testing.T) {
 		t.Errorf("removed observer fired %d time(s) on a later membership change", guestCalls)
 	}
 }
+
+func TestSession_BroadcastReachesEveryGuildAndDropsOnFullChannel(t *testing.T) {
+	t.Parallel()
+	s := newTestSession(t)
+
+	hostCh := make(chan []byte, 1)
+	guestCh := make(chan []byte, 1)
+	s.AddGuild(hostID, []chan<- []byte{hostCh})
+	s.AddGuild(guestID, []chan<- []byte{guestCh})
+
+	s.Broadcast([]byte{1, 2, 3})
+	for name, ch := range map[string]chan []byte{"host": hostCh, "guest": guestCh} {
+		select {
+		case got := <-ch:
+			if len(got) != 3 || got[0] != 1 {
+				t.Errorf("%s received %v, want the broadcast packet", name, got)
+			}
+		default:
+			t.Errorf("%s received nothing", name)
+		}
+	}
+
+	hostCh <- []byte{9}
+	done := make(chan struct{})
+	go func() {
+		s.Broadcast([]byte{4})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Broadcast blocked on a full channel")
+	}
+}

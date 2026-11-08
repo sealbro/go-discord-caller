@@ -77,3 +77,24 @@ func TestStorePath(t *testing.T) {
 		t.Errorf("storePath() = %q, want /data/store.yaml", got)
 	}
 }
+
+func TestLoadRequiresOwnerToken(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("DISCORD_OWNER_BOT_TOKEN", "")
+	if _, err := Load(); err == nil {
+		t.Fatal("Load without an owner token must fail")
+	}
+}
+
+func TestLoadReadsEnvironment(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("DISCORD_OWNER_BOT_TOKEN", "owner")
+	t.Setenv("TEST_ALLOW_BOTS", "true")
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load = %v", err)
+	}
+	if cfg.OwnerBotToken != "owner" || !cfg.Test.AllowBots {
+		t.Errorf("Load = %+v, want owner token and AllowBots", cfg)
+	}
+}

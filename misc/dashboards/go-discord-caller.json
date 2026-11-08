@@ -1345,7 +1345,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"})), 1)",
+                        "expr": "max_over_time(gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"})), 1)",
                         "instant": false,
                         "legendFormat": "{{guild_name}}",
                         "range": true
@@ -1380,9 +1380,9 @@
                     "axisLabel": "",
                     "axisPlacement": "auto",
                     "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 20,
+                    "barWidthFactor": 0.9,
+                    "drawStyle": "bars",
+                    "fillOpacity": 70,
                     "gradientMode": "none",
                     "hideFrom": {
                       "legend": false,
@@ -1391,7 +1391,7 @@
                     },
                     "insertNulls": false,
                     "lineInterpolation": "stepAfter",
-                    "lineWidth": 2,
+                    "lineWidth": 1,
                     "pointSize": 5,
                     "scaleDistribution": {
                       "type": "linear"
@@ -1401,7 +1401,7 @@
                     "spanNulls": false,
                     "stacking": {
                       "group": "A",
-                      "mode": "none"
+                      "mode": "normal"
                     },
                     "thresholdsStyle": {
                       "mode": "off"
@@ -1458,10 +1458,12 @@
                   ],
                   "displayMode": "list",
                   "placement": "bottom",
-                  "showLegend": true
+                  "showLegend": true,
+                  "sortBy": "Max",
+                  "sortDesc": true
                 },
                 "tooltip": {
-                  "hideZeros": false,
+                  "hideZeros": true,
                   "mode": "multi",
                   "sort": "desc"
                 }

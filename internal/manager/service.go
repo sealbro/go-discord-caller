@@ -212,9 +212,10 @@ func (m *Service) StartMetrics() {
 // observeGuildInfo is an OTel observable callback that emits gdc_discord_guild
 // for every guild the owner bot is currently a member of.
 // Reads directly from the disgo cache — no duplicate state needed.
-func (m *Service) observeGuildInfo(_ context.Context, o metric.Observer) error {
+func (m *Service) observeGuildInfo(ctx context.Context, o metric.Observer) error {
 	for g := range m.ownerClient.Caches.Guilds() {
 		m.metrics.Bot.ObserveGuildInfo(o, g.ID.String(), g.Name)
+		m.metrics.Session.PrimeGuild(ctx, g.ID)
 	}
 	return nil
 }

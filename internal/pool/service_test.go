@@ -325,6 +325,37 @@ func TestPoolMetricsReportConnectionState(t *testing.T) {
 	}
 }
 
+// disgo computes Latency as last ACK minus last heartbeat sent, so it is
+// negative (about minus one heartbeat interval) while a beat is in flight.
+func TestGatewayLatencyIsNotReportedWhileAHeartbeatIsInFlight(t *testing.T) {
+	t.Parallel()
+	const (
+		measured snowflake.ID = 731
+		inFlight snowflake.ID = 732
+	)
+	s, reader := newMetricsService(t)
+	s.poolClients[measured], _ = clientWithGateway(gateway.StatusReady, 105*time.Millisecond)
+	s.poolClients[inFlight], _ = clientWithGateway(gateway.StatusReady, -41*time.Second)
+	s.StartMetrics()
+
+	latency := map[string]float64{}
+	for _, scope := range collect(t, reader).ScopeMetrics {
+		for _, m := range scope.Metrics {
+			if gauge, ok := m.Data.(metricdata.Gauge[float64]); ok && m.Name == "gdc.bot.gateway.latency" {
+				for _, dp := range gauge.DataPoints {
+					id, _ := dp.Attributes.Value("bot_id")
+					latency[id.AsString()] = dp.Value
+				}
+			}
+		}
+	}
+
+	want := map[string]float64{measured.String(): 105}
+	if len(latency) != len(want) || latency[measured.String()] != 105 {
+		t.Errorf("gateway latency = %v, want %v (no sample for a beat in flight)", latency, want)
+	}
+}
+
 func TestRegisteredBotNameIsFilledInOnceItsSelfUserIsKnown(t *testing.T) {
 	t.Parallel()
 	const owner snowflake.ID = 741

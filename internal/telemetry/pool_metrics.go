@@ -42,7 +42,7 @@ func (p *PoolMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if p.gatewayLatency, err = meter.Float64ObservableGauge("gdc.bot.gateway.latency",
-		metric.WithDescription("Discord gateway WebSocket heartbeat RTT per bot. Zero until the first heartbeat ACK is received."),
+		metric.WithDescription("Discord gateway WebSocket heartbeat RTT per bot. Zero until the first heartbeat ACK; absent while a later heartbeat is awaiting its ACK."),
 		metric.WithUnit("ms"),
 	); err != nil {
 		return

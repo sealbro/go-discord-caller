@@ -2171,7 +2171,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "avg(gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"})",
+                        "expr": "avg(gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"} > 0)",
                         "instant": true,
                         "legendFormat": "avg",
                         "range": false
@@ -2257,7 +2257,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"} * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1)",
+                        "expr": "(gdc_bot_gateway_latency_milliseconds{origin_prometheus=~\"$origin_prometheus\"} > 0) * on(bot_id) group_left(bot_name) clamp_max(topk by (bot_id) (1, timestamp(gdc_discord_bot{origin_prometheus=~\"$origin_prometheus\"})), 1)",
                         "instant": false,
                         "legendFormat": "{{bot_name}}",
                         "range": true

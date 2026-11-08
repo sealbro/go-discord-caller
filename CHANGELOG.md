@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Gateway latency dipping to about −41 s**: `gdc_bot_gateway_latency_milliseconds` is no longer reported while a heartbeat is waiting for its reply, which made averages meaningless. The gateway latency panels ignore non-positive values.
+
 ## [0.14.1] - 2026-11-07
 
 ### Fixed

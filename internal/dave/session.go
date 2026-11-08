@@ -211,7 +211,9 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 	}
 
 	position := spurt.next(s.now())
+	started := time.Now()
 	n, err := s.Session.Decrypt(userID, frame, decryptedFrame)
+	s.stats.RecordDecryptDuration(s.botUserID, time.Since(started))
 	s.stats.Record(s.botUserID, string(userID), err)
 	s.stats.RecordPosition(s.botUserID, position, err)
 	return n, err

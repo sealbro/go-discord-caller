@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.opentelemetry.io/otel/metric"
 
@@ -182,6 +183,17 @@ func (s *Stats) Record(botUserID, userID string, err error) {
 		outcome:   outcome(err),
 		reason:    reason(err),
 	}).Add(1)
+}
+
+// RecordDecryptDuration reports how long one backend Decrypt call took. It is a
+// no-op until StartMetrics attaches the meter.
+func (s *Stats) RecordDecryptDuration(botUserID string, took time.Duration) {
+	s.mu.RLock()
+	m := s.metrics
+	s.mu.RUnlock()
+	if m != nil {
+		m.RecordDecryptDuration(botUserID, took)
+	}
 }
 
 // RecordPassthrough counts one frame from a user the backend has no decryptor

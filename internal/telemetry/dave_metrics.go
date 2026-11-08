@@ -1,6 +1,10 @@
 package telemetry
 
 import (
+	"context"
+	"sync"
+	"time"
+
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
@@ -21,10 +25,20 @@ type DaveMetrics struct {
 	senders      metric.Int64ObservableGauge
 	encryptTotal metric.Int64ObservableCounter
 	positions    metric.Int64ObservableCounter
+
+	decryptDuration metric.Float64Histogram
+	durationAttrs   sync.Map // bot user ID -> metric.MeasurementOption
 }
 
 func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 	d.meter = meter
+	if d.decryptDuration, err = meter.Float64Histogram("gdc.dave.decrypt.duration",
+		metric.WithDescription("Time one DAVE frame decryption took. Frames from every speaker are decrypted in turn on one receive goroutine, so a slow decrypt delays them all. Labels: bot_user_id."),
+		metric.WithUnit("ms"),
+		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250),
+	); err != nil {
+		return
+	}
 	if d.decryptTotal, err = meter.Int64ObservableCounter("gdc.dave.decrypt.total",
 		metric.WithDescription("DAVE frame decryption outcomes, summed over senders. Labels: bot_user_id, outcome (success|passthrough|dropped|failure), reason (failure detail, else none)."),
 	); err != nil {
@@ -46,6 +60,17 @@ func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	return nil
+}
+
+// RecordDecryptDuration records one decryption. It runs for every inbound
+// frame, so the attribute set is built once per bot.
+func (d *DaveMetrics) RecordDecryptDuration(botUserID string, took time.Duration) {
+	opt, ok := d.durationAttrs.Load(botUserID)
+	if !ok {
+		opt, _ = d.durationAttrs.LoadOrStore(botUserID,
+			metric.WithAttributes(attribute.String("bot_user_id", botUserID)))
+	}
+	d.decryptDuration.Record(context.Background(), float64(took.Microseconds())/1000, opt.(metric.MeasurementOption))
 }
 
 // RegisterObservers registers cb as the observable callback for every DAVE

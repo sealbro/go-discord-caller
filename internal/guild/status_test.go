@@ -139,3 +139,15 @@ func TestRenderUsesTranslator(t *testing.T) {
 		t.Fatal("Render did not consult the translator")
 	}
 }
+
+func TestHasActiveSession(t *testing.T) {
+	t.Parallel()
+	s := NewStatus(testGuild, testOwner)
+	if s.HasActiveSession() {
+		t.Error("fresh status must have no active session")
+	}
+	s.Session = &Session{GuildID: testGuild}
+	if !s.HasActiveSession() {
+		t.Error("status with a session must report it active")
+	}
+}

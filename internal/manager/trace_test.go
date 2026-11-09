@@ -5,33 +5,19 @@ import (
 	"errors"
 	"testing"
 
-	"go.opentelemetry.io/otel"
+	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 	"go.opentelemetry.io/otel/codes"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
-// recordSpans swaps in a recording tracer provider for the duration of a test.
-// telemetry.Tracer comes from the otel global, which delegates to whichever
-// provider is installed, so registering one here is enough.
-func recordSpans(t *testing.T) *tracetest.SpanRecorder {
-	t.Helper()
-	rec := tracetest.NewSpanRecorder()
-	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
-	otel.SetTracerProvider(tp)
-	t.Cleanup(func() { _ = tp.Shutdown(context.Background()) })
-	return rec
-}
-
 func TestStartPhaseNestsAndRecordsError(t *testing.T) {
-	rec := recordSpans(t)
+	ended := spantest.Record()
 
 	outerCtx, endOuter := startPhase(context.Background(), "voice.session.setup")
 	_, endInner := startPhase(outerCtx, "voice.conn.open")
 	endInner(errors.New("join timeout"))
 	endOuter(nil)
 
-	spans := rec.Ended()
+	spans := ended()
 	if len(spans) != 2 {
 		t.Fatalf("want 2 ended spans, got %d", len(spans))
 	}

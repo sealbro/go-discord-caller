@@ -2,7 +2,6 @@ package bot
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,9 +26,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
 	"github.com/sealbro/go-discord-caller/internal/manager"
-	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 )
 
 const (
@@ -919,20 +916,13 @@ func TestStartCommandRejectsMalformedRelayCode(t *testing.T) {
 }
 
 func TestCommandSpansCarryNoUserIdentifier(t *testing.T) {
-	spans := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
-	prev := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(prev)
-		_ = provider.Shutdown(context.Background())
-	})
+	ended := spantest.Record()
 
 	h := newInteractionHarness(t, &fakeManager{})
 	h.dispatch(slashPayload(memberJSON(permManage), "status"))
 
 	var found bool
-	for _, span := range spans.Ended() {
+	for _, span := range ended() {
 		if span.Name() != "discord.command" {
 			continue
 		}

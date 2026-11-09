@@ -14,9 +14,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
-	"go.opentelemetry.io/otel"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 )
 
 type lockedBuffer struct {
@@ -47,14 +45,7 @@ func TestE5g_RelayCodeNotInLogsOrSpans(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	t.Cleanup(func() { slog.SetDefault(prevLogger) })
 
-	spans := tracetest.NewSpanRecorder()
-	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
-	prevProvider := otel.GetTracerProvider()
-	otel.SetTracerProvider(provider)
-	t.Cleanup(func() {
-		otel.SetTracerProvider(prevProvider)
-		_ = provider.Shutdown(context.Background())
-	})
+	ended := spantest.Record()
 
 	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
 	defer cancel()
@@ -89,11 +80,11 @@ func TestE5g_RelayCodeNotInLogsOrSpans(t *testing.T) {
 	if strings.Contains(out, code) {
 		t.Error("a log line carries the relay code")
 	}
-	ended := spans.Ended()
-	if len(ended) == 0 {
+	recorded := ended()
+	if len(recorded) == 0 {
 		t.Fatal("no spans recorded")
 	}
-	for _, span := range ended {
+	for _, span := range recorded {
 		for _, attr := range span.Attributes() {
 			if strings.Contains(attr.Value.Emit(), code) {
 				t.Errorf("span %q carries the relay code in attribute %q", span.Name(), attr.Key)

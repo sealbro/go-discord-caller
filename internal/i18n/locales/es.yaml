@@ -15,7 +15,8 @@ cmd.status.description: "Mostrar las vinculaciones actuales de speakers y el est
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Necesitas el permiso «Administrar servidor» o el rol de gestor para usar este comando."
-err.need_admin: "❌ Necesitas el permiso «Administrador» o el rol de gestor para usar este comando."
+err.need_admin: "❌ Necesitas el permiso «Administrador» para usar este comando."
+err.role_not_bindable: "❌ No se puede usar este rol: elige un rol normal, no @everyone ni un rol gestionado por un bot."
 err.guild_only: "este comando solo se puede usar dentro de un servidor"
 err.unexpected_data_type: "tipo de datos de interacción inesperado"
 err.invalid_speaker_id: "ID de speaker inválido"

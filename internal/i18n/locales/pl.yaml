@@ -15,7 +15,8 @@ cmd.status.description: "Pokaż bieżące powiązania speakerów i stan voice ra
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Potrzebujesz uprawnienia „Zarządzaj serwerem” lub roli menedżera serwera, aby użyć tego polecenia."
-err.need_admin: "❌ Potrzebujesz uprawnienia „Administrator” lub roli menedżera serwera, aby użyć tego polecenia."
+err.need_admin: "❌ Potrzebujesz uprawnienia „Administrator”, aby użyć tego polecenia."
+err.role_not_bindable: "❌ Tej roli nie można użyć: wybierz zwykłą rolę, a nie @everyone ani rolę zarządzaną przez bota."
 err.guild_only: "to polecenie można używać tylko wewnątrz serwera"
 err.unexpected_data_type: "nieoczekiwany typ danych interakcji"
 err.invalid_speaker_id: "nieprawidłowy identyfikator speakera"

@@ -15,7 +15,8 @@ cmd.status.description: "Aktuelle Speaker-Bindungen und den Voice-Raid-Status an
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Du benötigst die Berechtigung „Server verwalten“ oder die Manager-Rolle des Servers, um diesen Befehl zu nutzen."
-err.need_admin: "❌ Du benötigst die Berechtigung „Administrator“ oder die Manager-Rolle des Servers, um diesen Befehl zu nutzen."
+err.need_admin: "❌ Du benötigst die Berechtigung „Administrator“, um diesen Befehl zu nutzen."
+err.role_not_bindable: "❌ Diese Rolle kann nicht verwendet werden: Wähle eine normale Rolle, nicht @everyone oder eine von einem Bot verwaltete Rolle."
 err.guild_only: "dieser Befehl kann nur innerhalb eines Servers verwendet werden"
 err.unexpected_data_type: "unerwarteter Interaktionsdatentyp"
 err.invalid_speaker_id: "ungültige Speaker-ID"

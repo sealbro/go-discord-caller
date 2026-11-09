@@ -16,7 +16,8 @@ cmd.status.description: "Show current speaker bindings and voice raid state"
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ You need the Manage Server permission or the server's manager role to use this command."
-err.need_admin: "❌ You need the Administrator permission or the server's manager role to use this command."
+err.need_admin: "❌ You need the Administrator permission to use this command."
+err.role_not_bindable: "❌ This role cannot be used: pick a regular role, not @everyone or a bot-managed role."
 err.guild_only: "this command can only be used inside a server"
 err.unexpected_data_type: "unexpected interaction data type"
 err.invalid_speaker_id: "invalid speaker ID"

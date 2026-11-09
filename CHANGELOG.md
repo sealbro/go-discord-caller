@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ally code reset**: `/setup` has a "Reset Ally Code" button that replaces the server's relay code with a new one, so a code that leaked can be retired. It is refused while a raid is running.
 
 ### Fixed
+- **Setup panel open to the manager role and to stale panels**: `/setup` now needs the Administrator permission, and every setup button and menu checks it again on each click, so a member who loses the permission can no longer keep using a panel they already opened. The manager role still starts and stops raids, but no longer opens `/setup`.
+- **`@everyone` and bot-managed roles bindable as capture or manager role**: the role pickers in `/setup` now refuse them, since binding `@everyone` would hand the manager commands, or the relay, to every member.
 - **First raid after a restart missing from session counts**: a guild's session start and stop counters now begin at zero, so Prometheus counts its first raid. Before, a guild with one raid since the last restart showed no sessions.
 - **Gateway latency dipping to about −41 s**: `gdc_bot_gateway_latency_milliseconds` is no longer reported while a heartbeat is waiting for its reply, which made averages meaningless. The gateway latency panels ignore non-positive values.
 

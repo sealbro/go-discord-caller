@@ -36,11 +36,11 @@ func TestAuthorization(t *testing.T) {
 		{"no permissions or roles", member(0, otherRole), false, false},
 		{"administrator", member(discord.PermissionAdministrator), true, false},
 		{"manage server", member(discord.PermissionManageGuild), false, true},
-		{"manager role", member(0, otherRole, managerRole), true, true},
+		{"manager role", member(0, otherRole, managerRole), false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := h.isAdminAuthorized(guildID, tt.member); got != tt.wantAdmin {
+			if got := h.isAdminAuthorized(tt.member); got != tt.wantAdmin {
 				t.Errorf("isAdminAuthorized = %v, want %v", got, tt.wantAdmin)
 			}
 			if got := h.isManagerAuthorized(guildID, tt.member); got != tt.wantManager {

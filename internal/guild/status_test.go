@@ -151,3 +151,36 @@ func TestHasActiveSession(t *testing.T) {
 		t.Error("status with a session must report it active")
 	}
 }
+
+func TestRenderEscapesOtherGuildsNames(t *testing.T) {
+	const hostile = "[Official support](https://evil.example) **now**"
+	const escaped = `\[Official support\]\(https://evil.example\) \*\*now\*\*`
+
+	t.Run("own guild", func(t *testing.T) {
+		st := NewStatus(testGuild, testOwner)
+		st.GuildName = hostile
+		assertEscaped(t, st.Render(nil), hostile, escaped)
+	})
+	t.Run("host seen by a guest", func(t *testing.T) {
+		st := NewStatus(testGuild, testOwner)
+		st.Session = &Session{IsGuest: true, AllyCode: "ABCD2345"}
+		st.HostGuildName = hostile
+		assertEscaped(t, st.Render(nil), hostile, escaped)
+	})
+	t.Run("guests seen by the host", func(t *testing.T) {
+		st := NewStatus(testGuild, testOwner)
+		st.Session = &Session{}
+		st.GuestGuildNames = []string{hostile, "plain"}
+		assertEscaped(t, st.Render(nil), hostile, escaped)
+	})
+}
+
+func assertEscaped(t *testing.T, out, raw, escaped string) {
+	t.Helper()
+	if strings.Contains(out, raw) {
+		t.Errorf("a guild name reached the message as live markdown:\n%s", out)
+	}
+	if !strings.Contains(out, escaped) {
+		t.Errorf("escaped name %q missing from:\n%s", escaped, out)
+	}
+}

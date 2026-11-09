@@ -62,7 +62,7 @@ func (s Status) Render(loc Translator) string {
 	var sb strings.Builder
 
 	if s.GuildName != "" {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.guild"), s.GuildName)
+		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.guild"), escapeMarkdown(s.GuildName))
 	}
 
 	if s.CallerRoleID != nil {
@@ -108,13 +108,13 @@ func (s Status) Render(loc Translator) string {
 		if s.Session.IsGuest {
 			host := s.Session.AllyCode
 			if s.HostGuildName != "" {
-				host = fmt.Sprintf("%s (`%s`)", s.HostGuildName, s.Session.AllyCode)
+				host = fmt.Sprintf("%s (`%s`)", escapeMarkdown(s.HostGuildName), s.Session.AllyCode)
 			}
 			fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel,
 				t("status.raid_guest", "Count", len(s.Session.Speakers), "Host", host))
 		} else if len(s.GuestGuildNames) > 0 {
 			fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel,
-				t("status.raid_active_with_guests", "Count", len(s.Session.Speakers), "Guests", strings.Join(s.GuestGuildNames, ", ")))
+				t("status.raid_active_with_guests", "Count", len(s.Session.Speakers), "Guests", strings.Join(escapeAll(s.GuestGuildNames), ", ")))
 		} else {
 			fmt.Fprintf(&sb, "\n**%s:** %s\n", raidLabel,
 				t("status.raid_active", "Count", len(s.Session.Speakers)))
@@ -176,4 +176,22 @@ func englishStatusFallback(key string, args ...any) string {
 		return fmt.Sprintf("🔴 guest relay → %s (%d speakers joined)", host, count)
 	}
 	return key
+}
+
+// markdownEscaper neutralises everything Discord renders in a message, so a
+// server name chosen by someone else cannot show up as a link, mention or
+// formatting.
+var markdownEscaper = strings.NewReplacer(
+	`\`, `\\`, "*", `\*`, "_", `\_`, "~", `\~`, "`", "\\`", "|", `\|`,
+	"<", `\<`, ">", `\>`, "[", `\[`, "]", `\]`, "(", `\(`, ")", `\)`, "#", `\#`,
+)
+
+func escapeMarkdown(s string) string { return markdownEscaper.Replace(s) }
+
+func escapeAll(names []string) []string {
+	escaped := make([]string, len(names))
+	for i, name := range names {
+		escaped[i] = escapeMarkdown(name)
+	}
+	return escaped
 }

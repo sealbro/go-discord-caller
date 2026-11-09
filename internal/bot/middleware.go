@@ -29,7 +29,6 @@ func (h *CommandHandlers) withGuild(fn guildCommandHandler) func(discord.SlashCo
 			trace.WithAttributes(
 				attribute.String("command", data.CommandName()),
 				attribute.String("guild.id", guildID.String()),
-				attribute.String("user.id", e.User().ID.String()),
 			),
 		)
 		// Recorded before fn runs: a handler that never returns records no

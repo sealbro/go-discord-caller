@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ally code reset**: `/setup` has a "Reset Ally Code" button that replaces the server's relay code with a new one, so a code that leaked can be retired. It is refused while a raid is running.
 
 ### Fixed
+- **Other servers' names rendered as formatting in `/status`**: a server's name is shown as plain text, so a connected server can no longer name itself as a link or mention to dress up a message the host's managers read.
+- **Command traces carried the invoking user's ID**: the trace of each slash command no longer records who ran it, matching the privacy page's promise that telemetry names no member.
+- **Malformed relay codes reached the join logic**: `/start code:` now rejects anything that is not an 8-character relay code (case and surrounding spaces are forgiven) before it is logged or looked up.
+- **Setup accepted speakers the server never registered**: binding a channel to a speaker ID that is not one of the server's speakers is refused.
 - **Relay code written to logs and traces**: the code that lets a server join someone else's raid is no longer logged or attached to traces, and a failed join no longer echoes it into the logs. Anyone who could read the telemetry could previously attach to a live raid.
 - **Unlimited guesses at a relay code**: a server that enters five wrong relay codes in ten minutes is locked out of joining for the rest of that window, and gets a message saying so. A correct code is refused during the lockout too, so it can't be used to tell a right guess from a wrong one.
 - **Setup panel open to the manager role and to stale panels**: `/setup` now needs the Administrator permission, and every setup button and menu checks it again on each click, so a member who loses the permission can no longer keep using a panel they already opened. The manager role still starts and stops raids, but no longer opens `/setup`.

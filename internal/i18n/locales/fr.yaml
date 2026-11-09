@@ -15,7 +15,8 @@ cmd.status.description: "Afficher les associations actuelles des speakers et l'�
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Vous avez besoin de la permission « Gérer le serveur » ou du rôle de gestionnaire du serveur pour utiliser cette commande."
-err.need_admin: "❌ Vous avez besoin de la permission « Administrateur » ou du rôle de gestionnaire du serveur pour utiliser cette commande."
+err.need_admin: "❌ Vous avez besoin de la permission « Administrateur » pour utiliser cette commande."
+err.role_not_bindable: "❌ Ce rôle ne peut pas être utilisé : choisissez un rôle ordinaire, pas @everyone ni un rôle géré par un bot."
 err.guild_only: "cette commande ne peut être utilisée que dans un serveur"
 err.unexpected_data_type: "type de données d'interaction inattendu"
 err.invalid_speaker_id: "ID de speaker invalide"

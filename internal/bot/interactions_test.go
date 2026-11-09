@@ -160,6 +160,11 @@ func roleSelectData(roles ...snowflake.ID) string {
 	return fmt.Sprintf(`"values":[%s],"resolved":{"roles":{%s}}`, strings.Join(values, ","), strings.Join(resolved, ","))
 }
 
+func managedRoleSelectData(role snowflake.ID) string {
+	return fmt.Sprintf(`"values":[%q],"resolved":{"roles":{%q:{"id":%q,"name":"r","permissions":"0","managed":true}}}`,
+		role.String(), role.String(), role.String())
+}
+
 func channelSelectData(channels ...snowflake.ID) string {
 	values, resolved := make([]string, 0, len(channels)), make([]string, 0, len(channels))
 	for _, c := range channels {
@@ -746,5 +751,60 @@ func TestSpeakersPagePagination(t *testing.T) {
 				t.Errorf("content = %q, want the no-speakers notice", content)
 			}
 		})
+	}
+}
+
+func TestSetupComponentsRequireAdministrator(t *testing.T) {
+	t.Parallel()
+	routes := map[string]string{
+		"roles menu":         componentPayload("%s", "/roles/menu", componentBtn, ""),
+		"main menu":          componentPayload("%s", "/speakers/menu", componentBtn, ""),
+		"speakers page":      componentPayload("%s", "/speakers/page/0", componentBtn, ""),
+		"toggle speaker":     componentPayload("%s", fmt.Sprintf("/speakers/toggle/%s/0", speakerA), componentBtn, ""),
+		"add speaker":        componentPayload("%s", "/speakers/add", componentBtn, ""),
+		"reset ally code":    componentPayload("%s", "/setup/reset-ally-code", componentBtn, ""),
+		"bind caller role":   componentPayload("%s", "/setup/bind-role", componentRole, roleSelectData(selectedRole)),
+		"bind manager role":  componentPayload("%s", "/setup/bind-manager-role", componentRole, roleSelectData(selectedRole)),
+		"bind locale":        componentPayload("%s", "/setup/locale", componentText, `"values":["de"]`),
+		"bind owner channel": componentPayload("%s", "/owner/bind-channel", componentChan, channelSelectData(boundChannel)),
+		"bind speaker":       componentPayload("%s", fmt.Sprintf("/speakers/bind-channel/%s/0", speakerA), componentChan, channelSelectData(boundChannel)),
+	}
+	for name, template := range routes {
+		for _, perms := range []string{permNone, permManage} {
+			t.Run(name+"/"+perms, func(t *testing.T) {
+				t.Parallel()
+				m := &fakeManager{statusFn: statusWithSpeakers(1, true)}
+				h := newInteractionHarness(t, m)
+				resp := h.dispatch(fmt.Sprintf(template, memberJSON(perms)))
+				wantEphemeral(t, resp, en.T("err.need_admin"))
+				if len(m.bindings) != 0 {
+					t.Errorf("bindings = %v, want none", m.bindings)
+				}
+			})
+		}
+	}
+}
+
+func TestRoleMenuRefusesUnassignableRoles(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, data string
+	}{
+		{"everyone", roleSelectData(testGuildID)},
+		{"managed", managedRoleSelectData(selectedRole)},
+	}
+	for _, customID := range []string{"/setup/bind-role", "/setup/bind-manager-role"} {
+		for _, tt := range tests {
+			t.Run(customID+"/"+tt.name, func(t *testing.T) {
+				t.Parallel()
+				m := &fakeManager{}
+				h := newInteractionHarness(t, m)
+				resp := h.dispatch(componentPayload(memberJSON(permAdmin), customID, componentRole, tt.data))
+				wantEphemeral(t, resp, en.T("err.role_not_bindable"))
+				if len(m.bindings) != 0 {
+					t.Errorf("bindings = %v, want none", m.bindings)
+				}
+			})
+		}
 	}
 }

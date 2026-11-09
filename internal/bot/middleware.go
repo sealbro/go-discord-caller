@@ -63,10 +63,10 @@ func (h *CommandHandlers) withManager(fn guildCommandHandler) func(discord.Slash
 	})
 }
 
-// withAdmin wraps a handler to require Administrator permission or the manager role.
+// withAdmin wraps a handler to require Administrator permission.
 func (h *CommandHandlers) withAdmin(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
 	return h.withGuild(func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-		if !h.isAdminAuthorized(guildID, e.Member()) {
+		if !h.isAdminAuthorized(e.Member()) {
 			return e.CreateMessage(ephemeral(loc.T("err.need_admin")))
 		}
 		return fn(guildID, loc, data, e)
@@ -76,43 +76,52 @@ func (h *CommandHandlers) withAdmin(fn guildCommandHandler) func(discord.SlashCo
 // guildButtonHandler is a button component handler that receives a validated guild ID and localizer.
 type guildButtonHandler func(guildID snowflake.ID, loc *i18n.Localizer, data discord.ButtonInteractionData, e *handler.ComponentEvent) error
 
-// withGuildButton wraps a button component handler to validate the guild context.
+// withGuildButton wraps a button component handler to validate the guild context
+// and require Administrator permission. The check repeats on every click: an
+// ephemeral panel outlives the role that opened it.
 func (h *CommandHandlers) withGuildButton(fn guildButtonHandler) func(discord.ButtonInteractionData, *handler.ComponentEvent) error {
 	return func(data discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 		guildID, errMsg := requireGuild(h.bundle.For("", e.Locale()), e.GuildID())
 		if errMsg != nil {
 			return e.CreateMessage(*errMsg)
 		}
+		loc := h.loc(guildID, e.Locale())
+		if !h.isAdminAuthorized(e.Member()) {
+			return e.CreateMessage(ephemeral(loc.T("err.need_admin")))
+		}
 		h.manager.EnsureGuildReady(guildID)
-		return fn(guildID, h.loc(guildID, e.Locale()), data, e)
+		return fn(guildID, loc, data, e)
 	}
 }
 
 // guildSelectMenuHandler is a select menu component handler that receives a validated guild ID and localizer.
 type guildSelectMenuHandler func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error
 
-// withGuildSelectMenu wraps a select menu component handler to validate the guild context.
+// withGuildSelectMenu wraps a select menu component handler to validate the guild
+// context and require Administrator permission on every interaction.
 func (h *CommandHandlers) withGuildSelectMenu(fn guildSelectMenuHandler) func(discord.SelectMenuInteractionData, *handler.ComponentEvent) error {
 	return func(data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
 		guildID, errMsg := requireGuild(h.bundle.For("", e.Locale()), e.GuildID())
 		if errMsg != nil {
 			return e.CreateMessage(*errMsg)
 		}
+		loc := h.loc(guildID, e.Locale())
+		if !h.isAdminAuthorized(e.Member()) {
+			return e.CreateMessage(ephemeral(loc.T("err.need_admin")))
+		}
 		h.manager.EnsureGuildReady(guildID)
-		return fn(guildID, h.loc(guildID, e.Locale()), data, e)
+		return fn(guildID, loc, data, e)
 	}
 }
 
-// isAdminAuthorized reports whether the member has Administrator permission
-// or holds the guild's configured manager role.
-func (h *CommandHandlers) isAdminAuthorized(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+// isAdminAuthorized reports whether the member has Administrator permission.
+// The manager role is deliberately not enough: it is configured through the
+// setup panel, so honouring it here would let managers rewrite their own access.
+func (h *CommandHandlers) isAdminAuthorized(member *discord.ResolvedMember) bool {
 	if member == nil {
 		return false
 	}
-	if member.Permissions.Has(discord.PermissionAdministrator) {
-		return true
-	}
-	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
+	return member.Permissions.Has(discord.PermissionAdministrator)
 }
 
 // isManagerAuthorized reports whether the member has Manage Server permission

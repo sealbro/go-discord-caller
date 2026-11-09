@@ -110,6 +110,9 @@ func (h *CommandHandlers) applyRoleMenuBinding(
 	}
 
 	roles := roleData.Roles()
+	if len(roles) > 0 && !isBindableRole(guildID, roles[0]) {
+		return e.CreateMessage(ephemeral(loc.T("err.role_not_bindable")))
+	}
 	if len(roles) == 0 {
 		h.manager.UnbindRole(guildID, roleType)
 	} else {
@@ -235,4 +238,10 @@ func (h *CommandHandlers) bindChannelError(loc *i18n.Localizer, e *handler.Compo
 		return e.CreateMessage(ephemeral(loc.T("err.channel_taken", "Bot", "<@"+taken.BotID.String()+">")))
 	}
 	return err
+}
+
+// isBindableRole rejects @everyone, whose ID is the guild's, and bot-managed
+// roles: neither identifies a deliberately chosen group of people.
+func isBindableRole(guildID snowflake.ID, role discord.Role) bool {
+	return role.ID != guildID && !role.Managed
 }

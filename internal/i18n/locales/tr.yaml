@@ -25,6 +25,7 @@ err.no_more_tokens: "❌ Havuzdaki tüm speaker token'ları zaten eklendi."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Sesli baskın aktifken kurulum kullanılamaz. Önce baskını durdurun."
+setup.ally_code_reset: "🔑 Ally kodu sıfırlandı. Yeni aktarma kodu: `{{.Code}}`"
 
 raid.already_active: "⚠️ Bu sunucuda zaten aktif bir sesli baskın var."
 raid.none_active: "⚠️ Bu sunucuda aktif bir sesli baskın yok."
@@ -71,6 +72,7 @@ btn.main_menu: "🏠 Ana Menü"
 btn.bind_roles: "🎭 Rolleri Bağla"
 btn.bind_speakers: "⚙️ Speaker'ları Bağla"
 btn.add_speaker: "➕ Speaker Ekle"
+btn.reset_ally_code: "🔄 Ally Kodunu Sıfırla"
 btn.invite: "🔗 Sunucuya Davet Et"
 btn.enable: "Etkinleştir"
 btn.disable: "Devre Dışı Bırak"

@@ -356,6 +356,16 @@ func (s *YAMLStore) GetAllyCode(guildID snowflake.ID) (string, bool) {
 	return code, ok
 }
 
+func (s *YAMLStore) ResetAllyCode(guildID snowflake.ID) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.relayCodes, guildID)
+	code := uniqueAllyCode(s.relayCodes)
+	s.relayCodes[guildID] = code
+	s.markDirty()
+	return code
+}
+
 func (s *YAMLStore) BindLocale(guildID snowflake.ID, locale string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

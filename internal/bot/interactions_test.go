@@ -255,7 +255,8 @@ func TestCommandPermissions(t *testing.T) {
 		{"start", permNone, "err.need_manager"},
 		{"start", permManage, ""},
 		{"stop", permNone, "err.need_manager"},
-		{"status", permNone, ""},
+		{"status", permNone, "err.need_manager"},
+		{"status", permManage, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.command+"/"+tt.perms, func(t *testing.T) {
@@ -326,7 +327,21 @@ func TestStatusCommandRendersGuildStatus(t *testing.T) {
 	t.Parallel()
 	m := &fakeManager{statusFn: statusWithSpeakers(2, true)}
 	h := newInteractionHarness(t, m)
-	wantEphemeral(t, h.dispatch(slashPayload(memberJSON(permNone), "status")), m.GetStatus(testGuildID).Render(en))
+	wantEphemeral(t, h.dispatch(slashPayload(memberJSON(permManage), "status")), m.GetStatus(testGuildID).Render(en))
+}
+
+func TestResetAllyCodeButton(t *testing.T) {
+	t.Parallel()
+	t.Run("reports the new code", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{})
+		resp := h.dispatch(componentPayload(memberJSON(permAdmin), "/setup/reset-ally-code", componentBtn, ""))
+		wantEphemeral(t, resp, en.T("setup.ally_code_reset", "Code", "NEWCODE1"))
+	})
+	t.Run("blocked during a raid", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }})
+		resp := h.dispatch(componentPayload(memberJSON(permAdmin), "/setup/reset-ally-code", componentBtn, ""))
+		wantEphemeral(t, resp, en.T("setup.blocked_active_raid"))
+	})
 }
 
 func TestStartCommandMapsModeAndCode(t *testing.T) {

@@ -46,6 +46,8 @@ type Store interface {
 	GetOrCreateAllyCode(guildID snowflake.ID) string
 	// GetAllyCode returns the stored ally code for guildID without creating one.
 	GetAllyCode(guildID snowflake.ID) (string, bool)
+	// ResetAllyCode replaces the ally code for guildID with a fresh one and returns it.
+	ResetAllyCode(guildID snowflake.ID) string
 
 	// BindLocale pins the bot's response language for guildID.
 	// Pass "" or call UnbindLocale to revert to per-user interaction locale.
@@ -161,6 +163,15 @@ func (s *InMemoryStore) GetAllyCode(guildID snowflake.ID) (string, bool) {
 	defer s.mu.RUnlock()
 	code, ok := s.relayCodes[guildID]
 	return code, ok
+}
+
+func (s *InMemoryStore) ResetAllyCode(guildID snowflake.ID) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.relayCodes, guildID)
+	code := uniqueAllyCode(s.relayCodes)
+	s.relayCodes[guildID] = code
+	return code
 }
 
 func (s *InMemoryStore) BindLocale(guildID snowflake.ID, locale string) {

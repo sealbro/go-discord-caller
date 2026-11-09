@@ -133,7 +133,7 @@ flowchart TB
 
 ## Slash commands
 
-> The manager role is configured inside `/setup`. `/status` is available to everyone.
+> The manager role is configured inside `/setup`. `/status` requires Manage Server or the manager role (it shows the relay code).
 
 | Command                        | Required role | Description                                                                                                                                       |
 |--------------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -144,11 +144,11 @@ flowchart TB
 | `/start code:XXXXXX`           | Manager       | Join an existing relay session as a **listener** — receives host audio but does not capture locally                                               |
 | `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when host uses `mode:many`)               |
 | `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
-| `/status`                      | Everyone      | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
+| `/status`                      | Manager       | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
 
 ## Inter-guild relay
 
-Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown in `/status`.
+Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown in `/status`. Administrators can reset it from `/setup` (not during a raid).
 
 **To start a cross-guild relay:**
 

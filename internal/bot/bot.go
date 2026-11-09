@@ -61,6 +61,7 @@ type BindingManager interface {
 	BindLocale(guildID snowflake.ID, locale string)
 	UnbindLocale(guildID snowflake.ID)
 	GetLocale(guildID snowflake.ID) string
+	ResetAllyCode(guildID snowflake.ID) string
 }
 
 // SpeakerManager handles speaker registration and configuration.

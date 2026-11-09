@@ -38,6 +38,7 @@ raid.no_bound_speakers: "⚠️ No speaker bots are configured in this server. R
 raid.no_owner_channel: "⚠️ The owner bot has no voice channel — it may have been deleted. Run `/setup` and pick one, then try again."
 raid.no_caller_role: "⚠️ No capture role is set. Run `/setup` → **🎭 Bind Roles** and pick the capture role — only members with it are relayed, then try again."
 raid.no_deafen_permission: "⚠️ The bot lacks the **Deafen Members** permission. Grant it in Server Settings → Roles, then try again."
+raid.join_locked_out: "⏳ Too many wrong relay codes from this server. Wait a few minutes and try again."
 raid.start_failed: "❌ Failed to start voice raid: {{.Err}}"
 raid.stop_failed: "❌ Failed to stop voice raid: {{.Err}}"
 raid.joined: "🔴 **Joined relay session** `{{.Code}}` as {{.Mode}}. Speakers are connecting to their bound channels."

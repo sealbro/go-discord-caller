@@ -37,6 +37,7 @@ raid.no_bound_speakers: "⚠️ No hay bots speaker configurados en este servido
 raid.no_owner_channel: "⚠️ El bot owner no tiene canal de voz; puede que se haya eliminado. Ejecuta `/setup`, elige uno y vuelve a intentarlo."
 raid.no_caller_role: "⚠️ No hay ningún rol de captura configurado. Ejecuta `/setup` → **🎭 Vincular roles** y elige el rol de captura — solo se retransmite a los miembros que lo tienen. Luego inténtalo de nuevo."
 raid.no_deafen_permission: "⚠️ El bot no tiene el permiso **Ensordecer miembros**. Concédelo en Ajustes del servidor → Roles y vuelve a intentarlo."
+raid.join_locked_out: "⏳ Demasiados códigos de relé incorrectos desde este servidor. Espera unos minutos e inténtalo de nuevo."
 raid.start_failed: "❌ Error al iniciar el voice raid: {{.Err}}"
 raid.stop_failed: "❌ Error al detener el voice raid: {{.Err}}"
 raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. Los speakers se están conectando a sus canales."

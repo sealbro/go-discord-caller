@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/ally"
 )
 
 // Sentinel errors returned by session lifecycle methods.
@@ -17,6 +18,10 @@ var (
 	// ErrSessionExists is returned when starting or joining a session while one
 	// is already active in the guild.
 	ErrSessionExists = errors.New("a voice raid is already active in this server")
+
+	// ErrJoinLockedOut is returned when a guild has tried too many wrong relay
+	// codes and must wait before joining a session again.
+	ErrJoinLockedOut = ally.ErrJoinLockedOut
 
 	// ErrNoGuildStatus is returned when operating on a guild that has not been
 	// seeded yet.

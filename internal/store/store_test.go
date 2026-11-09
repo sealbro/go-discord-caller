@@ -38,6 +38,18 @@ func TestInMemoryStoreAllyCode(t *testing.T) {
 	}
 }
 
+func TestInMemoryStoreResetAllyCode(t *testing.T) {
+	s := NewInMemoryStore()
+	old := s.GetOrCreateAllyCode(guild1)
+	fresh := s.ResetAllyCode(guild1)
+	if fresh == old {
+		t.Fatalf("ResetAllyCode kept code %q", old)
+	}
+	if got, _ := s.GetAllyCode(guild1); got != fresh {
+		t.Fatalf("GetAllyCode = %q; want %q", got, fresh)
+	}
+}
+
 func TestInMemoryStoreLocale(t *testing.T) {
 	s := NewInMemoryStore()
 

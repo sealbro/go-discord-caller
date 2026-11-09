@@ -35,6 +35,16 @@ func (h *CommandHandlers) handleRolesMenu(guildID snowflake.ID, loc *i18n.Locali
 		WithComponents(components...))
 }
 
+// handleResetAllyCode replaces the guild's relay code. Rejected while a raid is
+// active because guests are attached to the current code.
+func (h *CommandHandlers) handleResetAllyCode(guildID snowflake.ID, loc *i18n.Localizer, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	if h.manager.HasActiveSession(guildID) {
+		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
+	}
+	code := h.manager.ResetAllyCode(guildID)
+	return e.CreateMessage(ephemeral(loc.T("setup.ally_code_reset", "Code", code)))
+}
+
 // handleMainMenu returns the user to the main setup message.
 func (h *CommandHandlers) handleMainMenu(guildID snowflake.ID, loc *i18n.Localizer, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
 	msg, components := h.buildMainSetupMessage(guildID, loc)

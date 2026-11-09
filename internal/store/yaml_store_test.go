@@ -157,6 +157,19 @@ func TestYAMLStore_AllyCode(t *testing.T) {
 	}
 }
 
+func TestYAMLStore_ResetAllyCode(t *testing.T) {
+	s := newTestStore(t)
+
+	old := s.GetOrCreateAllyCode(guild1)
+	fresh := s.ResetAllyCode(guild1)
+	if fresh == old {
+		t.Fatalf("ResetAllyCode kept code %q", old)
+	}
+	if got, _ := s.GetAllyCode(guild1); got != fresh {
+		t.Errorf("GetAllyCode = %q; want %q", got, fresh)
+	}
+}
+
 // TestYAMLStore_Persistence verifies state survives Close + reopen.
 func TestYAMLStore_Persistence(t *testing.T) {
 	s := newTestStore(t)

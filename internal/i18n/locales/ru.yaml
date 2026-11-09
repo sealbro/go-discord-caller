@@ -25,6 +25,7 @@ err.no_more_tokens: "❌ Все speaker-токены из пула уже доб
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Настройка недоступна во время активного рейда. Сначала остановите рейд."
+setup.ally_code_reset: "🔑 Ally-код сброшен. Новый relay-код: `{{.Code}}`"
 
 raid.already_active: "⚠️ На этом сервере уже идёт голосовой рейд."
 raid.none_active: "⚠️ На этом сервере нет активного голосового рейда."
@@ -73,6 +74,7 @@ btn.main_menu: "🏠 Главное меню"
 btn.bind_roles: "🎭 Привязать роли"
 btn.bind_speakers: "⚙️ Привязать speaker-ботов"
 btn.add_speaker: "➕ Добавить speaker-бота"
+btn.reset_ally_code: "🔄 Сбросить Ally-код"
 btn.invite: "🔗 Пригласить на сервер"
 btn.enable: "Включить"
 btn.disable: "Выключить"

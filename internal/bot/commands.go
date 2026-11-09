@@ -94,13 +94,14 @@ func (h *CommandHandlers) Register(r handler.Router) {
 	r.SlashCommand("/setup", h.withAdmin(h.handleSetup))
 	r.SlashCommand("/start", h.withManager(h.handleStartVoiceRaid))
 	r.SlashCommand("/stop", h.withManager(h.handleStopVoiceRaid))
-	r.SlashCommand("/status", h.withGuild(h.handleStatus))
+	r.SlashCommand("/status", h.withManager(h.handleStatus))
 
 	// Main setup menu components
 	r.SelectMenuComponent("/setup/bind-role", h.withGuildSelectMenu(h.handleBindRoleMenu))
 	r.SelectMenuComponent("/setup/bind-manager-role", h.withGuildSelectMenu(h.handleBindManagerRoleMenu))
 	r.SelectMenuComponent("/setup/locale", h.withGuildSelectMenu(h.handleBindLocale))
 	r.SelectMenuComponent("/owner/bind-channel", h.withGuildSelectMenu(h.handleBindOwnerChannel))
+	r.ButtonComponent("/setup/reset-ally-code", h.withGuildButton(h.handleResetAllyCode))
 	r.ButtonComponent("/roles/menu", h.withGuildButton(h.handleRolesMenu))
 	r.ButtonComponent("/speakers/page/{page}", h.withGuildButton(h.handleSpeakersPage))
 	r.ButtonComponent("/speakers/menu", h.withGuildButton(h.handleMainMenu))

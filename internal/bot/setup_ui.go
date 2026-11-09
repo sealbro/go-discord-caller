@@ -54,6 +54,7 @@ func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID, loc *i18n.
 	if h.manager.HasAvailableToken(guildID) {
 		buttons = append(buttons, discord.NewSuccessButton(loc.T("btn.add_speaker"), "/speakers/add"))
 	}
+	buttons = append(buttons, discord.NewSecondaryButton(loc.T("btn.reset_ally_code"), "/setup/reset-ally-code"))
 	components = append(components, discord.NewActionRow(buttons...))
 
 	return loc.T("setup.main_title") + "\n" + status.Render(loc), components

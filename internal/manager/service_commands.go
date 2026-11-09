@@ -246,6 +246,13 @@ func (m *Service) UnbindRole(guildID snowflake.ID, roleType store.RoleType) {
 	)
 }
 
+// ResetAllyCode replaces the guild's relay code with a fresh one and returns it.
+func (m *Service) ResetAllyCode(guildID snowflake.ID) string {
+	code := m.store.ResetAllyCode(guildID)
+	slog.Info("ally code reset", slog.String("guildID", guildID.String()))
+	return code
+}
+
 // BindLocale pins the bot's response language for guildID. Pass "" to clear.
 func (m *Service) BindLocale(guildID snowflake.ID, locale string) {
 	m.store.BindLocale(guildID, locale)

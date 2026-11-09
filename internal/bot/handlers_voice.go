@@ -195,7 +195,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, loc *i18n.Lo
 }
 
 // handleStatus responds with an ephemeral snapshot of the guild's configuration and
-// session state. Authorization handled by withGuild middleware.
+// session state. Authorization handled by withManager middleware.
 func (h *CommandHandlers) handleStatus(guildID snowflake.ID, loc *i18n.Localizer, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	status := h.manager.GetStatus(guildID)
 	return e.CreateMessage(discord.MessageCreate{

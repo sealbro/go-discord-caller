@@ -9,10 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **DAVE decrypt duration**: `gdc_dave_decrypt_duration_milliseconds` times each frame decryption, to tell a stall inside decryption from frames that were already late when they arrived.
+- **Ally code reset**: `/setup` has a "Reset Ally Code" button that replaces the server's relay code with a new one, so a code that leaked can be retired. It is refused while a raid is running.
 
 ### Fixed
 - **First raid after a restart missing from session counts**: a guild's session start and stop counters now begin at zero, so Prometheus counts its first raid. Before, a guild with one raid since the last restart showed no sessions.
 - **Gateway latency dipping to about −41 s**: `gdc_bot_gateway_latency_milliseconds` is no longer reported while a heartbeat is waiting for its reply, which made averages meaningless. The gateway latency panels ignore non-positive values.
+
+### Changed
+- **`/status` is manager-only**: it needs Manage Server or the manager role, like `/start` and `/stop`, because it shows the relay code.
 
 ## [0.14.1] - 2026-11-07
 

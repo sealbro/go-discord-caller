@@ -208,6 +208,10 @@ func (f *fakeManager) BindLocale(_ snowflake.ID, locale string) {
 	f.locale = locale
 	f.mu.Unlock()
 }
+func (f *fakeManager) ResetAllyCode(snowflake.ID) string {
+	f.record("reset-ally-code", "", "")
+	return "NEWCODE1"
+}
 func (f *fakeManager) UnbindLocale(snowflake.ID) {
 	f.record("unbind-locale", "", "")
 	f.mu.Lock()

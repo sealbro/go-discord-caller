@@ -25,6 +25,7 @@ err.no_more_tokens: "❌ Todos os tokens de speaker do pool já foram adicionado
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ A configuração não está disponível enquanto um voice raid está ativo. Pare o raid primeiro."
+setup.ally_code_reset: "🔑 Código ally redefinido. Novo código de relay: `{{.Code}}`"
 
 raid.already_active: "⚠️ Já há um voice raid ativo neste servidor."
 raid.none_active: "⚠️ Não há voice raid ativo neste servidor."
@@ -71,6 +72,7 @@ btn.main_menu: "🏠 Menu principal"
 btn.bind_roles: "🎭 Vincular cargos"
 btn.bind_speakers: "⚙️ Vincular speakers"
 btn.add_speaker: "➕ Adicionar speaker"
+btn.reset_ally_code: "🔄 Redefinir código ally"
 btn.invite: "🔗 Convidar para o servidor"
 btn.enable: "Ativar"
 btn.disable: "Desativar"

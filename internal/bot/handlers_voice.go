@@ -8,6 +8,7 @@ import (
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/handler"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
 	"github.com/sealbro/go-discord-caller/internal/manager"
@@ -39,7 +40,15 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		return e.CreateMessage(ephemeral(loc.T("raid.already_active")))
 	}
 
-	code, hasCode := data.OptString("code")
+	var code ally.Code
+	if raw, ok := data.OptString("code"); ok && raw != "" {
+		normalized, valid := ally.NormalizeCode(raw)
+		if !valid {
+			return e.CreateMessage(ephemeral(loc.T("raid.invalid_code")))
+		}
+		code = normalized
+	}
+	hasCode := code != ""
 
 	if err := e.DeferCreateMessage(true); err != nil {
 		return err

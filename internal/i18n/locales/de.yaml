@@ -38,6 +38,7 @@ raid.no_owner_channel: "⚠️ Der Owner-Bot hat keinen Sprachkanal — er wurde
 raid.no_caller_role: "⚠️ Es ist keine Aufnahmerolle festgelegt. Führe `/setup` → **🎭 Rollen binden** aus und wähle die Aufnahmerolle — nur Mitglieder mit dieser Rolle werden übertragen. Versuche es dann erneut."
 raid.no_deafen_permission: "⚠️ Dem Bot fehlt die Berechtigung **Mitglieder taub schalten**. Erteile sie unter Servereinstellungen → Rollen und versuche es erneut."
 raid.join_locked_out: "⏳ Zu viele falsche Relay-Codes von diesem Server. Warte ein paar Minuten und versuche es erneut."
+raid.invalid_code: "❌ Das ist kein Relay-Code. Ein Code besteht aus 8 Buchstaben und Ziffern, wie der in /status auf dem Host-Server angezeigte."
 raid.start_failed: "❌ Starten des Voice-Raids fehlgeschlagen: {{.Err}}"
 raid.stop_failed: "❌ Stoppen des Voice-Raids fehlgeschlagen: {{.Err}}"
 raid.joined: "🔴 **Relay-Sitzung beigetreten** `{{.Code}}` als {{.Mode}}. Speaker verbinden sich mit ihren Kanälen."

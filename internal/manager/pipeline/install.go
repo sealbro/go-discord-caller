@@ -98,7 +98,6 @@ func buildPerUserMixSpec(src *router.SourceSlot, users []router.UserBinding, dro
 				slog.Warn("auto-route: mixer.AddInput failed; skipping user→dest binding",
 					slog.String("sourceID", src.ID.String()),
 					slog.String("destID", d.ChannelID.String()),
-					slog.String("userID", u.UserID.String()),
 					slog.Any("err", err))
 				continue
 			}

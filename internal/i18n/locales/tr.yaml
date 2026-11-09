@@ -38,6 +38,7 @@ raid.no_owner_channel: "⚠️ Owner botunun ses kanalı yok — silinmiş olabi
 raid.no_caller_role: "⚠️ Yakalama rolü ayarlanmamış. `/setup` → **🎭 Rolleri Bağla** bölümünden yakalama rolünü seçin — yalnızca bu role sahip üyelerin sesi aktarılır — sonra tekrar deneyin."
 raid.no_deafen_permission: "⚠️ Botta **Üyeleri Sağırlaştır** izni yok. Sunucu Ayarları → Roller bölümünden verin ve tekrar deneyin."
 raid.join_locked_out: "⏳ Bu sunucudan çok fazla yanlış aktarım kodu girildi. Birkaç dakika bekleyip tekrar deneyin."
+raid.invalid_code: "❌ Bu bir aktarım kodu değil. Kod, ana sunucudaki /status içinde gösterilen gibi 8 harf ve rakamdan oluşur."
 raid.start_failed: "❌ Sesli baskın başlatılamadı: {{.Err}}"
 raid.stop_failed: "❌ Sesli baskın durdurulamadı: {{.Err}}"
 raid.joined: "🔴 `{{.Code}}` **aktarma oturumuna katılındı** ({{.Mode}}). Speaker'lar bağlı kanallarına bağlanıyor."

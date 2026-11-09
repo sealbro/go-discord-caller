@@ -2,12 +2,14 @@ package bot
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +27,9 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/i18n"
 	"github.com/sealbro/go-discord-caller/internal/manager"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 const (
@@ -361,9 +366,9 @@ func TestStartCommandMapsModeAndCode(t *testing.T) {
 		{callerModeOne, "", guild.RaidModeOneCaller},
 		{callerModeMany, "", guild.RaidModeGuildCaller},
 		{callerModeOneMany, "", guild.RaidModeOneManyGuildCaller},
-		{"", "CODE1234", guild.RaidModeAllyListener},
-		{callerModeMany, "CODE1234", guild.RaidModeAllyCaller},
-		{callerModeOneMany, "CODE1234", guild.RaidModeOneManyAllyCaller},
+		{"", "CODE2345", guild.RaidModeAllyListener},
+		{callerModeMany, "CODE2345", guild.RaidModeAllyCaller},
+		{callerModeOneMany, "CODE2345", guild.RaidModeOneManyAllyCaller},
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf("mode=%q code=%q", tt.mode, tt.code), func(t *testing.T) {
@@ -409,7 +414,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 	t.Parallel()
 	boom := errors.New("boom")
 	warning := []manager.ChannelAccessWarning{{BotID: speakerA, ChannelID: boundChannel}}
-	withCode := []string{stringOption("code", "CODE1234")}
+	withCode := []string{stringOption("code", "CODE2345")}
 
 	tests := []struct {
 		name    string
@@ -440,7 +445,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 		{name: "join no deafen permission", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
 		{name: "join session exists", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrSessionExists)}, want: en.T("raid.already_active"), started: true},
 		{name: "join locked out", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrJoinLockedOut)}, want: en.T("raid.join_locked_out"), started: true},
-		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE1234", "Err", "boom"), started: true},
+		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE2345", "Err", "boom"), started: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -854,4 +859,91 @@ func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestToggleAndBindIgnoreUnregisteredSpeaker(t *testing.T) {
+	t.Parallel()
+	const stranger snowflake.ID = 777
+	who := memberJSON(permAdmin)
+	for name, payload := range map[string]string{
+		"bind channel": componentPayload(who, fmt.Sprintf("/speakers/bind-channel/%s/0", stranger), componentChan, channelSelectData(boundChannel)),
+		"unbind":       componentPayload(who, fmt.Sprintf("/speakers/bind-channel/%s/0", stranger), componentChan, channelSelectData()),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := &fakeManager{statusFn: statusWithSpeakers(1, true)}
+			h := newInteractionHarness(t, m)
+			wantEphemeral(t, h.dispatch(payload), en.T("err.speaker_not_found"))
+			if len(m.bindings) != 0 {
+				t.Errorf("bindings = %v, want none for a speaker the guild never registered", m.bindings)
+			}
+		})
+	}
+}
+
+func TestStartCommandRejectsMalformedRelayCode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, code string
+		wantJoined ally.Code
+	}{
+		{"too short", "ABC", ""},
+		{"too long", strings.Repeat("A", 3000), ""},
+		{"characters outside base32", "ABCD1890", ""},
+		{"markdown", "[x](http://e)", ""},
+		{"lowercase and padding are tolerated", " abcd2345 ", "ABCD2345"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m := &fakeManager{}
+			h := newInteractionHarness(t, m)
+			resp := h.dispatch(slashPayload(memberJSON(permManage), "start", stringOption("code", tt.code)))
+
+			if tt.wantJoined != "" {
+				h.followUp()
+			} else {
+				wantEphemeral(t, resp, en.T("raid.invalid_code"))
+			}
+			m.mu.Lock()
+			defer m.mu.Unlock()
+			var want []ally.Code
+			if tt.wantJoined != "" {
+				want = []ally.Code{tt.wantJoined}
+			}
+			if !slices.Equal(m.joinCodes, want) {
+				t.Errorf("JoinSession codes = %v, want %v", m.joinCodes, want)
+			}
+		})
+	}
+}
+
+func TestCommandSpansCarryNoUserIdentifier(t *testing.T) {
+	spans := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(spans))
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(prev)
+		_ = provider.Shutdown(context.Background())
+	})
+
+	h := newInteractionHarness(t, &fakeManager{})
+	h.dispatch(slashPayload(memberJSON(permManage), "status"))
+
+	var found bool
+	for _, span := range spans.Ended() {
+		if span.Name() != "discord.command" {
+			continue
+		}
+		found = true
+		for _, attr := range span.Attributes() {
+			if attr.Key == "user.id" || attr.Value.Emit() == "5" {
+				t.Errorf("command span carries the invoking user's identifier in %q", attr.Key)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("no discord.command span recorded")
+	}
 }

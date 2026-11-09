@@ -194,6 +194,10 @@ func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, loc *i18n.Loca
 		return e.CreateMessage(ephemeral(loc.T("err.unexpected_data_type")))
 	}
 
+	if _, registered := h.manager.GetStatus(guildID).Speakers[speakerID]; !registered {
+		return e.CreateMessage(ephemeral(loc.T("err.speaker_not_found")))
+	}
+
 	channels := channelData.Channels()
 	if len(channels) == 0 {
 		h.manager.UnbindChannel(guildID, speakerID)

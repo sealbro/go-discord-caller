@@ -3,6 +3,7 @@ package ally
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -213,6 +214,25 @@ func (s *Session) close() {
 	default:
 		close(s.done)
 	}
+}
+
+// codeLength is the length of a relay code: eight characters of the RFC 4648
+// base32 alphabet, which is what the store generates.
+const codeLength = 8
+
+// NormalizeCode trims and upper-cases a relay code typed by a person and
+// reports whether the result has the shape of one the store could have issued.
+func NormalizeCode(raw string) (Code, bool) {
+	code := strings.ToUpper(strings.TrimSpace(raw))
+	if len(code) != codeLength {
+		return "", false
+	}
+	for _, r := range code {
+		if (r < 'A' || r > 'Z') && (r < '2' || r > '7') {
+			return "", false
+		}
+	}
+	return code, true
 }
 
 const (

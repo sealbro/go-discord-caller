@@ -37,6 +37,7 @@ raid.no_bound_speakers: "⚠️ Na tym serwerze nie skonfigurowano żadnych bot�
 raid.no_owner_channel: "⚠️ Bot owner nie ma kanału głosowego — mógł zostać usunięty. Uruchom `/setup`, wybierz kanał i spróbuj ponownie."
 raid.no_caller_role: "⚠️ Nie ustawiono roli przechwytywania. Uruchom `/setup` → **🎭 Powiąż role** i wybierz rolę przechwytywania — przekazywani są tylko członkowie, którzy ją mają. Następnie spróbuj ponownie."
 raid.no_deafen_permission: "⚠️ Bot nie ma uprawnienia **Wyciszaj słuch członków**. Nadaj je w Ustawienia serwera → Role i spróbuj ponownie."
+raid.join_locked_out: "⏳ Zbyt wiele błędnych kodów przekaźnika z tego serwera. Odczekaj kilka minut i spróbuj ponownie."
 raid.start_failed: "❌ Nie udało się rozpocząć voice raidu: {{.Err}}"
 raid.stop_failed: "❌ Nie udało się zatrzymać voice raidu: {{.Err}}"
 raid.joined: "🔴 **Dołączono do sesji relay** `{{.Code}}` jako {{.Mode}}. Speakerzy łączą się ze swoimi kanałami."

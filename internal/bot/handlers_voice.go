@@ -71,7 +71,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			if err != nil {
 				cancelFunc()
 				slog.WarnContext(cmdCtx, "failed to join relay session",
-					slog.String("guildID", guildID.String()), slog.String("code", code), slog.Any("err", err))
+					slog.String("guildID", guildID.String()), slog.Any("err", err))
 				if errors.Is(err, manager.ErrNoBoundSpeakers) {
 					h.followUp(e, loc.T("raid.no_bound_speakers"))
 					return
@@ -82,6 +82,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				}
 				if errors.Is(err, manager.ErrNoDeafenPermission) {
 					h.followUp(e, loc.T("raid.no_deafen_permission"))
+					return
+				}
+				if errors.Is(err, manager.ErrJoinLockedOut) {
+					h.followUp(e, loc.T("raid.join_locked_out"))
 					return
 				}
 				// A raid that came up between the command's pre-check and here,
@@ -159,7 +163,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			msg += "\n\n" + loc.T("raid.deafen_unavailable")
 		}
 		msg += skipped
-		slog.InfoContext(cmdCtx, "voice raid started", slog.String("relayCode", relayCode))
+		slog.InfoContext(cmdCtx, "voice raid started")
 		h.followUp(e, msg)
 	}()
 

@@ -1,8 +1,10 @@
 package ally
 
 import (
+	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
@@ -213,17 +215,31 @@ func (s *Session) close() {
 	}
 }
 
+const (
+	joinMaxFailures = 5
+	joinLockout     = 10 * time.Minute
+)
+
+// ErrJoinLockedOut is returned by Join once a guild has tried too many wrong
+// codes. While it holds, even a correct code is refused, so the lockout cannot
+// be used to tell a right guess from a wrong one.
+var ErrJoinLockedOut = errors.New("too many wrong relay codes: try again later")
+
 // Manager is the global registry of active ally sessions.
 type Manager struct {
 	mu       sync.RWMutex
 	sessions map[Code]*Session         // code → session
 	byGuild  map[snowflake.ID]*Session // guildID (host or guest) → session
+	failures map[snowflake.ID][]time.Time
+	now      func() time.Time
 }
 
 func NewManager() *Manager {
 	return &Manager{
 		sessions: make(map[Code]*Session),
 		byGuild:  make(map[snowflake.ID]*Session),
+		failures: make(map[snowflake.ID][]time.Time),
+		now:      time.Now,
 	}
 }
 
@@ -242,9 +258,13 @@ func (m *Manager) Create(code Code, hostGuildID snowflake.ID, mode guild.RaidMod
 func (m *Manager) Join(code Code, guildID snowflake.ID) (*Session, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.lockedOutLocked(guildID) {
+		return nil, ErrJoinLockedOut
+	}
 	s, ok := m.sessions[code]
 	if !ok {
-		return nil, fmt.Errorf("session %q not found", code)
+		m.recordFailureLocked(guildID)
+		return nil, errors.New("no relay session matches this code")
 	}
 	if s.HostGuildID == guildID {
 		return nil, fmt.Errorf("cannot join your own session")
@@ -252,8 +272,36 @@ func (m *Manager) Join(code Code, guildID snowflake.ID) (*Session, error) {
 	if _, already := m.byGuild[guildID]; already {
 		return nil, fmt.Errorf("guild already has an active session")
 	}
+	delete(m.failures, guildID)
 	m.byGuild[guildID] = s
 	return s, nil
+}
+
+// recentFailuresLocked returns guildID's wrong-code attempts still inside the
+// lockout window, dropping the older ones. Caller must hold m.mu.
+func (m *Manager) recentFailuresLocked(guildID snowflake.ID) []time.Time {
+	cutoff := m.now().Add(-joinLockout)
+	recent := m.failures[guildID][:0]
+	for _, at := range m.failures[guildID] {
+		if at.After(cutoff) {
+			recent = append(recent, at)
+		}
+	}
+	if len(recent) == 0 {
+		delete(m.failures, guildID)
+		return nil
+	}
+	m.failures[guildID] = recent
+	return recent
+}
+
+func (m *Manager) lockedOutLocked(guildID snowflake.ID) bool {
+	return len(m.recentFailuresLocked(guildID)) >= joinMaxFailures
+}
+
+func (m *Manager) recordFailureLocked(guildID snowflake.ID) {
+	recent := m.recentFailuresLocked(guildID)
+	m.failures[guildID] = append(recent, m.now())
 }
 
 // GetByGuild returns the session the guild belongs to (as host or guest).

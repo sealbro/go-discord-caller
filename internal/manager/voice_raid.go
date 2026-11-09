@@ -43,7 +43,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	ctx, span := telemetry.Tracer.Start(ctx, "voice.session.guest",
 		trace.WithAttributes(
 			attribute.String("guild.id", guestGuildID.String()),
-			attribute.String("relay.code", code),
 			attribute.String("guest.mode", string(guestMode)),
 		),
 	)
@@ -183,7 +182,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		slog.String("guildID", guestGuildID.String()),
 		slog.String("hostMode", string(allySession.HostMode)),
 		slog.String("guestMode", string(guestMode)),
-		slog.String("code", code),
 		slog.Int("activeSpeakers", speakerCount),
 		slog.Bool("ownerRelaying", ownerCleanup != nil),
 	)
@@ -360,10 +358,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// Owner bot always joins the host channel (join failures abort above), so
 	// it counts as a speaker alongside the pool bots in setup.Joined.
 	speakerCount := countSpeakers(len(setup.Joined), true)
-	span.SetAttributes(
-		attribute.String("relay.code", allyCode),
-		attribute.Int("speaker.count", speakerCount),
-	)
+	span.SetAttributes(attribute.Int("speaker.count", speakerCount))
 	// errCleanup undoes everything that committed after allySession was created.
 	errCleanup := func() {
 		setup.SpeakerCleanup()
@@ -425,7 +420,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	slog.InfoContext(ctx, logMsg,
 		slog.String("guildID", guildID.String()),
 		slog.String("mode", string(mode)),
-		slog.String("code", allyCode),
 		slog.Int("activeSpeakers", speakerCount),
 	)
 	start()

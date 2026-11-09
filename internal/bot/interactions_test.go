@@ -1,6 +1,7 @@
 package bot
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -437,6 +439,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 		{name: "join no caller role", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoCallerRole)}, want: en.T("raid.no_caller_role"), started: true},
 		{name: "join no deafen permission", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
 		{name: "join session exists", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrSessionExists)}, want: en.T("raid.already_active"), started: true},
+		{name: "join locked out", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrJoinLockedOut)}, want: en.T("raid.join_locked_out"), started: true},
 		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE1234", "Err", "boom"), started: true},
 	}
 	for _, tt := range tests {
@@ -807,4 +810,48 @@ func TestRoleMenuRefusesUnassignableRoles(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestStartCommandLogsCarryNoRelayCode(t *testing.T) {
+	const hostCode, guessedCode = "HOSTCODE", "GUESS234"
+	var buf syncBuffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	host := newInteractionHarness(t, &fakeManager{startFn: func(guild.RaidMode) (ally.Code, error) { return hostCode, nil }})
+	host.dispatch(slashPayload(memberJSON(permManage), "start"))
+	host.followUp()
+
+	guest := newInteractionHarness(t, &fakeManager{joinFn: failJoin(errors.New("boom"))})
+	guest.dispatch(slashPayload(memberJSON(permManage), "start", stringOption("code", guessedCode)))
+	guest.followUp()
+
+	out := buf.String()
+	if !strings.Contains(out, "voice raid started") || !strings.Contains(out, "failed to join relay session") {
+		t.Fatalf("expected the start and join-failure log lines, got:\n%s", out)
+	}
+	for _, code := range []string{hostCode, guessedCode} {
+		if strings.Contains(out, code) {
+			t.Errorf("log carries a relay code (%s):\n%s", code, out)
+		}
+	}
+}
+
+// syncBuffer lets a test read what a handler goroutine is still logging.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }

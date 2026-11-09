@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ally code reset**: `/setup` has a "Reset Ally Code" button that replaces the server's relay code with a new one, so a code that leaked can be retired. It is refused while a raid is running.
 
 ### Fixed
+- **Relay code written to logs and traces**: the code that lets a server join someone else's raid is no longer logged or attached to traces, and a failed join no longer echoes it into the logs. Anyone who could read the telemetry could previously attach to a live raid.
+- **Unlimited guesses at a relay code**: a server that enters five wrong relay codes in ten minutes is locked out of joining for the rest of that window, and gets a message saying so. A correct code is refused during the lockout too, so it can't be used to tell a right guess from a wrong one.
 - **Setup panel open to the manager role and to stale panels**: `/setup` now needs the Administrator permission, and every setup button and menu checks it again on each click, so a member who loses the permission can no longer keep using a panel they already opened. The manager role still starts and stops raids, but no longer opens `/setup`.
 - **`@everyone` and bot-managed roles bindable as capture or manager role**: the role pickers in `/setup` now refuse them, since binding `@everyone` would hand the manager commands, or the relay, to every member.
 - **First raid after a restart missing from session counts**: a guild's session start and stop counters now begin at zero, so Prometheus counts its first raid. Before, a guild with one raid since the last restart showed no sessions.

@@ -2,6 +2,9 @@ package telemetry
 
 import (
 	"context"
+	"math"
+	"runtime"
+	"runtime/metrics"
 	"testing"
 
 	"github.com/sealbro/go-discord-caller/internal/buildinfo"
@@ -15,6 +18,7 @@ func TestProcessMetricsExportRuntimeAndCPU(t *testing.T) {
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
 	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
 
+	runtime.GC()
 	if err := startProcessMetrics(mp); err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +33,7 @@ func TestProcessMetricsExportRuntimeAndCPU(t *testing.T) {
 			seen[m.Name] = true
 		}
 	}
-	for _, name := range []string{"gdc.build.info", "gdc.process.cpu.time", "go.memory.used", "go.goroutine.count"} {
+	for _, name := range []string{"gdc.build.info", "gdc.process.cpu.time", "go.memory.used", "go.goroutine.count", "gdc.gc.pause.duration"} {
 		if !seen[name] {
 			t.Errorf("metric %q was not exported; got %v", name, seen)
 		}
@@ -84,4 +88,34 @@ func TestBuildInfoCarriesStampedVersion(t *testing.T) {
 		}
 	}
 	t.Fatal("gdc.build.info was not exported")
+}
+
+func TestGCPauseRecorderRecordsEachPauseOnce(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() { _ = mp.Shutdown(context.Background()) })
+	rec, err := newGCPauseRecorder(mp.Meter("test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hist := &metrics.Float64Histogram{
+		Counts:  []uint64{2, 0, 1},
+		Buckets: []float64{0, 0.0001, 0.001, math.Inf(1)},
+	}
+	rec.recordNew(context.Background(), hist)
+	hist.Counts = []uint64{2, 1, 1}
+	rec.recordNew(context.Background(), hist)
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatal(err)
+	}
+	dp := rm.ScopeMetrics[0].Metrics[0].Data.(metricdata.Histogram[float64]).DataPoints[0]
+	if dp.Count != 4 {
+		t.Errorf("recorded %d pauses, want 4 (2 + 1 + 1 new)", dp.Count)
+	}
+	if want := 0.1*2 + 1 + 1; math.Abs(dp.Sum-want) > 1e-9 {
+		t.Errorf("sum = %v ms, want %v", dp.Sum, want)
+	}
 }

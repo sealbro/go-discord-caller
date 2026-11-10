@@ -149,6 +149,7 @@ The process's own resource use, for capacity planning against the container limi
 | `gdc.process.cpu.time`     | ObservableCounter (`s`) | `gdc_process_cpu_time_seconds_total` | — | CPU time consumed by the process, user plus system. `rate()` of it is the fraction of one core in use. |
 | `gdc.process.memory.usage` | ObservableGauge (`By`)  | `gdc_process_memory_usage_bytes`     | — | Resident set size, including C allocations. Linux only — absent elsewhere. |
 | `gdc.gc.pause.duration`    | Histogram (`ms`)        | `gdc_gc_pause_duration_milliseconds_*` | — | Stop-the-world GC pauses, recorded when the runtime metrics are sampled. Buckets (0.25, 1, 5, 20 ms) read as fine, watch, warn and a missed 20 ms mixer tick; compare with `gdc.mixer.tick.lateness`. |
+| `gdc.sched.latency.over`   | ObservableCounter       | `gdc_sched_latency_over_total`       | `over_ms` (`0`, `1`, `5`, `20`) | Goroutine schedulings that waited at least `over_ms` for a CPU; `0` counts all of them. `rate(over_ms="5") / rate(over_ms="0")` is the share of schedulings delayed by 5 ms or more — a late mixer tick that coincides with a rise is CPU starvation, not slow work in the tick. |
 | `go.memory.used`, `go.memory.limit`, `go.memory.gc.goal`, `go.goroutine.count`, … | ObservableGauge / Counter | `go_memory_used_bytes`, `go_memory_limit_bytes`, `go_goroutine_count`, … | `go.memory.type` on `go.memory.used` | Go runtime metrics from `go.opentelemetry.io/contrib/instrumentation/runtime`, sampled at most every 15 s. |
 
 ---

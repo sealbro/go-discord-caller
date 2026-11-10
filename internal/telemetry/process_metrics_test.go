@@ -33,7 +33,7 @@ func TestProcessMetricsExportRuntimeAndCPU(t *testing.T) {
 			seen[m.Name] = true
 		}
 	}
-	for _, name := range []string{"gdc.build.info", "gdc.process.cpu.time", "go.memory.used", "go.goroutine.count", "gdc.gc.pause.duration"} {
+	for _, name := range []string{"gdc.build.info", "gdc.process.cpu.time", "go.memory.used", "go.goroutine.count", "gdc.gc.pause.duration", "gdc.sched.latency.over"} {
 		if !seen[name] {
 			t.Errorf("metric %q was not exported; got %v", name, seen)
 		}
@@ -117,5 +117,17 @@ func TestGCPauseRecorderRecordsEachPauseOnce(t *testing.T) {
 	}
 	if want := 0.1*2 + 1 + 1; math.Abs(dp.Sum-want) > 1e-9 {
 		t.Errorf("sum = %v ms, want %v", dp.Sum, want)
+	}
+}
+
+func TestCountAtLeastSkipsBucketsStraddlingTheThreshold(t *testing.T) {
+	h := &metrics.Float64Histogram{
+		Counts:  []uint64{5, 3, 2, 1},
+		Buckets: []float64{0, 0.0005, 0.001, 0.005, math.Inf(1)},
+	}
+	for seconds, want := range map[float64]uint64{0: 11, 0.001: 3, 0.0007: 3, 0.005: 1, 0.02: 0} {
+		if got := countAtLeast(h, seconds); got != want {
+			t.Errorf("countAtLeast(%v) = %d, want %d", seconds, got, want)
+		}
 	}
 }

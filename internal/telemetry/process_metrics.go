@@ -34,6 +34,9 @@ func startProcessMetrics(mp metric.MeterProvider) error {
 	if err != nil {
 		return err
 	}
+	if err := registerSchedLatencyMetrics(meter); err != nil {
+		return err
+	}
 	cpuTime, err := meter.Float64ObservableCounter("gdc.process.cpu.time",
 		metric.WithDescription("CPU time consumed by the process, user plus system."),
 		metric.WithUnit("s"),

@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"math"
 	"runtime/metrics"
 	"strconv"
 
@@ -33,7 +34,7 @@ func registerSchedLatencyMetrics(meter metric.Meter) error {
 		}
 		h := sample[0].Value.Float64Histogram()
 		for _, ms := range schedLatencyThresholdsMs {
-			o.ObserveInt64(over, int64(countAtLeast(h, ms/1000)),
+			o.ObserveInt64(over, int64(min(countAtLeast(h, ms/1000), math.MaxInt64)),
 				metric.WithAttributes(attribute.String("over_ms", strconv.FormatFloat(ms, 'f', -1, 64))))
 		}
 		return nil

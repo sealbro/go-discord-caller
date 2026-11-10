@@ -30,6 +30,10 @@ func startProcessMetrics(mp metric.MeterProvider) error {
 	}
 
 	meter := mp.Meter(ServiceName)
+	gcPauses, err := newGCPauseRecorder(meter)
+	if err != nil {
+		return err
+	}
 	cpuTime, err := meter.Float64ObservableCounter("gdc.process.cpu.time",
 		metric.WithDescription("CPU time consumed by the process, user plus system."),
 		metric.WithUnit("s"),
@@ -58,7 +62,8 @@ func startProcessMetrics(mp metric.MeterProvider) error {
 		attribute.String("libdave_version", buildinfo.LibdaveVersion),
 	)
 
-	_, err = meter.RegisterCallback(func(_ context.Context, o metric.Observer) error {
+	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		gcPauses.record(ctx)
 		o.ObserveInt64(buildInfo, 1, buildAttrs)
 		var ru syscall.Rusage
 		if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err == nil {

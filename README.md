@@ -122,13 +122,14 @@ flowchart TB
   - hub-and-spoke broadcast (`/start mode:one-many`) where speakers only hear the owner,
   - full multi-channel conference (`/start mode:many`) where every bound channel captures and plays back audio with mix-minus echo prevention
 - **Automatic audio pause** – bots stop processing audio for channels with no active listeners, reducing idle resource usage
+- **Idle auto-stop** – a raid with no unmuted caller, or with no one to hear one, stops by itself after `SESSION_IDLE_TIMEOUT` (see [When a raid ends](#when-a-raid-ends))
 - **Inter-guild relay** – guest guilds join a host session via relay code; guests are listener-only by default, or active participants with `mode:many`
 - **Persistent relay codes** – each guild has a unique 8-character code stored in YAML; shared via `/status` so other servers can join
 - **Per-guild configuration** – capture role, manager role, owner channel, and per-speaker bindings are stored per guild and survive restarts
 - **Interactive setup UI** – paginated slash-command menus with dropdowns, toggle buttons, and quick page-range navigation; no manual config file needed
 - **Role-based access control** – a dedicated manager role controls who can start/stop raids without granting full admin
 - **Auto-seeding** – speaker bots already in a guild are automatically registered on startup or when they join later
-- **Speaker gateway watchdog** – reconnects any speaker gateway that failed at startup; logs health every 30 s
+- **Speaker gateway watchdog** – every 30 s reconnects any speaker gateway that failed at startup and logs a warning for any that is not connected
 - **Localization** – slash-command descriptions and the setup UI are translated into 8 languages (English, Español, Deutsch, Français, Português, Polski, Русский, Türkçe); the language is auto-detected from each user's Discord client locale and can be pinned per guild from `/setup`
 
 ## Slash commands
@@ -142,7 +143,8 @@ flowchart TB
 | `/start mode:one-many`         | Manager       | Start a voice raid in **hub-and-spoke** mode — the owner hears all speakers, but speakers only hear the owner; prevents cross-talk in large raids |
 | `/start mode:many`             | Manager       | Start a voice raid in **many-callers** mode — every bound channel captures and plays back audio with mix-minus echo prevention                    |
 | `/start code:XXXXXX`           | Manager       | Join an existing relay session as a **listener** — receives host audio but does not capture locally                                               |
-| `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when host uses `mode:many`)               |
+| `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when the host uses `mode:many` or `mode:one-many`) |
+| `/start code:XXXXXX mode:one-many` | Manager   | Join an existing relay session as a **hub-and-spoke participant** — members in your speaker channels are heard by the host owner, and every local channel hears the host owner (only effective when the host uses `mode:many` or `mode:one-many`) |
 | `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
 | `/status`                      | Manager       | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
 
@@ -154,7 +156,7 @@ Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown 
 
 1. Guild A runs `/start` (or `/start mode:many`) — its session becomes active; the relay code is visible in `/status`.
 2. Guild B runs `/start code:A3BX7KQP` — its speakers connect in **listener-only** mode and receive all audio from Guild A.
-3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` and Guild B must join with `/start code:A3BX7KQP mode:many`.
+3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` (or `mode:one-many`) and Guild B must join with `/start code:A3BX7KQP mode:many` (or `mode:one-many`). If the host does not allow it, a guest asking for more is downgraded to a listener.
 4. When Guild A runs `/stop`, all guest sessions are torn down automatically.
 
 ## When a raid ends
@@ -196,6 +198,7 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
 | `PYROSCOPE_ENDPOINT`          | ❌        | Pyroscope push URL for continuous profiling (e.g. `http://alloy:4040`); empty or unset disables it      |
 | `LOG_LEVEL`                   | ❌        | Minimum log level: `debug`, `info`, `warn`, `error` (default: `info`)                                   |
+| `VOICE_LOG_LEVEL`             | ❌        | Log level for disgo's voice layer: `debug`, `info`, `warn`, `error` or `off` (default: `off`; `warn` helps debug audio) |
 
 > At least one speaker token is strongly recommended; without any, voice relay will not work.
 
@@ -287,13 +290,6 @@ docker run -d --env-file .env go-discord-caller
 ```
 
 The multi-stage build installs `libdave`, compiles the binary with CGO, then copies the binary and all shared-library dependencies into a minimal `distroless/base` image.
-
-## Tech stack
-
-- [disgo](https://github.com/disgoorg/disgo) – Discord API & gateway client
-- [godave / libdave](https://github.com/disgoorg/godave) – Discord DAVE E2EE voice protocol (CGO)
-- [godotenv](https://github.com/joho/godotenv) – `.env` file loading
-- [OpenTelemetry Go](https://opentelemetry.io/docs/languages/go/) – traces, metrics, and logs via OTLP gRPC
 
 ## Articles
 

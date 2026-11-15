@@ -14,14 +14,14 @@ description: >-
 [:simple-discord: Add the hosted bot](https://discord.com/discovery/applications/1484911601210495038){ .md-button .md-button--primary }
 [:material-github: View on GitHub](https://github.com/sealbro/go-discord-caller){ .md-button }
 
-*The hosted bot is free to use and has a limited number of speakers. It runs at the maintainer's expense, so at peak times, when load is high, capacity may be limited ([terms](terms.md)). Self-hosting is free under the Elastic License 2.0, with unlimited speakers and servers.*
+*The hosted bot is free to use and has 11 speaker bots (more on request). It runs at the maintainer's expense, so at peak times, when load is high, capacity may be limited ([terms](terms.md)). Self-hosting is free under the Elastic License 2.0, with unlimited speakers and servers.*
 
 ## Why use it
 
 [Free vs paid shot-caller bots →](free-shot-caller-bot.md){ .md-button }
 
 - **Free to self-host (Elastic License 2.0)** — no monthly fee, no trial wall.
-- **Unlimited servers & speakers** — inter-guild relay across any number of Discord servers; one speaker bot per voice channel, as many as you want.
+- **Unlimited servers & speakers when self-hosted** — inter-guild relay across any number of Discord servers; one speaker bot per voice channel, as many as you want. The hosted bot has 11 speaker bots, and more can be added on request.
 - **Three caller modes** — one-caller broadcast, hub-and-spoke, or full conference with mix-minus echo prevention.
 - **End-to-end encrypted audio** — uses Discord's DAVE E2EE voice protocol via [godave / libdave](https://github.com/disgoorg/godave).
 - **Self-hosted & private** — runs in Docker; bindings persist in a YAML store you control.

@@ -4,7 +4,8 @@
 
 ## Docs
 
-- [Home](https://go-discord-caller.sealbro.dev/): overview, modes, setup
+- [Home](https://go-discord-caller.sealbro.dev/): what it does, hosted or self-hosted
+- [Get started](https://go-discord-caller.sealbro.dev/get-started/): modes, quick start, self-hosting
 - [Free vs paid shot-caller bots](https://go-discord-caller.sealbro.dev/free-shot-caller-bot/)
 - [How it works](https://go-discord-caller.sealbro.dev/voice-flow/)
 - [Audio latency](https://go-discord-caller.sealbro.dev/latency/)

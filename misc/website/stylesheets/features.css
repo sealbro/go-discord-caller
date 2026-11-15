@@ -1,0 +1,1009 @@
+/* Features page: hand-built layout; colours follow the Material scheme so light and dark both work. */
+
+.md-main__inner:has(.fx) {
+  max-width: none;
+  margin: 0;
+}
+
+.fx {
+  --fx-a: #4f46e5;
+  --fx-b: #0ea5a4;
+  --fx-ok: #16a34a;
+  --fx-warn: #dc2626;
+  --fx-ink: var(--md-default-fg-color);
+  --fx-mute: var(--md-default-fg-color--light);
+  --fx-line: var(--md-default-fg-color--light);
+  --fx-card: var(--md-default-bg-color);
+  --fx-tint: color-mix(in srgb, var(--fx-a) 7%, var(--md-default-bg-color));
+  --fx-border: color-mix(in srgb, var(--md-default-fg-color) 14%, transparent);
+  max-width: 70rem;
+  margin: 0 auto;
+  padding: 0 1rem 4rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  position: relative;
+  isolation: isolate;
+}
+
+[data-md-color-scheme="slate"] .fx {
+  --fx-a: #8b93ff;
+  --fx-b: #2dd4bf;
+  --fx-ok: #4ade80;
+  --fx-warn: #f87171;
+  --fx-tint: color-mix(in srgb, var(--fx-a) 12%, var(--md-default-bg-color));
+}
+
+.fx h1,
+.fx h2,
+.fx h3 {
+  color: var(--fx-ink);
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.fx p {
+  margin: 0;
+}
+
+/* Background: soft colour orbs that drift slowly behind the content. Fixed to the
+   viewport so no container edge ever clips them. */
+
+.fx-bg {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fx-bg span {
+  position: absolute;
+  width: 34rem;
+  height: 34rem;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.2;
+  background: var(--fx-a);
+}
+
+.fx-bg span:nth-child(1) {
+  top: -8rem;
+  left: -10rem;
+}
+
+.fx-bg span:nth-child(2) {
+  top: 18%;
+  right: -12rem;
+  background: var(--fx-b);
+}
+
+.fx-bg span:nth-child(3) {
+  top: 52%;
+  left: -12rem;
+  background: var(--fx-b);
+  opacity: 0.16;
+}
+
+.fx-bg span:nth-child(4) {
+  bottom: -8rem;
+  right: -8rem;
+}
+
+[data-md-color-scheme="slate"] .fx-bg span {
+  opacity: 0.16;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fx-bg span {
+    animation: fx-drift 22s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+
+  .fx-bg span:nth-child(2) {
+    animation-duration: 28s;
+    animation-delay: -6s;
+  }
+
+  .fx-bg span:nth-child(3) {
+    animation-duration: 25s;
+    animation-delay: -12s;
+  }
+
+  .fx-bg span:nth-child(4) {
+    animation-duration: 30s;
+    animation-delay: -3s;
+  }
+
+  @keyframes fx-drift {
+    from {
+      transform: translate(0, 0) scale(1);
+    }
+    to {
+      transform: translate(5rem, 3rem) scale(1.15);
+    }
+  }
+}
+
+@media (max-width: 44em) {
+  .fx-bg span {
+    width: 20rem;
+    height: 20rem;
+    filter: blur(50px);
+  }
+}
+
+/* Hero */
+
+.fx-hero {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+  align-items: center;
+  padding: 3.5rem 0 2.5rem;
+}
+
+.fx-eyebrow {
+  color: var(--fx-a);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.fx-hero h1 {
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  line-height: 1.08;
+  margin: 0.6rem 0 1rem;
+}
+
+.fx-lead {
+  color: var(--fx-mute);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  max-width: 32rem;
+}
+
+.fx-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1.5rem !important;
+}
+
+.fx-actions--center {
+  justify-content: center;
+}
+
+.fx-hero__art {
+  margin: 0;
+  padding: 1rem;
+  border-radius: 1.25rem;
+  background: var(--fx-tint);
+  border: 1px solid var(--fx-border);
+}
+
+/* Sections */
+
+.fx-section {
+  padding-top: 3rem;
+}
+
+.fx-section > h2 {
+  font-size: 1.7rem;
+  text-align: center;
+}
+
+.fx-sub {
+  font-size: 0.9rem;
+  color: var(--fx-mute);
+  text-align: center;
+  margin-top: 0.4rem !important;
+}
+
+.fx-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+}
+
+.fx-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  margin-top: 1.75rem;
+}
+
+/* Cards */
+
+.fx-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem 1.1rem 1.25rem;
+  background: var(--fx-card);
+  border: 1px solid var(--fx-border);
+  border-radius: 1rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.fx-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 10px 28px color-mix(in srgb, var(--fx-a) 18%, transparent);
+}
+
+.fx-card .fx-svg {
+  background: var(--fx-tint);
+  border-radius: 0.75rem;
+  margin-bottom: 0.4rem;
+}
+
+.fx-card h3,
+.fx-trio h3 {
+  font-size: 1rem;
+}
+
+.fx-claim {
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.fx-why {
+  color: var(--fx-mute);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.fx-more {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+.fx-card--hosted {
+  border-color: color-mix(in srgb, var(--fx-a) 45%, transparent);
+}
+
+.fx-card--self {
+  border-color: color-mix(in srgb, var(--fx-b) 55%, transparent);
+}
+
+.fx-card--self .fx-svg {
+  background: color-mix(in srgb, var(--fx-b) 9%, var(--md-default-bg-color));
+}
+
+.fx-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fx-a);
+}
+
+.fx-card--self .fx-tag {
+  color: var(--fx-b);
+}
+
+.fx-list {
+  margin: 0.25rem 0 0.75rem;
+  padding-left: 1.1rem;
+  line-height: 1.55;
+  font-size: 0.8rem;
+}
+
+.fx .md-button {
+  display: inline-block;
+  padding: 0.55em 1.2em;
+  font-size: 0.8rem;
+  font-weight: 700;
+  line-height: 1.3;
+  text-decoration: none;
+  color: var(--fx-a);
+  border: 2px solid var(--fx-a);
+  border-radius: 0.6rem;
+  margin: 0;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+
+.fx .md-button:hover {
+  transform: translateY(-1px);
+  background: var(--fx-tint);
+}
+
+.fx .md-button--primary {
+  color: #fff;
+  background: var(--fx-a);
+}
+
+[data-md-color-scheme="slate"] .fx .md-button--primary {
+  color: #11131c;
+}
+
+.fx .md-button--primary:hover {
+  background: var(--fx-a);
+  filter: brightness(1.1);
+}
+
+.fx-card .md-button {
+  align-self: flex-start;
+  margin-top: auto;
+}
+
+.fx-split .fx-svg {
+  max-height: 13rem;
+}
+
+/* Game guide pills */
+
+.fx-pills {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.6rem;
+  margin-top: 1.25rem !important;
+}
+
+.fx-pills a {
+  padding: 0.45em 1em;
+  border: 1px solid var(--fx-border);
+  border-radius: 2rem;
+  background: var(--fx-card);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.fx-pills a:hover {
+  transform: translateY(-2px);
+  border-color: var(--fx-a);
+}
+
+.fx-btnrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.8rem 1rem;
+  margin-top: auto;
+}
+
+.fx-btnrow .md-button {
+  margin-top: 0;
+}
+
+.fx-more--inline {
+  margin: 0;
+  padding: 0;
+}
+
+/* Closing block */
+
+.fx-trio {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  margin-top: 1.75rem;
+  text-align: center;
+}
+
+.fx-trio p {
+  font-size: 0.8rem;
+  color: var(--fx-mute);
+  margin-top: 0.3rem;
+  line-height: 1.5;
+}
+
+.fx .fx-svg.fx-svg--icon {
+  width: 4rem;
+  height: 4rem;
+  margin: 0 auto 0.5rem;
+  display: block;
+}
+
+.fx-why-us .fx-actions {
+  margin-top: 2rem !important;
+}
+
+/* Illustrations: static frames. */
+
+.fx-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.fx-svg text {
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  fill: var(--fx-ink);
+}
+
+.fx-svg .cap {
+  font-size: 11px;
+}
+
+.fx-svg .cap--dim {
+  fill: var(--fx-mute);
+  font-weight: 500;
+}
+
+.fx-svg .wire,
+.fx-svg .wave,
+.fx-svg .glyph,
+.fx-svg .retry,
+.fx-svg .spark,
+.fx-svg .strike,
+.fx-svg .tick,
+.fx-svg .plus {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.fx-svg .wire {
+  stroke: var(--fx-a);
+  stroke-width: 2;
+  opacity: 0.7;
+}
+
+.fx-svg .wave {
+  stroke: var(--fx-a);
+  stroke-width: 3;
+}
+
+.fx-svg .glyph {
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.fx-svg .glyph--ink {
+  stroke: var(--fx-a);
+  stroke-width: 4;
+}
+
+.fx-svg .ring {
+  fill: none;
+  stroke: var(--fx-a);
+  stroke-width: 2;
+  opacity: 0.35;
+}
+
+.fx-svg .ring--2 {
+  opacity: 0.6;
+}
+
+.fx-svg .dot-a {
+  fill: var(--fx-a);
+}
+
+.fx-svg .dot-b {
+  fill: var(--fx-b);
+  opacity: 0.85;
+}
+
+.fx-svg .dot-ok {
+  fill: var(--fx-ok);
+}
+
+.fx-svg .node,
+.fx-svg .chip {
+  fill: var(--fx-card);
+  stroke: var(--fx-line);
+  stroke-width: 2;
+}
+
+.fx-svg .chip {
+  stroke: var(--fx-a);
+}
+
+.fx-svg .outline {
+  fill: none;
+  stroke: var(--fx-line);
+  stroke-width: 2;
+}
+
+.fx-svg .outline--dash {
+  stroke-dasharray: 5 5;
+  opacity: 0.7;
+}
+
+.fx-svg .chan rect,
+.fx-svg .bot rect,
+.fx-svg .perm rect:first-child {
+  fill: var(--fx-card);
+  stroke: var(--fx-line);
+  stroke-width: 2;
+}
+
+.fx-svg .chan text {
+  font-size: 13px;
+}
+
+.fx-svg .bot path {
+  fill: none;
+  stroke: var(--fx-line);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.fx-svg .bot--down rect {
+  stroke-dasharray: 5 4;
+  opacity: 0.75;
+}
+
+.fx-svg .bot--down path {
+  stroke: var(--fx-warn);
+}
+
+.fx-svg .retry {
+  stroke: var(--fx-a);
+  stroke-width: 3;
+}
+
+.fx-svg .retry-head {
+  fill: var(--fx-a);
+}
+
+.fx-svg .lock rect {
+  fill: var(--fx-a);
+}
+
+.fx-svg .lock path {
+  fill: none;
+  stroke: var(--fx-a);
+  stroke-width: 3;
+}
+
+.fx-svg .scramble rect {
+  fill: var(--fx-b);
+  opacity: 0.85;
+}
+
+.fx-svg .tick {
+  stroke: var(--fx-ok);
+  stroke-width: 3;
+}
+
+.fx-svg .bar {
+  fill: color-mix(in srgb, var(--md-default-fg-color) 22%, transparent);
+  stroke: none;
+}
+
+.fx-svg .perm--no rect:first-child {
+  stroke-dasharray: 4 4;
+  opacity: 0.8;
+}
+
+.fx-svg .perm--no circle {
+  fill: none;
+  stroke: var(--fx-mute);
+  stroke-width: 2;
+}
+
+.fx-svg .perm--no path:not(.strike) {
+  fill: none;
+  stroke: var(--fx-mute);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.fx-svg .strike {
+  stroke: var(--fx-warn);
+  stroke-width: 3;
+}
+
+.fx-svg .bubble rect {
+  fill: var(--fx-card);
+  stroke: var(--fx-a);
+  stroke-width: 2;
+}
+
+.fx-svg .bubble path {
+  fill: var(--fx-card);
+  stroke: var(--fx-a);
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.fx-svg .bubble--b rect,
+.fx-svg .bubble--b path {
+  stroke: var(--fx-b);
+}
+
+.fx-svg .bubble--c rect,
+.fx-svg .bubble--c path {
+  stroke: var(--fx-ok);
+}
+
+.fx-svg .bubble--new rect {
+  stroke-dasharray: 5 4;
+  stroke: var(--fx-mute);
+}
+
+.fx-svg .bubble--new text {
+  font-size: 22px;
+  fill: var(--fx-mute);
+}
+
+.fx-svg .plus {
+  stroke: var(--fx-a);
+  stroke-width: 2.5;
+}
+
+.fx-svg .spark {
+  stroke: var(--fx-a);
+  stroke-width: 3;
+}
+
+/* Motion. Entrance: each illustration plays once when it scrolls into view.
+   Loops: only while its card is hovered or focused. Without script, or with
+   reduced motion, none of this applies and the static frames above stay. */
+
+.fx-svg .pkt,
+.fx-svg .pkt-hero {
+  fill: var(--fx-a);
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .fx-js .fx-svg * {
+    animation-play-state: paused;
+  }
+
+  .fx-js .fx-svg.is-live * {
+    animation-play-state: running;
+  }
+
+  /* Entrance */
+
+  .fx-js .fx-svg .wire,
+  .fx-js .fx-svg .wave,
+  .fx-js .fx-svg .spark,
+  .fx-js .fx-svg .glyph--ink {
+    animation: fx-draw 0.9s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.15s + 0.1s);
+  }
+
+  .fx-js .fx-svg .tick {
+    animation: fx-draw 0.9s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.25s + 0.5s);
+  }
+
+  .fx-js .fx-svg .strike {
+    animation: fx-draw 0.9s ease-out 1.3s both;
+  }
+
+  .fx-js .fx-svg .chan,
+  .fx-js .fx-svg .bubble,
+  .fx-js .fx-svg .chip,
+  .fx-js .fx-svg .bot {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fx-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    animation-delay: calc(var(--i, 0) * 0.18s + 0.3s);
+  }
+
+  .fx-js .fx-svg .bubble--new {
+    animation-delay: 1.5s;
+  }
+
+  .fx-js .fx-svg .perm {
+    animation: fx-slide 0.5s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.2s);
+  }
+
+  .fx-js .fx-svg .seq,
+  .fx-js .fx-svg .lock,
+  .fx-js .fx-svg .outline--dash {
+    animation: fx-fade 0.6s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.25s + 0.2s);
+  }
+
+  .fx-js .fx-svg .outline--dash {
+    animation-delay: 1.2s;
+  }
+
+  .fx-js .fx-svg .bar-grow {
+    transform-box: fill-box;
+    transform-origin: left center;
+    animation: fx-grow 0.8s ease-out both;
+    animation-delay: calc(var(--i, 0) * 0.2s + 0.4s);
+  }
+
+  .fx-js .fx-svg .dot-a.slide {
+    animation: fx-from-left 0.8s ease-out both;
+  }
+
+  .fx-js .fx-svg .dot-b {
+    animation: fx-from-right 0.8s ease-out both;
+  }
+
+  /* Always on: the hero (rings and travelling packets) */
+
+  .fx-js .fx-svg .pkt-hero {
+    animation: fx-packet 2.4s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 0.55s + 1.4s);
+  }
+
+  /* Loops, on hover or keyboard focus only */
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .seq .wire {
+    animation: fx-draw 0.9s ease-out both, fx-flow 1.2s linear infinite;
+    animation-delay: calc(var(--i, 0) * 0.15s + 0.1s), 0s;
+  }
+
+  .fx-js .fx-svg .ring {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fx-ring 2.6s ease-out infinite;
+  }
+
+  .fx-js .fx-svg .ring--2 {
+    animation-delay: 0.9s;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .scramble rect {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fx-bar 1.4s ease-in-out infinite;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .scramble rect:nth-child(2) {
+    animation-delay: 0.25s;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .scramble rect:nth-child(3) {
+    animation-delay: 0.5s;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .scramble rect:nth-child(4) {
+    animation-delay: 0.75s;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .retry,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .retry-head {
+    transform-box: view-box;
+    transform-origin: 120px 114px;
+    animation: fx-spin 1.6s linear infinite;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .pkt {
+    animation: fx-travel 2s ease-in-out infinite;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .outline--dash {
+    animation: fx-fade 0.6s ease-out 1.2s both, fx-march 1.2s linear infinite;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .perm:not(.perm--no) rect:first-child {
+    animation: fx-glow 3.6s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 0.6s);
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .bubble {
+    animation: fx-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both, fx-float 3.2s ease-in-out infinite;
+    animation-delay: calc(var(--i, 0) * 0.18s + 0.3s), calc(var(--i, 0) * 0.5s);
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .bubble--new {
+    animation: fx-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 1.5s both, fx-breathe 2.2s ease-in-out infinite;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .bubble--new rect {
+    animation: fx-march 1.2s linear infinite;
+  }
+
+  @keyframes fx-draw {
+    from {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 0;
+    }
+  }
+
+  @keyframes fx-flow {
+    from {
+      stroke-dasharray: 0.06 0.1;
+      stroke-dashoffset: 0;
+    }
+    to {
+      stroke-dasharray: 0.06 0.1;
+      stroke-dashoffset: -0.16;
+    }
+  }
+
+  @keyframes fx-packet {
+    0% {
+      opacity: 0;
+      offset-distance: 0%;
+    }
+    12%,
+    88% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      offset-distance: 100%;
+    }
+  }
+
+  @keyframes fx-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.6);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  @keyframes fx-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fx-slide {
+    from {
+      opacity: 0;
+      transform: translateX(-14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fx-grow {
+    from {
+      transform: scaleX(0);
+    }
+    to {
+      transform: scaleX(1);
+    }
+  }
+
+  @keyframes fx-from-left {
+    from {
+      transform: translateX(-14px);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fx-from-right {
+    from {
+      transform: translateX(14px);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes fx-ring {
+    0% {
+      opacity: 0.7;
+      transform: scale(0.85);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(1.15);
+    }
+  }
+
+  @keyframes fx-bar {
+    0%,
+    100% {
+      transform: scaleY(0.45);
+    }
+    50% {
+      transform: scaleY(1.1);
+    }
+  }
+
+  @keyframes fx-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @keyframes fx-travel {
+    0% {
+      opacity: 0;
+      transform: translateX(0);
+    }
+    15%,
+    85% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(64px);
+    }
+  }
+
+  @keyframes fx-march {
+    to {
+      stroke-dashoffset: -20;
+    }
+  }
+
+  @keyframes fx-glow {
+    0%,
+    40%,
+    100% {
+      stroke: var(--fx-line);
+    }
+    12%,
+    28% {
+      stroke: var(--fx-ok);
+    }
+  }
+
+  @keyframes fx-float {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-5px);
+    }
+  }
+
+  @keyframes fx-breathe {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+    50% {
+      transform: scale(1.08);
+      opacity: 0.7;
+    }
+  }
+}
+
+/* Phones and tablets */
+
+@media (max-width: 60em) {
+  .fx-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 44em) {
+  .fx-hero,
+  .fx-split,
+  .fx-trio {
+    grid-template-columns: 1fr;
+  }
+
+  .fx-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fx-hero {
+    padding-top: 2rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-card {
+    transition: none;
+  }
+
+  .fx-card:hover {
+    transform: none;
+  }
+}

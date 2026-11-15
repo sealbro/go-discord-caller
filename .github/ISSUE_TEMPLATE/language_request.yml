@@ -1,0 +1,23 @@
+name: Language request
+description: Ask for the bot's commands and setup screens in another language.
+title: "Language request: "
+labels: ["translations"]
+body:
+  - type: input
+    id: language
+    attributes:
+      label: Language
+      description: The language and, if it matters, the region (for example Portuguese, Brazil).
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Who would use it?
+      description: Your community's size and language, and whether you can help review a translation.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution
+      options:
+        - label: I can help translate or review it.

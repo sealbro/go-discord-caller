@@ -161,10 +161,12 @@ func (c *startSignalConn) DAVE() godave.Session {
 // unsentFrameSession is the sender's view of the conn's DAVE session. disgo's
 // sender asks Ready once per tick and, while it is false, neither pulls nor
 // encrypts a frame — so a lost key ratchet never fails an Encrypt, and the
-// encrypt-stall rejoin never fires. On such a tick this drops one queued frame
-// and records it as unsent, which counts toward the stall only while there is
-// speech to send: an idle bot is never rejoined, and the queue drains within a
-// few ticks of the speech stopping.
+// encrypt-stall rejoin never fires. On such a tick this drops every queued
+// frame and records each as unsent, which counts toward the stall only while
+// there is speech to send: an idle bot is never rejoined, and the queue is empty
+// as soon as the speech stops. Draining it all, not one frame per tick, keeps the
+// room a burst of frames needs; a ready sender takes frames as they arrive and
+// has that room too.
 type unsentFrameSession struct {
 	godave.Session
 	provider voice.OpusFrameProvider
@@ -176,8 +178,13 @@ func (s unsentFrameSession) Ready() bool {
 	if s.Session.Ready() {
 		return true
 	}
-	if d, ok := s.provider.(frameDiscarder); ok && d.DiscardFrame() {
-		if r, ok := s.Session.(dave.UnsentFrameRecorder); ok {
+	d, ok := s.provider.(frameDiscarder)
+	if !ok {
+		return false
+	}
+	r, _ := s.Session.(dave.UnsentFrameRecorder)
+	for d.DiscardFrame() {
+		if r != nil {
 			r.RecordUnsentFrame()
 		}
 	}

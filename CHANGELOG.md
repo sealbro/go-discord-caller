@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel discarded one queued frame per tick, so a short burst of frames overflowed its queue and was counted in `gdc_fanout_frames_dropped_total` on the `direct` path. It now discards everything queued on each tick, and those drops no longer appear for it.
+
 ## [0.15.0] - 2026-11-09
 
 ### Added

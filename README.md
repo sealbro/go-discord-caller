@@ -157,6 +157,30 @@ Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown 
 3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` and Guild B must join with `/start code:A3BX7KQP mode:many`.
 4. When Guild A runs `/stop`, all guest sessions are torn down automatically.
 
+## When a raid ends
+
+A raid ends when a manager runs `/stop`, or by itself in these cases:
+
+| Situation                                                                                   | Result                                                        |
+|---------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| No member with the capture role in any session channel for `SESSION_IDLE_TIMEOUT` (10 min)  | Raid stops                                                    |
+| Members with the capture role are there, but every one of them is muted (self or server)    | Raid stops after the same timeout: a muted caller sends nothing |
+| One unmuted caller, and nobody else in the session's channels to hear them                  | Raid stops after the same timeout                             |
+| Only members without the capture role, or only bots, are in the channels                    | Raid stops after the same timeout                             |
+| A caller is in a voice channel that is not the owner's or a speaker's                       | Does not count; the raid stops after the same timeout         |
+| The host server of a relay runs `/stop`                                                     | Every guest session is torn down                              |
+| The bot is removed from the server                                                          | Its raid is stopped                                           |
+| The service shuts down                                                                      | Every raid is stopped                                         |
+
+What keeps a raid alive is an **unmuted caller with at least one other human** in the owner's channel or a speaker's channel (bots do not count; a member in the caller's own channel does).
+
+- **Shared relays use a simpler rule.** While another server is attached (you host with guests, or you joined as a guest), any caller present keeps the raid alive, muted or not, because the other server's members cannot be seen from here.
+- **Timing.** The bot checks once a minute, so a raid stops 10 to 11 minutes after the last check that found a caller with an audience. Any check that finds one starts the count over, and someone who joins and leaves between two checks is never seen.
+- **Which channels.** The owner's channel and each speaker's bound channel, as bound when the raid started.
+- **Disabling.** `SESSION_IDLE_TIMEOUT=0` turns the idle stop off; a manager then has to run `/stop`.
+
+Audio pausing is not an end: a channel with no listeners, or one whose mixer gets no audio for 5 seconds, is paused and resumes by itself, and the raid keeps running. See [docs/VOICE_FLOW.md](docs/VOICE_FLOW.md#session-end-and-the-idle-timeout) for how the idle stop works.
+
 ## Configuration
 
 Configuration is loaded from environment variables (a `.env` file in the working directory is also supported via [godotenv](https://github.com/joho/godotenv)).
@@ -167,7 +191,7 @@ Configuration is loaded from environment variables (a `.env` file in the working
 | `DISCORD_SPEAKER_BOT_TOKEN_1` | ⚠️       | Token for the first speaker bot                                                                         |
 | `DISCORD_SPEAKER_BOT_TOKEN_2` | ⚠️       | Token for the second speaker bot                                                                        |
 | `DISCORD_SPEAKER_BOT_TOKEN_N` | ⚠️       | … any numeric suffix; gaps in numbering are supported                                                   |
-| `SESSION_IDLE_TIMEOUT`        | ❌        | How long a voice raid may stay continuously idle (default: `10m`; set `0` to disable)                   |
+| `SESSION_IDLE_TIMEOUT`        | ❌        | How long a voice raid may stay idle: no unmuted caller, or nobody else there to hear one (default: `10m`; `0` disables) |
 | `STORE_PATH`                  | ❌        | Path to the YAML persistence file (default: `store.yaml`)                                               |
 | `OTEL_ENDPOINT`               | ❌        | OTLP gRPC endpoint for traces, metrics, and logs (e.g. `alloy:4317`); empty or unset disables telemetry |
 | `PYROSCOPE_ENDPOINT`          | ❌        | Pyroscope push URL for continuous profiling (e.g. `http://alloy:4040`); empty or unset disables it      |

@@ -2,6 +2,7 @@ package manager
 
 import (
 	"context"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -11,9 +12,18 @@ import (
 
 type fakeOccupancy struct {
 	callers []snowflake.ID
+	others  []snowflake.ID // members without the caller role
 }
 
 func (f *fakeOccupancy) EnumerateCallers(_, _ snowflake.ID) []snowflake.ID { return f.callers }
+
+func (f *fakeOccupancy) EnumerateUnmutedCallers(_, _ snowflake.ID) []snowflake.ID {
+	return f.callers
+}
+
+func (f *fakeOccupancy) Listeners(snowflake.ID) []snowflake.ID {
+	return append(slices.Clone(f.callers), f.others...)
+}
 
 func newIdleWatcher(guildID snowflake.ID, probe occupancyProbe) *sessionPresenceWatcher {
 	return &sessionPresenceWatcher{
@@ -42,7 +52,7 @@ func TestSessionIdle_StopsWhenOnlyNonCallersAreInChannel(t *testing.T) {
 }
 
 func TestSessionIdle_KeptAliveWhileACallerIsPresent(t *testing.T) {
-	probe := &fakeOccupancy{callers: []snowflake.ID{111111}}
+	probe := &fakeOccupancy{callers: []snowflake.ID{111111}, others: []snowflake.ID{222222}}
 	var stopped atomic.Bool
 	w := newIdleWatcher(7700005, probe)
 	w.stop = func() { stopped.Store(true) }

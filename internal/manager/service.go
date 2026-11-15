@@ -146,8 +146,19 @@ func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc contex
 		callerRole:  func() snowflake.ID { return m.callerRoleID(session.GuildID) },
 		stop:        func() { m.stopIdleSession(session, cancelFunc) },
 		idleTimeout: m.sessionIdleTimeout,
+		sharesRelay: func() bool { return m.sharesRelay(session.GuildID) },
 	}
 	go w.Run(ctx)
+}
+
+// sharesRelay reports whether guildID's audio is shared with another server:
+// it hosts a relay with guests attached, or is a guest of one.
+func (m *Service) sharesRelay(guildID snowflake.ID) bool {
+	relay, ok := m.sessions.GetByGuild(guildID)
+	if !ok {
+		return false
+	}
+	return relay.HostGuildID != guildID || len(relay.GuestGuildIDs()) > 0
 }
 
 func (m *Service) callerRoleID(guildID snowflake.ID) snowflake.ID {
@@ -430,10 +441,23 @@ func (p *cacheVoiceProbe) Listeners(channelID snowflake.ID) []snowflake.ID {
 // channelID whose role set contains roleID. When roleID == 0 (no caller role
 // bound) nobody counts — matching AllowFilter semantics.
 func (p *cacheVoiceProbe) EnumerateCallers(channelID, roleID snowflake.ID) []snowflake.ID {
+	return p.callers(channelID, roleID, false)
+}
+
+// EnumerateUnmutedCallers is EnumerateCallers without the members who are muted,
+// by themselves or by the server: a muted caller sends nothing to relay.
+func (p *cacheVoiceProbe) EnumerateUnmutedCallers(channelID, roleID snowflake.ID) []snowflake.ID {
+	return p.callers(channelID, roleID, true)
+}
+
+func (p *cacheVoiceProbe) callers(channelID, roleID snowflake.ID, skipMuted bool) []snowflake.ID {
 	caches := p.svc.ownerClient.Caches
 	var users []snowflake.ID
 	for vs := range caches.VoiceStates(p.guildID) {
 		if vs.ChannelID == nil || *vs.ChannelID != channelID {
+			continue
+		}
+		if skipMuted && (vs.SelfMute || vs.GuildMute) {
 			continue
 		}
 		member, ok := caches.Member(p.guildID, vs.UserID)

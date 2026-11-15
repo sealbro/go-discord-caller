@@ -266,10 +266,10 @@ func (m *Service) countVoiceCallers() map[voiceChannelKey]int64 {
 	return counts
 }
 
-// observeBotOnline is an OTel observable callback that emits gdc_bot_online
-// for every bot that is a registered guild member at metric collection time.
-// Only emits when value is 1 (bot present in guild) — absent bots produce no
-// series rather than a 0, keeping cardinality bounded as pool/guild count grows.
+// observeBotOnline is an OTel observable callback that emits gdc_bot_online:
+// for every guild, how many bots (the owner and its speakers) are registered
+// members at metric collection time. It is one series per guild, not per bot, so
+// cardinality does not grow with the pool.
 func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 	speakerIDs := m.poolSvc.GetIDs()
 
@@ -298,10 +298,7 @@ func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
 
 	for _, e := range snap {
 		// Owner bot is always a member of every guild it manages.
-		m.metrics.Bot.ObserveBotOnline(o, m.ownerBotID.String(), e.guildID.String())
-		for _, botID := range e.speakerIDs {
-			m.metrics.Bot.ObserveBotOnline(o, botID.String(), e.guildID.String())
-		}
+		m.metrics.Bot.ObserveBotOnline(o, e.guildID.String(), 1+len(e.speakerIDs))
 	}
 	return nil
 }

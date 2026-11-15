@@ -3629,7 +3629,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "count by (guild_id, origin_prometheus) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "expr": "sum by (guild_id, origin_prometheus) (gdc_bot_online{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
                         "format": "table",
                         "instant": true,
                         "legendFormat": "Bots Active",

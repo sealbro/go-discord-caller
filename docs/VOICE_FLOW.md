@@ -602,6 +602,48 @@ Each drop produces a 20ms gap — far less noticeable than cumulative delay from
 
 ---
 
+## Session end and the idle timeout
+
+A session ends in one of five ways. Only the idle stop is a timeout.
+
+| Cause | Where | Notes |
+|-------|-------|-------|
+| `/stop` | `bot/handlers_voice.go:handleStopVoiceRaid` → `Service.StopVoiceRaid` | |
+| Idle stop | `manager/session_idle.go:sessionPresenceWatcher.Run` → `Service.stopIdleSession` | Same teardown as `/stop`, so the owner's voice connection is released; logs `session idle: no one speaking to a listener, stopping voice raid` |
+| Host ended the relay | `manager/voice_raid.go` (guest goroutine waits on `allySession.Done()`) | Guests only |
+| Bot removed from the server | `bot/handlers.go` → `Service.ForgetGuild` → `StopVoiceRaid` | |
+| Service shutdown | `Service.Shutdown` stops every active guild | |
+
+### The idle watcher
+
+`startSessionIdleWatcher` starts one watcher per session when `SESSION_IDLE_TIMEOUT` is above 0 and the session has bound channels. It polls every minute (`min(1 min, timeout)`). `busy()` decides each poll:
+
+| Session | `busy()` is true when |
+|---------|-----------------------|
+| Not shared with another server | an unmuted caller exists in a watched channel **and** at least two humans are in the watched channels (`hasAudience`) |
+| Shared (hosting with guests attached, or a guest; `Service.sharesRelay`) | any caller is in a watched channel, muted or not (`hasCaller`) |
+
+The first poll that is not busy records the time; a busy poll clears it; the session stops on the first not-busy poll at least `idleTimeout` after that, so 10 to 11 minutes with the default. A caller is a non-bot member holding the bound caller role (none bound means nobody counts), and muted means self-mute or server mute in the voice state. Muted members still count as humans for `hasAudience`: someone muted can still hear.
+
+The humans counted are those in the watched channels only: the owner's bound channel and each speaker's, read once when the session starts. Everything comes from the owner bot's cache (`cacheVoiceProbe.EnumerateCallers`, `EnumerateUnmutedCallers`, `Listeners`), so a member the cache holds without roles does not count as a caller.
+
+`hasAudience` errs toward keeping a session alive: another human in the caller's own channel counts as an audience even though the relay does not play a channel back to itself.
+
+| Case | Stops | Test |
+|------|-------|------|
+| No caller, other members present | yes | `TestSessionIdle_StopsWhenOnlyNonCallersAreInChannel` |
+| One unmuted caller, alone | yes | `TestSessionIdle_StopsWhenTheOnlyCallerHasNobodyToHear` |
+| Unmuted caller with a listener | no | `TestSessionIdle_KeptAliveWhileACallerHasAListener` |
+| Every caller muted | yes | `TestSessionIdle_StopsWhenEveryCallerIsMuted` |
+| One caller unmuted, one muted | no | `TestSessionIdle_KeptAliveWhileOneCallerIsUnmuted` |
+| Shared relay, caller muted and alone | no | `TestSessionIdle_ASharedRelayKeepsTheCallerRule` |
+| Shared relay, no caller | yes | `TestSessionIdle_ASharedRelayStillStopsWithoutACaller` |
+| Self- and server-muted members leave the unmuted list | n/a | `TestCacheVoiceProbe_UnmutedCallersSkipMutedMembers` |
+
+Not an end: the 5 second mixer drain and the router's pause for a channel without listeners (next section) only silence a channel; the session keeps running and the idle watcher is unaffected.
+
+---
+
 ## Auto-router-driven pause state
 
 Channel mixers are **paused** when **either** the cascade rule has nothing to mix (no live source feeding the destination) **or** the destination voice channel has no non-bot listeners. A paused mixer calls `src.Drain()` on every input (releasing pooled buffers) and skips mixing, encoding, and sink invocation — eliminating the Opus encode cost for silent or unwatched channels.

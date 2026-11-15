@@ -75,3 +75,69 @@ func TestRecordCommandStart_MakesWedgedHandlerVisible(t *testing.T) {
 		t.Errorf("started (%d) and completed (%d) must agree after the handler returns", started, completed)
 	}
 }
+
+func commandDurationPoint(t *testing.T, reader *sdkmetric.ManualReader) metricdata.HistogramDataPoint[float64] {
+	t.Helper()
+
+	var rm metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &rm); err != nil {
+		t.Fatalf("collect: %v", err)
+	}
+	for _, scope := range rm.ScopeMetrics {
+		for _, m := range scope.Metrics {
+			if m.Name != "gdc.command.duration" {
+				continue
+			}
+			hist, ok := m.Data.(metricdata.Histogram[float64])
+			if !ok || len(hist.DataPoints) != 1 {
+				t.Fatalf("gdc.command.duration: want one histogram point, got %T %+v", m.Data, m.Data)
+			}
+			return hist.DataPoints[0]
+		}
+	}
+	t.Fatal("gdc.command.duration was not emitted")
+	return metricdata.HistogramDataPoint[float64]{}
+}
+
+func bucketOf(bounds []float64, seconds float64) int {
+	for i, upper := range bounds {
+		if seconds <= upper {
+			return i
+		}
+	}
+	return len(bounds)
+}
+
+// The histogram is in seconds, but with no boundaries of its own it took the
+// SDK's defaults (0, 5, 10, 25 … 10000), which are sized for milliseconds. Every
+// command in a week landed in the single bucket up to 5 s, so the dashboard's
+// p50, p95 and p99 were interpolation across 0–5 s and said nothing. What the
+// metric has to answer is whether commands beat Discord's 3 s acknowledgement
+// deadline, so a prompt command, one that just made it and one that missed must
+// not share a bucket.
+func TestCommandDurationBucketsSeparateWithinFromPastTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	reader := sdkmetric.NewManualReader()
+	meter := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("test")
+
+	var b BotMetrics
+	if err := b.init(meter); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+
+	const prompt, justInTime, late = 0.04, 2.5, 3.5
+	ctx := context.Background()
+	for _, seconds := range []float64{prompt, justInTime, late} {
+		b.RecordCommand(ctx, "start", "100", seconds)
+	}
+
+	bounds := commandDurationPoint(t, reader).Bounds
+	promptBucket, justInTimeBucket, lateBucket := bucketOf(bounds, prompt), bucketOf(bounds, justInTime), bucketOf(bounds, late)
+	if promptBucket == justInTimeBucket {
+		t.Errorf("a %v s and a %v s command share a bucket; boundaries %v cannot tell them apart", prompt, justInTime, bounds)
+	}
+	if justInTimeBucket == lateBucket {
+		t.Errorf("a %v s command, inside Discord's 3 s deadline, and a %v s one, past it, share a bucket; boundaries %v", justInTime, late, bounds)
+	}
+}

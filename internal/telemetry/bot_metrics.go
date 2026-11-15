@@ -27,7 +27,7 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if b.botOnline, err = meter.Int64ObservableGauge("gdc.bot.online",
-		metric.WithDescription("1 when the bot is a registered member of the guild, absent otherwise."),
+		metric.WithDescription("Number of bots, the owner and its speakers, that are registered members of the guild; absent when the guild is unknown."),
 	); err != nil {
 		return
 	}
@@ -49,6 +49,7 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	if b.cmdDuration, err = meter.Float64Histogram("gdc.command.duration",
 		metric.WithDescription("Slash command execution duration in seconds"),
 		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(1, 3, 5),
 	); err != nil {
 		return
 	}
@@ -61,14 +62,11 @@ func (b *BotMetrics) RegisterBotOnline(cb metric.Callback) error {
 	return err
 }
 
-// ObserveBotOnline emits a value of 1 for the given userID/guildID pair via o.
+// ObserveBotOnline emits the number of bots that are members of guildID via o.
 // Call inside the callback registered with RegisterBotOnline.
-func (b *BotMetrics) ObserveBotOnline(o metric.Observer, userID, guildID string) {
-	o.ObserveInt64(b.botOnline, 1,
-		metric.WithAttributes(
-			attribute.String("user_id", userID),
-			attribute.String("guild_id", guildID),
-		),
+func (b *BotMetrics) ObserveBotOnline(o metric.Observer, guildID string, bots int) {
+	o.ObserveInt64(b.botOnline, int64(bots),
+		metric.WithAttributes(attribute.String("guild_id", guildID)),
 	)
 }
 

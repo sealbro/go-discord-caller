@@ -3,7 +3,7 @@ title: "Free Shot Caller Bot vs Paid Shot-Caller Services"
 description: >-
   Why pay a monthly subscription for a Discord shot caller bot? go-discord-caller
   is a free, source-available, self-hosted alternative to paid shot-caller services —
-  unlimited servers and speakers, full conference mode, and DAVE end-to-end
+  unlimited servers and speakers when self-hosted, full conference mode, and DAVE end-to-end
   encryption, with no plan tiers.
 keywords: >-
   free shot caller bot, source-available shot caller bot, self-hosted shot caller bot,
@@ -14,7 +14,7 @@ keywords: >-
 
 # A Free Shot-Caller Bot vs Paid Shot-Caller Services
 
-Most Discord shot-caller and shotcaller bots are paid, hosted services — a "speak once, reach every squad" workflow gated behind a monthly subscription, with tiers that cap how many servers and parties you can use. **go-discord-caller** gives you the same workflow for free: it's source-available and self-hosted, so you run it with your own Discord bot tokens with no plan tiers, no party limits, and end-to-end encrypted audio.
+Most Discord shot-caller and shotcaller bots are paid, hosted services — a "speak once, reach every squad" workflow gated behind a monthly subscription, with tiers that cap how many servers and parties you can use. **go-discord-caller** gives you the same workflow for free: it's source-available and self-hosted, so you run it with your own Discord bot tokens with no plan tiers, no party limits, and end-to-end encrypted audio. The free hosted bot has 11 speaker bots, and more can be added on request.
 
 [:simple-discord: Add the hosted bot](https://discord.com/discovery/applications/1484911601210495038){ .md-button .md-button--primary }
 
@@ -26,8 +26,8 @@ Most Discord shot-caller and shotcaller bots are paid, hosted services — a "sp
 | Feature | go-discord-caller | Typical paid shot-caller service |
 |---|---|---|
 | **Price** | ✅ Free to self-host (Elastic License 2.0) | 💸 Monthly subscription (tiered) |
-| **Servers** | ✅ Unlimited (inter-guild relay) | ⚠️ Usually capped by plan |
-| **Speaker channels / parties** | ✅ Unlimited (one speaker bot per channel) | ⚠️ Usually capped by plan |
+| **Servers** | ✅ Unlimited when self-hosted (inter-guild relay) | ⚠️ Usually capped by plan |
+| **Speaker channels / parties** | ✅ Unlimited when self-hosted (one speaker bot per channel); the hosted bot has 11, more on request | ⚠️ Usually capped by plan |
 | **Hosting** | ✅ Self-hosted — you own the data | ☁️ Managed SaaS |
 | **Caller modes** | ✅ One-caller, hub-and-spoke, full conference (mix-minus) | ➖ Typically one-way broadcast |
 | **Encryption** | ✅ DAVE end-to-end encrypted voice | ❓ Varies / often unstated |
@@ -39,7 +39,7 @@ Most Discord shot-caller and shotcaller bots are paid, hosted services — a "sp
 ## Why teams switch from paid services
 
 - **No subscription** — host it once and run as many relays as you want.
-- **No server or party caps** — relay across any number of Discord servers with as many speaker channels as you bind.
+- **No server or party caps when self-hosted** — relay across any number of Discord servers with as many speaker channels as you bind. The hosted bot has 11 speaker bots, and more can be added on request.
 - **Full conference mode** — not just one-way broadcast: everyone can hear everyone with mix-minus echo prevention (`/start mode:many`).
 - **Privacy** — self-hosted with DAVE end-to-end encryption; your audio never sits on a third-party service.
 

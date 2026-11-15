@@ -1,0 +1,280 @@
+{% extends "main.html" %}
+
+{% block styles %}
+  {{ super() }}
+  <link rel="stylesheet" href="{{ 'stylesheets/features.css' | url }}">
+{% endblock %}
+
+{% block site_nav %}{% endblock %}
+
+{% block container %}
+<div class="md-content" data-md-component="content">
+<div class="fx">
+
+  <div class="fx-bg" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+
+  <section class="fx-hero">
+    <div class="fx-hero__text">
+      <p class="fx-eyebrow">Discord shot caller and voice relay</p>
+      <h1>Call once.<br>Every squad hears it.</h1>
+      <p class="fx-lead">One caller speaks in one channel and the bot carries that voice, live, into every squad channel, in one server or across allied servers.</p>
+      <p class="fx-actions">
+        <a class="md-button md-button--primary" href="https://discord.com/discovery/applications/1484911601210495038">Add the hosted bot</a>
+        <a class="md-button" href="{{ 'get-started/' | url }}">Self-host it</a>
+      </p>
+    </div>
+    <figure class="fx-hero__art">
+      <svg class="fx-svg" viewBox="0 0 480 240" role="img" aria-labelledby="art-call-t">
+        <title id="art-call-t">One caller on the left sends sound to four squad channels on the right</title>
+        <circle class="ring" cx="78" cy="120" r="62"/>
+        <circle class="ring ring--2" cx="78" cy="120" r="46"/>
+        <path class="wire" style="--i:0" pathLength="1" d="M104 120 C 190 120, 220 36, 330 36"/>
+        <path class="wire" style="--i:1" pathLength="1" d="M104 120 C 190 120, 230 90, 330 92"/>
+        <path class="wire" style="--i:2" pathLength="1" d="M104 120 C 190 120, 230 148, 330 148"/>
+        <path class="wire" style="--i:3" pathLength="1" d="M104 120 C 190 120, 220 204, 330 204"/>
+        <circle class="pkt-hero" r="4" cx="0" cy="0" style="--i:0;offset-path:path('M104 120 C 190 120, 220 36, 330 36')"/>
+        <circle class="pkt-hero" r="4" cx="0" cy="0" style="--i:1;offset-path:path('M104 120 C 190 120, 230 90, 330 92')"/>
+        <circle class="pkt-hero" r="4" cx="0" cy="0" style="--i:2;offset-path:path('M104 120 C 190 120, 230 148, 330 148')"/>
+        <circle class="pkt-hero" r="4" cx="0" cy="0" style="--i:3;offset-path:path('M104 120 C 190 120, 220 204, 330 204')"/>
+        <circle class="dot-a" cx="78" cy="120" r="28"/>
+        <path class="glyph" d="M72 114a6 6 0 0 1 12 0v8a6 6 0 0 1-12 0zM67 122a11 11 0 0 0 22 0M78 133v5"/>
+        <g class="chan" style="--i:0"><rect x="330" y="18" width="130" height="36" rx="10"/><circle class="dot-ok" cx="350" cy="36" r="5"/><text x="366" y="40">Squad 1</text></g>
+        <g class="chan" style="--i:1"><rect x="330" y="74" width="130" height="36" rx="10"/><circle class="dot-ok" cx="350" cy="92" r="5"/><text x="366" y="96">Squad 2</text></g>
+        <g class="chan" style="--i:2"><rect x="330" y="130" width="130" height="36" rx="10"/><circle class="dot-ok" cx="350" cy="148" r="5"/><text x="366" y="152">Squad 3</text></g>
+        <g class="chan" style="--i:3"><rect x="330" y="186" width="130" height="36" rx="10"/><circle class="dot-ok" cx="350" cy="204" r="5"/><text x="366" y="208">Squad 4</text></g>
+      </svg>
+    </figure>
+  </section>
+
+  <section class="fx-section" aria-labelledby="fx-what">
+    <h2 id="fx-what">What you get</h2>
+    <div class="fx-grid">
+
+      <article class="fx-card">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-modes-t">
+          <title id="art-modes-t">Three layouts: one caller to many, a hub with spokes, and everyone hearing everyone</title>
+          <g class="seq" style="--i:0" transform="translate(8 14)">
+            <circle class="dot-a" cx="36" cy="12" r="9"/>
+            <path class="wire" style="--i:0" pathLength="1" d="M36 21 L12 62M36 21 L36 62M36 21 L60 62"/>
+            <circle class="node" cx="12" cy="68" r="7"/><circle class="node" cx="36" cy="68" r="7"/><circle class="node" cx="60" cy="68" r="7"/>
+            <text class="cap" x="36" y="102" text-anchor="middle">one</text>
+          </g>
+          <g class="seq" style="--i:1" transform="translate(84 14)">
+            <circle class="dot-a" cx="36" cy="40" r="10"/>
+            <path class="wire" style="--i:1" pathLength="1" d="M36 30 L36 8M26 44 L8 64M46 44 L64 64"/>
+            <circle class="node" cx="36" cy="6" r="7"/><circle class="node" cx="8" cy="68" r="7"/><circle class="node" cx="64" cy="68" r="7"/>
+            <text class="cap" x="36" y="102" text-anchor="middle">hub</text>
+          </g>
+          <g class="seq" style="--i:2" transform="translate(160 14)">
+            <path class="wire" style="--i:2" pathLength="1" d="M36 10 L8 62M36 10 L64 62M8 62 L64 62"/>
+            <circle class="dot-a" cx="36" cy="10" r="8"/><circle class="dot-a" cx="8" cy="64" r="8"/><circle class="dot-a" cx="64" cy="64" r="8"/>
+            <text class="cap" x="36" y="102" text-anchor="middle">all</text>
+          </g>
+        </svg>
+        <h3>Three caller modes</h3>
+        <p class="fx-claim">Broadcast, hub-and-spoke or a full conference.</p>
+        <p class="fx-why">Choose who hears whom. Mix-minus keeps anyone from hearing their own echo.</p>
+        <a class="fx-more" href="{{ 'voice-flow/' | url }}">See how it works</a>
+      </article>
+
+      <article class="fx-card">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-ally-t">
+          <title id="art-ally-t">Two server outlines joined by a relay code, with a third server waiting to join</title>
+          <rect class="outline" x="10" y="30" width="78" height="86" rx="12"/>
+          <rect class="outline" x="152" y="30" width="78" height="86" rx="12"/>
+          <circle class="dot-a" cx="36" cy="58" r="8"/><circle class="node" cx="36" cy="92" r="7"/><circle class="node" cx="62" cy="75" r="7"/>
+          <circle class="node" cx="178" cy="58" r="7"/><circle class="node" cx="204" cy="75" r="7"/><circle class="node" cx="178" cy="92" r="7"/>
+          <path class="wire" style="--i:0" pathLength="1" d="M88 73 L152 73"/>
+          <circle class="pkt" cx="88" cy="73" r="4"/>
+          <rect class="chip" x="94" y="60" width="52" height="26" rx="13"/>
+          <text class="cap" x="120" y="77" text-anchor="middle">A1B2</text>
+          <rect class="outline outline--dash" x="90" y="124" width="60" height="22" rx="10"/>
+          <text class="cap cap--dim" x="120" y="139" text-anchor="middle">+ guild</text>
+        </svg>
+        <h3>Cross-server alliances</h3>
+        <p class="fx-claim">One relay code links allied servers.</p>
+        <p class="fx-why">Allies join and leave without ending the host's call.</p>
+        <a class="fx-more" href="{{ 'guides/bot-in-multiple-voice-channels/' | url }}">Read the guide</a>
+      </article>
+
+      <article class="fx-card">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-enc-t">
+          <title id="art-enc-t">A sound wave is scrambled while it travels and restored at the other end, with a lock on each leg</title>
+          <path class="wave" pathLength="1" d="M8 75 q7 -26 14 0 t14 0 t14 0"/>
+          <g class="lock" style="--i:1" transform="translate(66 52)"><rect x="0" y="10" width="20" height="16" rx="4"/><path d="M4 10V6a6 6 0 0 1 12 0v4"/></g>
+          <g class="scramble">
+            <rect x="96" y="62" width="9" height="26" rx="3"/><rect x="110" y="46" width="9" height="56" rx="3"/><rect x="124" y="68" width="9" height="14" rx="3"/><rect x="138" y="54" width="9" height="40" rx="3"/>
+          </g>
+          <g class="lock" style="--i:3" transform="translate(154 52)"><rect x="0" y="10" width="20" height="16" rx="4"/><path d="M4 10V6a6 6 0 0 1 12 0v4"/></g>
+          <path class="wave" pathLength="1" d="M186 75 q7 -26 14 0 t14 0"/>
+          <text class="cap cap--dim" x="120" y="128" text-anchor="middle">every voice leg</text>
+        </svg>
+        <h3>Encrypted voice</h3>
+        <p class="fx-claim">Discord's DAVE encryption on every voice leg.</p>
+        <p class="fx-why">Your call stays between Discord and the bot.</p>
+        <a class="fx-more" href="{{ 'privacy/' | url }}">Read the privacy policy</a>
+      </article>
+
+      <article class="fx-card">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-heal-t">
+          <title id="art-heal-t">Three squad bots in a row; the middle one dropped and is reconnecting</title>
+          <g class="bot" style="--i:0"><rect x="14" y="44" width="52" height="46" rx="12"/><circle class="dot-ok" cx="32" cy="64" r="4"/><circle class="dot-ok" cx="48" cy="64" r="4"/><path d="M28 78h24"/></g>
+          <g class="bot bot--down" style="--i:1"><rect x="94" y="44" width="52" height="46" rx="12"/><path d="M104 60l12 12M116 60l-12 12M124 60l12 12M136 60l-12 12"/></g>
+          <g class="bot" style="--i:2"><rect x="174" y="44" width="52" height="46" rx="12"/><circle class="dot-ok" cx="192" cy="64" r="4"/><circle class="dot-ok" cx="208" cy="64" r="4"/><path d="M188 78h24"/></g>
+          <path class="retry" d="M132 114a12 12 0 1 1 -3 -8"/>
+          <path class="retry-head" d="M124 102l9 1-3 8z"/>
+          <text class="cap cap--dim" x="120" y="142" text-anchor="middle">rejoining</text>
+        </svg>
+        <h3>Self-heals</h3>
+        <p class="fx-claim">Squad bots rejoin on their own when Discord's gateway is unavailable or disconnects.</p>
+        <p class="fx-why">A bot that drops comes back without a restart.</p>
+        <a class="fx-more" href="{{ 'voice-flow/' | url }}">See the voice flow</a>
+      </article>
+
+      <article class="fx-card">
+        <svg class="fx-svg" viewBox="0 0 240 158" role="img" aria-labelledby="art-perm-t">
+          <title id="art-perm-t">A short list of narrow permissions ticked, and the Administrator key crossed out</title>
+          <g class="perm" style="--i:0"><rect x="34" y="18" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 31l6 6 11-12"/><rect class="bar" x="76" y="27" width="96" height="8" rx="4"/></g>
+          <g class="perm" style="--i:1"><rect x="34" y="52" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 65l6 6 11-12"/><rect class="bar" x="76" y="61" width="72" height="8" rx="4"/></g>
+          <g class="perm" style="--i:2"><rect x="34" y="86" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 99l6 6 11-12"/><rect class="bar" x="76" y="95" width="84" height="8" rx="4"/></g>
+          <g class="perm perm--no" style="--i:3"><rect x="34" y="120" width="172" height="26" rx="9"/><circle cx="56" cy="133" r="6"/><path d="M62 133h18M72 133v6M78 133v5"/><path class="strike" pathLength="1" d="M30 148L210 118"/></g>
+        </svg>
+        <h3>Minimal permissions</h3>
+        <p class="fx-claim">Asks only for the voice and command permissions it uses, never Administrator.</p>
+        <p class="fx-why">Administrator gives a bot full control of your server: it can delete channels, change roles and ban members. Narrow permissions keep that control with you.</p>
+        <a class="fx-more" href="{{ 'permissions/' | url }}">See every permission</a>
+      </article>
+
+      <article class="fx-card">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-lang-t">
+          <title id="art-lang-t">Speech bubbles saying hello in several languages, and a dashed bubble for a new one</title>
+          <g class="bubble" style="--i:0"><rect x="12" y="18" width="84" height="38" rx="14"/><path d="M30 56l-6 12 16-12z"/><text x="54" y="42" text-anchor="middle">Hello</text></g>
+          <g class="bubble bubble--b" style="--i:1"><rect x="130" y="30" width="96" height="38" rx="14"/><path d="M200 68l6 12-16-12z"/><text x="178" y="54" text-anchor="middle">Hola</text></g>
+          <g class="bubble bubble--c" style="--i:2"><rect x="30" y="84" width="84" height="38" rx="14"/><path d="M92 122l6 12-16-12z"/><text x="72" y="108" text-anchor="middle">Hallo</text></g>
+          <g class="bubble bubble--new" style="--i:3"><rect x="140" y="92" width="70" height="38" rx="14"/><text x="175" y="118" text-anchor="middle">+</text></g>
+        </svg>
+        <h3>Speaks your language</h3>
+        <p class="fx-claim">Commands and setup in English, Español, Deutsch, Français, Português, Polski, Русский and Türkçe.</p>
+        <p class="fx-why">Mixed-language alliances set up without translating. Missing yours? One click requests it.</p>
+        <a class="fx-more" href="https://github.com/sealbro/go-discord-caller/issues/new?template=language_request.yml">Request a language</a>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="fx-section" aria-labelledby="fx-run">
+    <h2 id="fx-run">Pick how you run it</h2>
+    <p class="fx-sub">Same bot, same features. The difference is who runs it.</p>
+    <div class="fx-split">
+
+      <article class="fx-card fx-card--hosted">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-host-t">
+          <title id="art-host-t">The hosted bot is invited to a server and connects to squad channels</title>
+          <g class="bot" style="--i:0"><rect x="14" y="48" width="56" height="50" rx="13"/><circle class="dot-ok" cx="34" cy="68" r="4"/><circle class="dot-ok" cx="50" cy="68" r="4"/><path d="M30 84h24"/></g>
+          <rect class="chip" x="84" y="64" width="40" height="22" rx="11"/><path class="plus" d="M104 69v12M98 75h12"/>
+          <path class="wire" style="--i:0" pathLength="1" d="M124 75 C 150 75, 160 40, 180 40M124 75 L180 75M124 75 C 150 75, 160 110, 180 110"/>
+          <g class="chan" style="--i:0"><rect x="180" y="26" width="48" height="28" rx="8"/><circle class="dot-ok" cx="194" cy="40" r="4"/></g>
+          <g class="chan" style="--i:1"><rect x="180" y="61" width="48" height="28" rx="8"/><circle class="dot-ok" cx="194" cy="75" r="4"/></g>
+          <g class="chan" style="--i:2"><rect x="180" y="96" width="48" height="28" rx="8"/><circle class="dot-ok" cx="194" cy="110" r="4"/></g>
+        </svg>
+        <p class="fx-tag">Hosted</p>
+        <h3>Invite and go</h3>
+        <ul class="fx-list">
+          <li>Nothing to install: add the bot and run the setup command.</li>
+          <li>Free, with 11 speaker bots. Need more? Ask and the limit can be raised.</li>
+          <li>Runs at the maintainer's expense, so capacity may be limited at peak times (<a href="{{ 'terms/' | url }}">terms</a>).</li>
+        </ul>
+        <a class="md-button md-button--primary" href="https://discord.com/discovery/applications/1484911601210495038">Add the hosted bot</a>
+      </article>
+
+      <article class="fx-card fx-card--self">
+        <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-self-t">
+          <title id="art-self-t">A container box on your own machine with a metrics graph inside</title>
+          <rect class="outline" x="24" y="22" width="192" height="108" rx="14"/>
+          <rect class="node" x="40" y="38" width="80" height="34" rx="8"/><circle class="dot-ok" cx="54" cy="55" r="4"/><rect class="bar bar-grow" style="--i:0" x="66" y="51" width="40" height="8" rx="4"/>
+          <rect class="node" x="40" y="82" width="80" height="34" rx="8"/><circle class="dot-ok" cx="54" cy="99" r="4"/><rect class="bar bar-grow" style="--i:1" x="66" y="95" width="30" height="8" rx="4"/>
+          <path class="spark" pathLength="1" d="M138 100 L152 84 L164 92 L178 62 L192 72 L204 48"/>
+          <path class="wire" style="--i:0" pathLength="1" d="M138 108 L204 108"/>
+        </svg>
+        <p class="fx-tag">Self-hosted</p>
+        <h3>Your server, your data</h3>
+        <ul class="fx-list">
+          <li>Unlimited speaker bots and servers.</li>
+          <li>Audio and data stay on your own machine, free under the Elastic License 2.0 with the source open.</li>
+          <li>Measure the in-process delay and read metrics and traces on your own stack (<a href="{{ 'latency/' | url }}">latency</a>, <a href="{{ 'metrics/' | url }}">metrics</a>).</li>
+        </ul>
+        <div class="fx-btnrow">
+          <a class="md-button" href="{{ 'get-started/' | url }}">Self-host it</a>
+          <a class="fx-more fx-more--inline" href="https://github.com/sealbro/go-discord-caller">Source on GitHub</a>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="fx-section" aria-labelledby="fx-games">
+    <h2 id="fx-games">Built for guild wars in any game</h2>
+    <p class="fx-sub">A game-agnostic voice command system for PvP battles, sieges, node wars and raids. Setup guides:</p>
+    <p class="fx-pills">
+      <a href="{{ 'guides/throne-and-liberty-shot-caller-bot/' | url }}">Throne and Liberty</a>
+      <a href="{{ 'guides/albion-online-shot-caller-bot/' | url }}">Albion Online</a>
+      <a href="{{ 'guides/guild-wars-2-shot-caller-bot/' | url }}">Guild Wars 2</a>
+      <a href="{{ 'guides/world-of-warcraft-shot-caller-bot/' | url }}">World of Warcraft</a>
+      <a href="{{ 'guides/where-winds-meet-shot-caller-bot/' | url }}">Where Winds Meet</a>
+      <a href="{{ 'guides/aion-2-shot-caller-bot/' | url }}">Aion 2</a>
+      <a href="{{ 'guides/teamspeak-alternative/' | url }}">TeamSpeak alternative</a>
+    </p>
+  </section>
+
+  <section class="fx-section fx-why-us" aria-labelledby="fx-why">
+    <h2 id="fx-why">Why teams pick it</h2>
+    <div class="fx-trio">
+      <div>
+        <svg class="fx-svg fx-svg--icon" viewBox="0 0 64 64" role="img" aria-labelledby="art-mix-t"><title id="art-mix-t">Overlapping circles</title><circle class="dot-a slide" cx="24" cy="32" r="16"/><circle class="dot-b" cx="40" cy="32" r="16"/></svg>
+        <h3>Conference mode</h3>
+        <p>Everyone can hear everyone, with mix-minus so nobody hears their own echo.</p>
+      </div>
+      <div>
+        <svg class="fx-svg fx-svg--icon" viewBox="0 0 64 64" role="img" aria-labelledby="art-tier-t"><title id="art-tier-t">A price tag crossed out</title><path class="outline" d="M8 32L32 8h24v24L32 56z"/><circle class="node" cx="44" cy="20" r="4"/><path class="strike" pathLength="1" d="M10 54L54 10"/></svg>
+        <h3>No plan tiers</h3>
+        <p>No paid level decides how big your alliance can be.</p>
+      </div>
+      <div>
+        <svg class="fx-svg fx-svg--icon" viewBox="0 0 64 64" role="img" aria-labelledby="art-src-t"><title id="art-src-t">Code brackets</title><path class="glyph glyph--ink" pathLength="1" d="M22 18L8 32l14 14M42 18l14 14-14 14M36 14L28 50"/></svg>
+        <h3>Open and self-hostable</h3>
+        <p>Read the source, or run it yourself.</p>
+      </div>
+    </div>
+    <p class="fx-actions fx-actions--center">
+      <a class="md-button md-button--primary" href="https://discord.com/discovery/applications/1484911601210495038">Add the hosted bot</a>
+      <a class="md-button" href="{{ 'free-shot-caller-bot/' | url }}">Free vs paid bots</a>
+    </p>
+  </section>
+
+</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  <script>
+    (function () {
+      function run() {
+        var root = document.querySelector(".fx");
+        if (!root || !("IntersectionObserver" in window)) return;
+        if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+        root.classList.add("fx-js");
+        var io = new IntersectionObserver(function (entries) {
+          entries.forEach(function (e) {
+            if (e.isIntersecting) {
+              e.target.classList.add("is-live");
+              io.unobserve(e.target);
+            }
+          });
+        }, { threshold: 0.35 });
+        root.querySelectorAll(".fx-svg").forEach(function (s) { io.observe(s); });
+      }
+      if (window.document$) { window.document$.subscribe(run); } else { run(); }
+    })();
+  </script>
+{% endblock %}

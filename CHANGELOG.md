@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **New home page**: the site opens on a page of feature blocks, with a choice between the hosted bot and self-hosting. The previous home is now the Get started page.
+- **Language requests**: a GitHub issue form for asking for a language the bot does not have yet.
+
 ### Fixed
 - **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel discarded one queued frame per tick, so a short burst of frames overflowed its queue and was counted in `gdc_fanout_frames_dropped_total` on the `direct` path. It now discards everything queued on each tick, and those drops no longer appear for it.
 - **Command duration histogram could not tell fast from slow**: `gdc_command_duration_seconds` took default buckets sized for milliseconds (0, 5, 10 … 10000), so every command landed in the one bucket up to 5 s and the dashboard's p50, p95 and p99 were interpolation. It now has buckets at 1, 3 and 5 s, around Discord's 3 s deadline, which also cuts its series by three quarters.

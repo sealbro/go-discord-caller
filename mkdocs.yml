@@ -76,6 +76,7 @@ markdown_extensions:
 
 nav:
   - Home: index.md
+  - Get started: get-started.md
   - Free Shot Caller Bot: free-shot-caller-bot.md
   - How it works: voice-flow.md
   - Guides:

@@ -87,6 +87,13 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
 	}
 }
 
+// trackStartupFilter routes member updates to filter while a raid for guildID is
+// still starting and has no committed session. The returned func stops that.
+func (m *Service) trackStartupFilter(guildID snowflake.ID, filter *AllowFilter) func() {
+	m.startupFilters.Store(guildID, filter)
+	return func() { m.startupFilters.CompareAndDelete(guildID, filter) }
+}
+
 // NotifyMemberUpdate pushes a fresh allow decision into the active session's
 // AllowFilter. Called by event handlers when a member's roles change or they
 // join a voice channel; no-op when there is no active session.
@@ -100,6 +107,9 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 	st := m.statuses[guildID]
 	if st == nil || st.Session == nil || st.Session.AllowFilter == nil {
 		m.mu.RUnlock()
+		if f, ok := m.startupFilters.Load(guildID); ok {
+			f.(*AllowFilter).Set(member.User.ID, !m.IsBot(member.User) && m.HasCallerRole(guildID, member.RoleIDs))
+		}
 		return
 	}
 	filter := st.Session.AllowFilter

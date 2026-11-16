@@ -254,6 +254,11 @@ func computeRoutes(sources []routeSource, destinations []routeDest, callerCounts
 // (EnumerateCallers, HasListeners) because production implementations read
 // from the disgo cache, which acquires its own locks in a different order.
 type Router struct {
+	// recomputeMu serialises whole Recompute runs so a snapshot taken earlier
+	// can never be applied or published after a later one. Held across the
+	// VoiceProbe calls and the capture observer, never taken by Close, and
+	// always acquired before mu.
+	recomputeMu    sync.Mutex
 	mu             sync.Mutex
 	guildID        snowflake.ID
 	roleID         snowflake.ID
@@ -406,6 +411,8 @@ func (r *Router) Debounce(channelID snowflake.ID) {
 // implementations backed by the disgo cache cannot create a lock-order edge
 // against guild events. r.mu is reacquired inside applyModes.
 func (r *Router) Recompute() {
+	r.recomputeMu.Lock()
+	defer r.recomputeMu.Unlock()
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
@@ -460,7 +467,9 @@ func (r *Router) Recompute() {
 	}
 
 	sourceModes, destMix := computeRoutes(routeSources, routeDests, callerCounts, relayFed)
-	r.applyModes(sourceModes, destMix, usersPerChannel, listenersPerChannel)
+	if !r.applyModes(sourceModes, destMix, usersPerChannel, listenersPerChannel) {
+		return
+	}
 	r.notifyCapture(sourceModes)
 }
 
@@ -473,9 +482,15 @@ func (r *Router) Recompute() {
 // Lock discipline: r.mu is held throughout. None of the calls performed under
 // the lock (Install, SetPaused, the pipeline's teardown closures) acquire
 // external locks in the same order as r.mu, so no inversion is possible.
-func (r *Router) applyModes(sourceModes map[snowflake.ID]RouteMode, destMix map[snowflake.ID]bool, usersPerChannel map[snowflake.ID][]snowflake.ID, listenersPerChannel map[snowflake.ID]bool) {
+//
+// Returns false, having changed nothing, when the router was closed after the
+// snapshot was taken.
+func (r *Router) applyModes(sourceModes map[snowflake.ID]RouteMode, destMix map[snowflake.ID]bool, usersPerChannel map[snowflake.ID][]snowflake.ID, listenersPerChannel map[snowflake.ID]bool) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
 
 	// Stopping a mixer comes first, resuming one comes last, with the installs
 	// in between. A copy-mode source writes raw Opus into the destination's
@@ -540,6 +555,7 @@ func (r *Router) applyModes(sourceModes map[snowflake.ID]RouteMode, destMix map[
 		pruneSynthIDsLocked(s, users)
 	}
 	r.setDestPaused(destMix, listenersPerChannel, false)
+	return true
 }
 
 // setDestPaused drives every destination mixer toward the state destMix and the

@@ -44,7 +44,33 @@ type Service struct {
 	daveStats      *dave.Stats
 	daveStalls     *dave.EncryptStalls
 	onFreshGateway atomic.Pointer[func(botUserID snowflake.ID)]
+
+	newClient func(token string) (*bot.Client, error)
+
+	downGrace     time.Duration
+	retryInterval time.Duration
+	watchMu       sync.Mutex
+	down          map[snowflake.ID]*downState
+	flights       map[snowflake.ID]*reconnectFlight
 }
+
+// downState tracks how long a bot has been without a connected gateway and
+// when the watchdog may next try to replace it.
+type downState struct {
+	since       time.Time
+	nextAttempt time.Time
+}
+
+// reconnectFlight is one in-progress Reconnect that concurrent callers join.
+type reconnectFlight struct {
+	done chan struct{}
+	ok   bool
+}
+
+const (
+	defaultDownGrace     = 2 * time.Minute
+	defaultRetryInterval = 2 * time.Minute
+)
 
 // extraBot is a bot reported in the info/latency metrics but not lifecycle-managed
 // by the pool (e.g. the owner bot). client may be nil (name-only registration).
@@ -55,15 +81,23 @@ type extraBot struct {
 
 // NewService creates a new speaker Service.
 func NewService(metrics *telemetry.PoolMetrics, voiceRegion *telemetry.VoiceRegionMetrics, daveStats *dave.Stats, daveStalls *dave.EncryptStalls) *Service {
-	return &Service{
-		poolClients:  make(map[snowflake.ID]*bot.Client),
-		extraBots:    make(map[snowflake.ID]extraBot),
-		verification: make(map[snowflake.ID]telemetry.BotVerification),
-		metrics:      metrics,
-		voiceRegion:  voiceRegion,
-		daveStats:    daveStats,
-		daveStalls:   daveStalls,
+	s := &Service{
+		poolClients:   make(map[snowflake.ID]*bot.Client),
+		extraBots:     make(map[snowflake.ID]extraBot),
+		verification:  make(map[snowflake.ID]telemetry.BotVerification),
+		metrics:       metrics,
+		voiceRegion:   voiceRegion,
+		daveStats:     daveStats,
+		daveStalls:    daveStalls,
+		downGrace:     defaultDownGrace,
+		retryInterval: defaultRetryInterval,
+		down:          make(map[snowflake.ID]*downState),
+		flights:       make(map[snowflake.ID]*reconnectFlight),
 	}
+	s.newClient = func(token string) (*bot.Client, error) {
+		return newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls, s.freshGateway)
+	}
+	return s
 }
 
 // RegisterBot adds a bot to the info and gateway-latency metrics that is not part
@@ -126,8 +160,19 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 	results := make([]result, len(tokens))
 
 	var wg sync.WaitGroup
-	wg.Add(len(tokens))
+	seen := make(map[snowflake.ID]int, len(tokens))
 	for i, token := range tokens {
+		if botUserID, ok := guild.BotUserID(token); ok {
+			if first, dup := seen[botUserID]; dup {
+				slog.WarnContext(ctx, "pool: duplicate pool token skipped",
+					slog.Int("index", i+1),
+					slog.Int("sameAsIndex", first),
+				)
+				continue
+			}
+			seen[botUserID] = i + 1
+		}
+		wg.Add(1)
 		go func(i int, token string) {
 			defer wg.Done()
 			index := i + 1
@@ -138,7 +183,7 @@ func (s *Service) ConnectPool(ctx context.Context, tokens []string) {
 				return
 			}
 
-			client, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls, s.freshGateway)
+			client, err := s.newClient(token)
 			if err != nil {
 				slog.WarnContext(ctx, "pool: failed to build client",
 					slog.Int("index", index),
@@ -243,8 +288,33 @@ func (s *Service) observeGatewayLatency(o metric.Observer, id snowflake.ID, c *b
 
 // Reconnect attempts to open the gateway for a bot whose connection failed.
 // It reads the token from the stored client.Token field. If the bot already has
-// a connected gateway it is a no-op and returns true.
+// a connected gateway it is a no-op and returns true. Concurrent calls for the
+// same bot share one attempt and its result.
 func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
+	s.watchMu.Lock()
+	if flight, running := s.flights[botUserID]; running {
+		s.watchMu.Unlock()
+		select {
+		case <-flight.done:
+			return flight.ok
+		case <-ctx.Done():
+			return false
+		}
+	}
+	flight := &reconnectFlight{done: make(chan struct{})}
+	s.flights[botUserID] = flight
+	s.watchMu.Unlock()
+
+	flight.ok = s.reconnect(ctx, botUserID)
+
+	s.watchMu.Lock()
+	delete(s.flights, botUserID)
+	s.watchMu.Unlock()
+	close(flight.done)
+	return flight.ok
+}
+
+func (s *Service) reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 	s.mu.RLock()
 	client, known := s.poolClients[botUserID]
 	s.mu.RUnlock()
@@ -267,7 +337,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 	s.metrics.ReconnectAttempt(ctx, botUserID)
 
-	newClient, err := newPoolClient(token, s.voiceRegion, s.daveStats, s.daveStalls, s.freshGateway)
+	newClient, err := s.newClient(token)
 	if err != nil {
 		slog.WarnContext(ctx, "pool: reconnect failed to build client",
 			slog.String("botUserID", botUserID.String()),
@@ -281,6 +351,7 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 			slog.String("botUserID", botUserID.String()),
 			slog.Any("err", err),
 		)
+		newClient.Close(ctx)
 		s.metrics.ReconnectFailed(ctx, botUserID)
 		return false
 	}
@@ -306,9 +377,11 @@ func (s *Service) Reconnect(ctx context.Context, botUserID snowflake.ID) bool {
 
 // StartWatchdog starts a background goroutine that periodically monitors every
 // gateway in the pool. On each tick it:
-//   - logs a warning for any gateway whose status is not connected (disgo's
-//     internal reconnect loop is already running for those; this gives visibility)
-//   - actively calls Reconnect for bots whose gateway failed at startup
+//   - logs a warning for any gateway whose status is not connected
+//   - calls Reconnect at once for bots with no gateway, and for bots that have
+//     stayed disconnected past downGrace (disgo's own reconnect loop gets that
+//     long to recover first; a startup failure has no loop at all), then at
+//     most once per retryInterval
 func (s *Service) StartWatchdog(ctx context.Context, interval time.Duration) {
 	go func() {
 		ticker := time.NewTicker(interval)
@@ -335,30 +408,62 @@ func (s *Service) watchdogCheck(ctx context.Context) {
 		s.mu.RUnlock()
 
 		if isConnected(client) {
+			s.markUp(botUserID)
 			continue // healthy
 		}
 
-		if client == nil || client.Gateway == nil {
-			slog.WarnContext(ctx, "pool: watchdog detected bot without gateway, attempting reconnect",
-				slog.String("botUserID", botUserID.String()),
-			)
-			reconnectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-			if s.Reconnect(reconnectCtx, botUserID) {
-				slog.InfoContext(ctx, "pool: watchdog successfully reconnected bot",
-					slog.String("botUserID", botUserID.String()),
-				)
+		if !s.shouldReplace(botUserID, client) {
+			status := "none"
+			if client != nil && client.Gateway != nil {
+				status = client.Gateway.Status().String()
 			}
-			cancel()
+			slog.WarnContext(ctx, "pool: watchdog detected disconnected gateway",
+				slog.String("botUserID", botUserID.String()),
+				slog.String("status", status),
+			)
 			continue
 		}
 
-		// Gateway exists but is not connected. Disgo's internal reconnect loop is
-		// already running with exponential backoff — log for visibility only.
-		slog.WarnContext(ctx, "pool: watchdog detected disconnected gateway",
+		slog.WarnContext(ctx, "pool: watchdog replacing disconnected gateway",
 			slog.String("botUserID", botUserID.String()),
-			slog.String("status", client.Gateway.Status().String()),
 		)
+		reconnectCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		if s.Reconnect(reconnectCtx, botUserID) {
+			s.markUp(botUserID)
+			slog.InfoContext(ctx, "pool: watchdog successfully reconnected bot",
+				slog.String("botUserID", botUserID.String()),
+			)
+		}
+		cancel()
 	}
+}
+
+func (s *Service) markUp(botUserID snowflake.ID) {
+	s.watchMu.Lock()
+	delete(s.down, botUserID)
+	s.watchMu.Unlock()
+}
+
+// shouldReplace reports whether the watchdog may open a new gateway for a bot
+// that is not connected now, and books the next allowed attempt when it may.
+func (s *Service) shouldReplace(botUserID snowflake.ID, client *bot.Client) bool {
+	now := time.Now()
+	s.watchMu.Lock()
+	defer s.watchMu.Unlock()
+	st, ok := s.down[botUserID]
+	if !ok {
+		st = &downState{since: now}
+		s.down[botUserID] = st
+	}
+	noGateway := client == nil || client.Gateway == nil
+	if !noGateway && now.Sub(st.since) < s.downGrace {
+		return false
+	}
+	if now.Before(st.nextAttempt) {
+		return false
+	}
+	st.nextAttempt = now.Add(s.retryInterval)
+	return true
 }
 
 // isConnected reports whether a client has a healthy gateway connection.

@@ -37,6 +37,9 @@ type callerRoleFixture struct {
 	st     *store.InMemoryStore
 	caches cache.Caches
 	joins  atomic.Int32
+
+	ownerConn, speakerConn *fakeVoiceConn
+	ownerVM, speakerVM     *fakeVoiceManager
 }
 
 func newCallerRoleFixture(t *testing.T) *callerRoleFixture {
@@ -64,11 +67,14 @@ func newCallerRoleFixture(t *testing.T) *callerRoleFixture {
 		t.Fatalf("NewMetrics: %v", err)
 	}
 	countJoin := func() { f.joins.Add(1) }
+	f.ownerConn, f.speakerConn = &fakeVoiceConn{}, &fakeVoiceConn{}
+	f.ownerVM = &fakeVoiceManager{conn: f.ownerConn, onOpen: countJoin}
+	f.speakerVM = &fakeVoiceManager{conn: f.speakerConn, onOpen: countJoin}
 	f.m = &Service{
 		statuses:    statuses,
 		store:       f.st,
-		poolSvc:     onePool{id: roleTestSpeakerID, client: &bot.Client{VoiceManager: &fakeVoiceManager{conn: &fakeVoiceConn{}, onOpen: countJoin}, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{VoiceManager: &fakeVoiceManager{conn: &fakeVoiceConn{}, onOpen: countJoin}, Caches: f.caches, Rest: stubRest{}},
+		poolSvc:     onePool{id: roleTestSpeakerID, client: &bot.Client{VoiceManager: f.speakerVM, Caches: cache.New(), Rest: stubRest{}}},
+		ownerClient: &bot.Client{VoiceManager: f.ownerVM, Caches: f.caches, Rest: stubRest{}},
 		ownerBotID:  testBotID,
 		sessions:    ally.NewManager(),
 		metrics:     metrics,

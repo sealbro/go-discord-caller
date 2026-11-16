@@ -69,10 +69,11 @@ func TestJoinSuccessForgetsEarlierFailures(t *testing.T) {
 	m.Create("TESTCODE", hostID, guild.RaidModeGuildCaller)
 
 	joinWithWrongCodes(t, m, guestID, joinMaxFailures-1)
-	if _, err := m.Join("TESTCODE", guestID); err != nil {
+	joined, err := m.Join("TESTCODE", guestID)
+	if err != nil {
 		t.Fatalf("join: %v", err)
 	}
-	m.RemoveGuest(guestID)
+	m.RemoveGuest(guestID, joined)
 
 	joinWithWrongCodes(t, m, guestID, joinMaxFailures-1)
 	if _, err := m.Join("TESTCODE", guestID); err != nil {

@@ -103,7 +103,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.already_active"))
 					return
 				}
-				h.followUp(e, loc.T("raid.join_failed", "Code", code, "Err", err.Error())+skipped)
+				h.followUp(e, loc.T("raid.join_failed", "Code", code)+skipped)
 				return
 			}
 			h.followUp(e, loc.T("raid.joined", "Code", code, "Mode", effectiveMode.Pretty(loc))+skipped)
@@ -156,7 +156,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 				h.followUp(e, loc.T("raid.no_deafen_permission"))
 				return
 			}
-			h.followUp(e, loc.T("raid.start_failed", "Err", err.Error())+skipped)
+			h.followUp(e, loc.T("raid.start_failed")+skipped)
 			return
 		}
 		var msg string
@@ -198,7 +198,7 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, loc *i18n.Lo
 				return
 			}
 			slog.WarnContext(cmdCtx, "failed to stop voice raid", slog.String("guildID", guildID.String()), slog.Any("err", err))
-			h.followUp(e, loc.T("raid.stop_failed", "Err", err.Error()))
+			h.followUp(e, loc.T("raid.stop_failed"))
 			return
 		}
 		h.followUp(e, loc.T("raid.stopped"))

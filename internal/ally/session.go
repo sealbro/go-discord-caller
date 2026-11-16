@@ -26,7 +26,8 @@ type Session struct {
 	HostGuildID snowflake.ID
 	HostMode    guild.RaidMode
 
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 
 	mu        sync.RWMutex
 	outs      map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
@@ -209,11 +210,7 @@ func (s *Session) Done() <-chan struct{} {
 
 // close signals all guests that the host has ended the session.
 func (s *Session) close() {
-	select {
-	case <-s.done:
-	default:
-		close(s.done)
-	}
+	s.closeOnce.Do(func() { close(s.done) })
 }
 
 // codeLength is the length of a relay code: eight characters of the RFC 4648

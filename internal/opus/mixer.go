@@ -112,11 +112,6 @@ type Frame struct {
 	CreatedAt time.Time
 }
 
-// inputEntry holds a single mixer input backed by an AudioSource.
-type inputEntry struct {
-	src AudioSource
-}
-
 // Mixer receives Opus frames from multiple named input channels, mixes their PCM,
 // and outputs a single re-encoded Opus stream to the sink set by SetSink.
 // Call Run to start the 20 ms tick loop; it blocks until ctx is cancelled.
@@ -127,8 +122,8 @@ type inputEntry struct {
 // CPU.
 type Mixer struct {
 	mu             sync.Mutex
-	inputs         map[snowflake.ID]*inputEntry
-	inputsSnap     atomic.Pointer[[]*inputEntry] // lock-free read for tick; rebuilt on AddInput/RemoveInput
+	inputs         map[snowflake.ID]AudioSource
+	inputsSnap     atomic.Pointer[[]AudioSource] // lock-free read for tick; rebuilt on AddInput/RemoveInput
 	paused         atomic.Bool
 	lastActivityAt atomic.Int64  // UnixNano of last tick that consumed at least one frame
 	pausedDrops    atomic.Uint64 // diagnostic: frames discarded because the mixer was paused
@@ -184,7 +179,7 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 		return nil, fmt.Errorf("mixer: set packet loss perc: %w", err)
 	}
 	mx := &Mixer{
-		inputs:    make(map[snowflake.ID]*inputEntry),
+		inputs:    make(map[snowflake.ID]AudioSource),
 		enc:       enc,
 		metrics:   metrics,
 		mixed:     make([]int32, mixerPCMBuf),
@@ -205,15 +200,14 @@ func (m *Mixer) SetSink(sink func(pkt []byte)) {
 }
 
 // AddInput registers an AudioSource identified by id.
-func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
+func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) {
 	if sb, ok := src.(*SourceBuffer); ok {
 		sb.bind(m)
 	}
 	m.mu.Lock()
-	m.inputs[id] = &inputEntry{src: src}
+	m.inputs[id] = src
 	m.rebuildSnapLocked()
 	m.mu.Unlock()
-	return nil
 }
 
 // RemoveInput unregisters the audio source identified by id.
@@ -228,9 +222,9 @@ func (m *Mixer) RemoveInput(id snowflake.ID) {
 // be called with m.mu held. Allocates a fresh slice (cheap relative to the
 // rarity of input changes vs. the 50 Hz tick rate).
 func (m *Mixer) rebuildSnapLocked() {
-	snap := make([]*inputEntry, 0, len(m.inputs))
-	for _, e := range m.inputs {
-		snap = append(snap, e)
+	snap := make([]AudioSource, 0, len(m.inputs))
+	for _, src := range m.inputs {
+		snap = append(snap, src)
 	}
 	m.inputsSnap.Store(&snap)
 }
@@ -394,9 +388,9 @@ func (s *tickSchedule) next(now time.Time) time.Duration {
 // helper so the orchestration reads top-to-bottom.
 func (m *Mixer) tick() error {
 	paused := m.paused.Load()
-	entries := m.readInputsSnapshot()
+	sources := m.readInputsSnapshot()
 
-	drained := m.collectFrames(entries, paused)
+	drained := m.collectFrames(sources, paused)
 
 	// Activity means "audio arrived", not "audio was mixed". A paused mixer
 	// still has to record it: otherwise IdleFor() grows without bound while
@@ -435,11 +429,11 @@ func (m *Mixer) tick() error {
 
 // readInputsSnapshot returns the current inputs slice without taking any lock.
 // The slice itself is immutable (AddInput/RemoveInput replace it via
-// inputsSnap.Store under m.mu); inputEntry.src is assigned once at construction.
+// inputsSnap.Store under m.mu).
 // Tick processes a stale snapshot at worst — fine, because removed inputs that
 // still appear in the snapshot just return underrun from Pull, and freshly-
 // added inputs are picked up on the next tick.
-func (m *Mixer) readInputsSnapshot() []*inputEntry {
+func (m *Mixer) readInputsSnapshot() []AudioSource {
 	if snap := m.inputsSnap.Load(); snap != nil {
 		return *snap
 	}
@@ -454,19 +448,19 @@ func (m *Mixer) readInputsSnapshot() []*inputEntry {
 // Returns the number of frames discarded by the paused path, which the caller
 // needs in order to tell "no audio is arriving" apart from "audio is arriving
 // and being thrown away" — see tick.
-func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) int {
+func (m *Mixer) collectFrames(sources []AudioSource, paused bool) int {
 	m.framesBuf = m.framesBuf[:0]
 	drained := 0
-	for _, e := range entries {
+	for _, src := range sources {
 		if paused {
-			if n := e.src.Len(); n > 0 {
+			if n := src.Len(); n > 0 {
 				m.pausedDrops.Add(uint64(n))
 				drained += n
 			}
-			e.src.Drain()
+			src.Drain()
 			continue
 		}
-		f, ok := e.src.Pull()
+		f, ok := src.Pull()
 		if !ok {
 			continue
 		}

@@ -1,8 +1,6 @@
 package pipeline
 
 import (
-	"log/slog"
-
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -91,16 +89,7 @@ func buildPerUserMixSpec(src *router.SourceSlot, users []router.UserBinding, dro
 				continue
 			}
 			sb := opus.NewSourceBuffer(dropMixer)
-			if err := d.Mixer.AddInput(u.SynthID, sb); err != nil {
-				// Silent skip would mean this user's audio never reaches
-				// this destination — surface it so the operator can
-				// correlate with the mixer-internal error.
-				slog.Warn("auto-route: mixer.AddInput failed; skipping user→dest binding",
-					slog.String("sourceID", src.ID.String()),
-					slog.String("destID", d.ChannelID.String()),
-					slog.Any("err", err))
-				continue
-			}
+			d.Mixer.AddInput(u.SynthID, sb)
 			userSBs = append(userSBs, sb)
 			sbs = append(sbs, sb)
 			removals = append(removals, mixerRef{mx: d.Mixer, id: u.SynthID})

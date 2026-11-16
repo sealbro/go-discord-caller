@@ -159,6 +159,7 @@ type VoiceReceiver struct {
 	voice.OpusFrameReceiver
 	fanout    *FanoutHandle
 	done      chan struct{}
+	closeOnce sync.Once
 	botID     snowflake.ID
 	allowUser func(snowflake.ID) bool // optional; nil means allow all non-bot users
 	metrics   telemetry.OpusRecorder  // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
@@ -414,11 +415,7 @@ func (v *VoiceReceiver) CleanupUser(userID snowflake.ID) {
 // Close stops this receiver. Does NOT close the FanoutHandle — that lives
 // across reconnects and is closed separately at session-end teardown.
 func (v *VoiceReceiver) Close() {
-	select {
-	case <-v.done:
-	default:
-		close(v.done)
-	}
+	v.closeOnce.Do(func() { close(v.done) })
 }
 
 // EmptyVoiceReceiver is a no-op OpusFrameReceiver that silently discards all incoming frames.

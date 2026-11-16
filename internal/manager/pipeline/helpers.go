@@ -134,12 +134,7 @@ func registerRelayInputs(gm telemetry.GuildMetrics, session *ally.Session, dests
 	for _, dest := range dests {
 		mx := chanMixers[dest.ChannelID]
 		src := opus.NewSourceBuffer(drop)
-		if err := mx.AddInput(RelayInputID, src); err != nil {
-			slog.Warn("relay: failed to add input to channel mixer",
-				slog.String("channelID", dest.ChannelID.String()),
-				slog.Any("err", err))
-			continue
-		}
+		mx.AddInput(RelayInputID, src)
 		relaySources = append(relaySources, relaySource{src: src, mx: mx})
 	}
 	if len(relaySources) == 0 {

@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -38,5 +39,24 @@ func TestYAMLStore_DuplicateRelayCodesOnLoadAreMadeUnique(t *testing.T) {
 	}
 	if first != "AAAAAAAA" {
 		t.Errorf("first guild lost its code: %q", first)
+	}
+}
+
+func TestYAMLStore_CloseIsSafeFromSeveralGoroutines(t *testing.T) {
+	for range 200 {
+		s, err := NewYAMLStore(filepath.Join(t.TempDir(), "store.yaml"))
+		if err != nil {
+			t.Fatalf("NewYAMLStore: %v", err)
+		}
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 8 {
+			wg.Go(func() {
+				<-start
+				s.Close()
+			})
+		}
+		close(start)
+		wg.Wait()
 	}
 }

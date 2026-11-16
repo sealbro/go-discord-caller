@@ -19,7 +19,6 @@ type countingSource struct {
 func (s *countingSource) Pull() (Frame, bool) { s.pulls.Add(1); return Frame{}, false }
 func (s *countingSource) Drain()              { s.drains.Add(1) }
 func (s *countingSource) Len() int            { return 0 }
-func (s *countingSource) Close()              {}
 
 func runMixer(t *testing.T, m *Mixer) {
 	t.Helper()
@@ -50,9 +49,7 @@ func newBareMixer(t *testing.T) *Mixer {
 func TestPausedMixerTicksSlowly(t *testing.T) {
 	m := newBareMixer(t)
 	src := &countingSource{}
-	if err := m.AddInput(1, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(1, src)
 	m.SetPaused(true)
 	runMixer(t, m)
 
@@ -69,9 +66,7 @@ func TestPausedMixerTicksSlowly(t *testing.T) {
 func TestUnpauseWakesAParkedMixer(t *testing.T) {
 	m := newBareMixer(t)
 	src := &countingSource{}
-	if err := m.AddInput(1, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(1, src)
 	m.SetPaused(true)
 	runMixer(t, m)
 	// Past the first tick, so the mixer is waiting out a parked interval.
@@ -94,9 +89,7 @@ func TestFeedIntoPausedMixerIsNotAnOverflow(t *testing.T) {
 	m := newBareMixer(t)
 	var overflows atomic.Int64
 	src := NewSourceBuffer(func() { overflows.Add(1) })
-	if err := m.AddInput(1, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(1, src)
 	m.SetPaused(true)
 	m.lastActivityAt.Store(time.Now().Add(-time.Hour).UnixNano())
 
@@ -129,12 +122,8 @@ func TestMixedFramesReturnTheirOpusBuffers(t *testing.T) {
 	m := newBareMixer(t)
 	m.SetSink(PutEncodedFrame)
 	a, b := NewSourceBuffer(nil), NewSourceBuffer(nil)
-	if err := m.AddInput(1, a); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
-	if err := m.AddInput(2, b); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(1, a)
+	m.AddInput(2, b)
 	pcmFrame := sinePCM(440, 0, testAmplitude)
 	// Mixing reads only the PCM; the packet just has to be pool-sized.
 	packet := make([]byte, recvFrameCap/2)

@@ -31,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Memory grew with every speaker over time**: per-speaker decrypt counters were only released when a member left, not when a connection closed. They are now released on close.
 - **Crackle with five or more loud callers**: mixing five or more near-full-volume callers in one channel could wrap and click. It now clamps.
 - **Oversized voice frame was truncated silently**: a frame larger than the buffer is now refused and counted instead of being played cut short.
+- **Leftovers after a start that failed at the owner bot's join**: the speakers' reconnect wiring stayed registered and could be reused by a later raid. A failed start now clears it.
 
 ### Changed
 - **`gdc_bot_online` is one series per server**: the value is now the number of bots (the owner and its speakers) in the server, and the `user_id` label is gone. It was one series per bot per server, always `1`, and only the count was ever read. Use `sum by (guild_id)` where you used `count by (guild_id)`.

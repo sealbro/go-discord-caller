@@ -136,6 +136,9 @@ type countingSession struct {
 
 	mu    sync.RWMutex
 	known map[godave.UserID]*talkSpurt
+
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // A sender's frames stop arriving when they go quiet, so a pause of
@@ -200,13 +203,17 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 	spurt := s.sender(userID)
 	if spurt == nil {
 		if s.Session.Ready() {
-			s.stats.RecordDropped(s.botUserID, string(userID))
+			s.stats.RecordDropped(s.botUserID)
 			return 0, nil
 		}
 
-		s.stats.RecordPassthrough(s.botUserID, string(userID))
 		// cap, not len: disgo sizes this buffer with slices.Grow, which raises
 		// capacity and leaves length at its original 512.
+		if len(frame) > cap(decryptedFrame) {
+			s.stats.RecordOversized(s.botUserID)
+			return 0, ErrFrameTooLarge
+		}
+		s.stats.RecordPassthrough(s.botUserID)
 		return copy(decryptedFrame[:cap(decryptedFrame)], frame), nil
 	}
 
@@ -232,6 +239,10 @@ func (s *countingSession) Encrypt(ssrc uint32, frame []byte, encryptedFrame []by
 	s.countEncryptFailure()
 	return n, err
 }
+
+// ErrFrameTooLarge is returned for a passthrough frame that does not fit the
+// output buffer, rather than handing back a truncated Opus packet.
+var ErrFrameTooLarge = errors.New("frame larger than output buffer")
 
 // ErrNotReady is recorded for an outbound frame dropped because the session
 // was not ready to encrypt it.
@@ -292,6 +303,18 @@ func (s *countingSession) RemoveUser(userID godave.UserID) {
 	s.Session.RemoveUser(userID)
 }
 
+// Close releases every sender still held. disgo closes the session when a conn
+// goes away without a RemoveUser per member, so nothing else would retire them.
+func (s *countingSession) Close() error {
+	s.closeOnce.Do(func() {
+		for _, userID := range s.forgetAll() {
+			s.stats.Retire(s.botUserID, string(userID))
+		}
+		s.closeErr = s.Session.Close()
+	})
+	return s.closeErr
+}
+
 // sender returns the talk-spurt state of a user the backend has a decryptor
 // for, or nil for anyone else.
 func (s *countingSession) sender(userID godave.UserID) *talkSpurt {
@@ -332,4 +355,16 @@ func (s *countingSession) forget(userID godave.UserID) bool {
 	}
 	delete(s.known, userID)
 	return true
+}
+
+func (s *countingSession) forgetAll() []godave.UserID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	users := make([]godave.UserID, 0, len(s.known))
+	for userID := range s.known {
+		users = append(users, userID)
+	}
+	clear(s.known)
+	return users
 }

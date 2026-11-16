@@ -26,7 +26,8 @@ const (
 	outcomeFailure     = "failure"
 	outcomeUnsentAlone = "unsent_alone"
 
-	reasonNone = "none"
+	reasonNone          = "none"
+	reasonFrameTooLarge = "frame_too_large"
 )
 
 // Decrypt health of one sender, reported as the health label. Identities are
@@ -197,11 +198,13 @@ func (s *Stats) RecordDecryptDuration(botUserID string, took time.Duration) {
 }
 
 // RecordPassthrough counts one frame from a user the backend has no decryptor
-// for, which is forwarded as-is rather than decrypted.
-func (s *Stats) RecordPassthrough(botUserID, userID string) {
+// for, which is forwarded as-is rather than decrypted. Such frames are booked
+// under UnknownUserID: a sender nobody holds is never retired, so a series per
+// real ID would leak.
+func (s *Stats) RecordPassthrough(botUserID string) {
 	s.counter(key{
 		botUserID: botUserID,
-		userID:    userID,
+		userID:    UnknownUserID,
 		outcome:   outcomePassthrough,
 		reason:    reasonNone,
 	}).Add(1)
@@ -210,12 +213,23 @@ func (s *Stats) RecordPassthrough(botUserID, userID string) {
 // RecordDropped counts one frame discarded because there was no decryptor for
 // the sender while the group was encrypted, so the frame could only be
 // ciphertext.
-func (s *Stats) RecordDropped(botUserID, userID string) {
+func (s *Stats) RecordDropped(botUserID string) {
 	s.counter(key{
 		botUserID: botUserID,
-		userID:    userID,
+		userID:    UnknownUserID,
 		outcome:   outcomeDropped,
 		reason:    reasonNone,
+	}).Add(1)
+}
+
+// RecordOversized counts one passthrough frame refused because it does not fit
+// the caller's buffer.
+func (s *Stats) RecordOversized(botUserID string) {
+	s.counter(key{
+		botUserID: botUserID,
+		userID:    UnknownUserID,
+		outcome:   outcomeFailure,
+		reason:    reasonFrameTooLarge,
 	}).Add(1)
 }
 

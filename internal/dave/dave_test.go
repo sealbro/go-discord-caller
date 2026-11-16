@@ -36,7 +36,15 @@ type fakeSession struct {
 
 	mu       sync.Mutex
 	decrypts int
+	closes   int
 	known    map[godave.UserID]struct{}
+}
+
+func (f *fakeSession) Close() error {
+	f.mu.Lock()
+	f.closes++
+	f.mu.Unlock()
+	return nil
 }
 
 func (f *fakeSession) Ready() bool { return f.ready }

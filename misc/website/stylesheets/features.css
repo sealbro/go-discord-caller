@@ -543,13 +543,53 @@
   stroke-linecap: round;
 }
 
-.fx-svg .bot--down rect {
+.fx-svg .heal-x rect,
+.fx-svg .heal-ok rect {
+  fill: var(--fx-card);
+  stroke: var(--fx-line);
+  stroke-width: 2;
+}
+
+.fx-svg .heal-x rect {
   stroke-dasharray: 5 4;
   opacity: 0.75;
 }
 
-.fx-svg .bot--down path {
+.fx-svg .heal-x path,
+.fx-svg .heal-ok path {
+  fill: none;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.fx-svg .heal-x path {
   stroke: var(--fx-warn);
+}
+
+.fx-svg .heal-ok path {
+  stroke: var(--fx-line);
+}
+
+.fx-svg .heal-x,
+.fx-svg .heal-spinner,
+.fx-svg .heal-lbl-rejoin,
+.fx-svg .heal-lbl-failed,
+.fx-svg .heal-pulse {
+  opacity: 0;
+}
+
+.fx-svg .heal-lbl-failed {
+  fill: var(--fx-warn);
+}
+
+.fx-svg .heal-pulse {
+  fill: none;
+  stroke: var(--fx-ok);
+  stroke-width: 2;
+}
+
+.fx-svg .heal-lbl-online {
+  fill: var(--fx-ok);
 }
 
 .fx-svg .retry {
@@ -591,17 +631,16 @@
   opacity: 0.8;
 }
 
-.fx-svg .perm--no circle {
-  fill: none;
-  stroke: var(--fx-mute);
-  stroke-width: 2;
-}
-
-.fx-svg .perm--no path:not(.strike) {
+.fx-svg .perm--no .key circle,
+.fx-svg .perm--no .key path {
   fill: none;
   stroke: var(--fx-mute);
   stroke-width: 2;
   stroke-linecap: round;
+}
+
+.fx-svg .tick--no {
+  stroke: var(--fx-warn);
 }
 
 .fx-svg .strike {
@@ -735,6 +774,73 @@
     animation: fx-from-right 0.8s ease-out both;
   }
 
+  /* Self-heals and permissions: short sequences. Played once on scroll (0.94 of a
+     cycle, so they end on the finished frame) and looped on hover. */
+
+  .fx-js .fx-svg .heal-x {
+    animation: fx-heal-x 6s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .heal-ok {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fx-heal-ok 6s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .heal-spinner,
+  .fx-js .fx-svg .heal-lbl-rejoin {
+    animation: fx-heal-busy 6s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .heal-lbl-online {
+    animation: fx-heal-online 6s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .heal-lbl-failed {
+    animation: fx-heal-failed 6s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .heal-pulse {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: fx-heal-pulse 6s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .retry,
+  .fx-js .fx-svg .retry-head {
+    transform-box: view-box;
+    transform-origin: 120px 114px;
+    animation: fx-spin 1.6s linear 0.9s infinite;
+  }
+
+  .fx-js .fx-svg .perm:nth-of-type(1) .tick {
+    animation: fx-p1 5s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .perm:nth-of-type(2) .tick {
+    animation: fx-p2 5s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .perm:nth-of-type(3) .tick--no {
+    animation: fx-p3 5s linear 0.3s 0.94 both;
+  }
+
+  .fx-js .fx-svg .perm:nth-of-type(3) .strike {
+    animation: fx-p4 5s linear 0.3s 0.94 both;
+  }
+
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-x,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-ok,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-spinner,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-lbl-rejoin,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-lbl-online,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-lbl-failed,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .heal-pulse,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .perm .tick,
+  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .perm .strike {
+    animation-iteration-count: infinite;
+  }
+
   /* Always on: the hero (rings and travelling packets) */
 
   .fx-js .fx-svg .pkt-hero {
@@ -777,24 +883,12 @@
     animation-delay: 0.75s;
   }
 
-  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .retry,
-  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .retry-head {
-    transform-box: view-box;
-    transform-origin: 120px 114px;
-    animation: fx-spin 1.6s linear infinite;
-  }
-
   .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .pkt {
     animation: fx-travel 2s ease-in-out infinite;
   }
 
   .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .outline--dash {
     animation: fx-fade 0.6s ease-out 1.2s both, fx-march 1.2s linear infinite;
-  }
-
-  .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .perm:not(.perm--no) rect:first-child {
-    animation: fx-glow 3.6s ease-in-out infinite;
-    animation-delay: calc(var(--i, 0) * 0.6s);
   }
 
   .fx-js :is(.fx-card, .fx-hero__art):is(:hover, :focus-within) .bubble {
@@ -926,6 +1020,164 @@
     }
   }
 
+  @keyframes fx-heal-x {
+    0%,
+    52% {
+      opacity: 1;
+    }
+    55%,
+    94% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fx-heal-ok {
+    0%,
+    52% {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+    58%,
+    94% {
+      opacity: 1;
+      transform: scale(1);
+    }
+    100% {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+  }
+
+  @keyframes fx-heal-busy {
+    0%,
+    18% {
+      opacity: 0;
+    }
+    21%,
+    50% {
+      opacity: 1;
+    }
+    53%,
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes fx-heal-failed {
+    0%,
+    18% {
+      opacity: 1;
+    }
+    21%,
+    94% {
+      opacity: 0;
+    }
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes fx-heal-online {
+    0%,
+    54% {
+      opacity: 0;
+    }
+    60%,
+    94% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+
+  @keyframes fx-heal-pulse {
+    0%,
+    54% {
+      opacity: 0;
+      transform: scale(0.8);
+    }
+    57% {
+      opacity: 0.8;
+    }
+    72%,
+    100% {
+      opacity: 0;
+      transform: scale(1.35);
+    }
+  }
+
+  @keyframes fx-p1 {
+    0%,
+    8% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+    18%,
+    94% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+  }
+
+  @keyframes fx-p2 {
+    0%,
+    28% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+    38%,
+    94% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+  }
+
+  @keyframes fx-p3 {
+    0%,
+    50% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+    58%,
+    94% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+  }
+
+  @keyframes fx-p4 {
+    0%,
+    56% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+    66%,
+    94% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 0;
+    }
+    100% {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+    }
+  }
+
   @keyframes fx-spin {
     to {
       transform: rotate(360deg);
@@ -950,18 +1202,6 @@
   @keyframes fx-march {
     to {
       stroke-dashoffset: -20;
-    }
-  }
-
-  @keyframes fx-glow {
-    0%,
-    40%,
-    100% {
-      stroke: var(--fx-line);
-    }
-    12%,
-    28% {
-      stroke: var(--fx-ok);
     }
   }
 

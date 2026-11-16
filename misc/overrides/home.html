@@ -117,13 +117,18 @@
 
       <article class="fx-card">
         <svg class="fx-svg" viewBox="0 0 240 150" role="img" aria-labelledby="art-heal-t">
-          <title id="art-heal-t">Three squad bots in a row; the middle one dropped and is reconnecting</title>
+          <title id="art-heal-t">Three squad bots in a row; the middle one fails, rejoins and comes back online</title>
           <g class="bot" style="--i:0"><rect x="14" y="44" width="52" height="46" rx="12"/><circle class="dot-ok" cx="32" cy="64" r="4"/><circle class="dot-ok" cx="48" cy="64" r="4"/><path d="M28 78h24"/></g>
-          <g class="bot bot--down" style="--i:1"><rect x="94" y="44" width="52" height="46" rx="12"/><path d="M104 60l12 12M116 60l-12 12M124 60l12 12M136 60l-12 12"/></g>
+          <g class="heal">
+            <g class="heal-x"><rect x="94" y="44" width="52" height="46" rx="12"/><path d="M104 60l12 12M116 60l-12 12M124 60l12 12M136 60l-12 12"/></g>
+            <g class="heal-ok"><rect x="94" y="44" width="52" height="46" rx="12"/><circle class="dot-ok" cx="112" cy="64" r="4"/><circle class="dot-ok" cx="128" cy="64" r="4"/><path d="M108 78h24"/></g>
+          </g>
           <g class="bot" style="--i:2"><rect x="174" y="44" width="52" height="46" rx="12"/><circle class="dot-ok" cx="192" cy="64" r="4"/><circle class="dot-ok" cx="208" cy="64" r="4"/><path d="M188 78h24"/></g>
-          <path class="retry" d="M132 114a12 12 0 1 1 -3 -8"/>
-          <path class="retry-head" d="M124 102l9 1-3 8z"/>
-          <text class="cap cap--dim" x="120" y="142" text-anchor="middle">rejoining</text>
+          <g class="heal-spinner"><path class="retry" d="M132 114a12 12 0 1 1 -3 -8"/><path class="retry-head" d="M124 102l9 1-3 8z"/></g>
+          <circle class="heal-pulse" cx="120" cy="67" r="34"/>
+          <text class="cap heal-lbl-failed" x="120" y="142" text-anchor="middle">failed</text>
+          <text class="cap cap--dim heal-lbl-rejoin" x="120" y="142" text-anchor="middle">rejoining</text>
+          <text class="cap heal-lbl-online" x="120" y="142" text-anchor="middle">online</text>
         </svg>
         <h3>Self-heals</h3>
         <p class="fx-claim">Squad bots rejoin on their own when Discord's gateway is unavailable or disconnects.</p>
@@ -133,11 +138,10 @@
 
       <article class="fx-card">
         <svg class="fx-svg" viewBox="0 0 240 158" role="img" aria-labelledby="art-perm-t">
-          <title id="art-perm-t">A short list of narrow permissions ticked, and the Administrator key crossed out</title>
-          <g class="perm" style="--i:0"><rect x="34" y="18" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 31l6 6 11-12"/><rect class="bar" x="76" y="27" width="96" height="8" rx="4"/></g>
-          <g class="perm" style="--i:1"><rect x="34" y="52" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 65l6 6 11-12"/><rect class="bar" x="76" y="61" width="72" height="8" rx="4"/></g>
-          <g class="perm" style="--i:2"><rect x="34" y="86" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 99l6 6 11-12"/><rect class="bar" x="76" y="95" width="84" height="8" rx="4"/></g>
-          <g class="perm perm--no" style="--i:3"><rect x="34" y="120" width="172" height="26" rx="9"/><circle cx="56" cy="133" r="6"/><path d="M62 133h18M72 133v6M78 133v5"/><path class="strike" pathLength="1" d="M30 148L210 118"/></g>
+          <title id="art-perm-t">A short list of narrow permissions: the first two ticked, the third, Administrator, crossed out</title>
+          <g class="perm" style="--i:0"><rect x="34" y="30" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 43l6 6 11-12"/><rect class="bar" x="76" y="39" width="96" height="8" rx="4"/></g>
+          <g class="perm" style="--i:1"><rect x="34" y="66" width="172" height="26" rx="9"/><path class="tick" pathLength="1" d="M48 79l6 6 11-12"/><rect class="bar" x="76" y="75" width="72" height="8" rx="4"/></g>
+          <g class="perm perm--no" style="--i:2"><rect x="34" y="102" width="172" height="26" rx="9"/><path class="tick tick--no" pathLength="1" d="M50 109l12 12M62 109l-12 12"/><g class="key"><circle cx="84" cy="115" r="6"/><path d="M90 115h18M100 115v6M106 115v5"/></g><path class="strike" pathLength="1" d="M30 126L210 104"/></g>
         </svg>
         <h3>Minimal permissions</h3>
         <p class="fx-claim">Asks only for the voice and command permissions it uses, never Administrator.</p>

@@ -53,6 +53,7 @@ type YAMLStore struct {
 	relayCodes map[snowflake.ID]string
 	locales    map[snowflake.ID]string
 	disabled   map[botKey]struct{}
+	closed     bool
 
 	dirtyCh chan struct{} // signals the flush goroutine
 	done    chan struct{} // closed by Close to stop the flush goroutine
@@ -117,8 +118,16 @@ func (s *YAMLStore) flushLoop() {
 }
 
 // markDirty signals the flush goroutine that the in-memory state has changed.
+// After Close the flush goroutine is gone, so the change is written
+// synchronously instead of being dropped.
 // Must be called with mu write-locked (the caller already holds it).
 func (s *YAMLStore) markDirty() {
+	if s.closed {
+		if err := s.save(); err != nil {
+			slog.Error("yaml store: write after close failed", slog.Any("err", err))
+		}
+		return
+	}
 	select {
 	case s.dirtyCh <- struct{}{}:
 	default:
@@ -126,9 +135,11 @@ func (s *YAMLStore) markDirty() {
 }
 
 // Close flushes any pending writes and blocks until the final save completes.
-// After Close returns, no further write methods should be called; any markDirty
-// signals sent after the flush goroutine exits are silently discarded.
+// Writes made after Close are saved synchronously. Close is idempotent.
 func (s *YAMLStore) Close() {
+	s.mu.Lock()
+	s.closed = true
+	s.mu.Unlock()
 	select {
 	case <-s.done:
 	default:
@@ -166,13 +177,28 @@ func (s *YAMLStore) load() error {
 			s.roles[roleKey{guildID, r.RoleType}] = snowflake.ID(r.RoleID)
 		}
 		if g.AllyCode != "" {
-			s.relayCodes[guildID] = g.AllyCode
+			if s.relayCodeInUse(g.AllyCode) {
+				slog.Warn("yaml store: relay code already used by another guild; generating a new one")
+				s.relayCodes[guildID] = uniqueAllyCode(s.relayCodes)
+				s.markDirty()
+			} else {
+				s.relayCodes[guildID] = g.AllyCode
+			}
 		}
 		if g.Locale != "" {
 			s.locales[guildID] = g.Locale
 		}
 	}
 	return nil
+}
+
+func (s *YAMLStore) relayCodeInUse(code string) bool {
+	for _, c := range s.relayCodes {
+		if c == code {
+			return true
+		}
+	}
+	return false
 }
 
 // save serialises the current state to the YAML file.

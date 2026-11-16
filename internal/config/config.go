@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 
 	speakerTokens := loadSpeakerTokens()
 	if len(speakerTokens) == 0 {
-		slog.Warn("no speaker tokens configured; voice relay will not work — set DISCORD_SPEAKER_1_BOT_TOKEN (and _2, _3 …)")
+		slog.Warn("no speaker tokens configured; voice relay will not work — set DISCORD_SPEAKER_BOT_TOKEN_1 (and _2, _3 …)")
 	}
 
 	return &Config{
@@ -113,12 +113,15 @@ func parseSessionIdleTimeout(s string) time.Duration {
 	return d
 }
 
-// loadSpeakerTokens scans all environment variables for DISCORD_SPEAKER_N_BOT_TOKEN
+// loadSpeakerTokens scans all environment variables for DISCORD_SPEAKER_BOT_TOKEN_N
 // keys (any numeric N), sorts them by index, and returns the tokens in order.
-// Gaps in numbering (e.g. _1 and _3 with no _2) are silently skipped.
+// Gaps in numbering (e.g. _1 and _3 with no _2) are silently skipped. Keys whose
+// index overflows an int are skipped with a warning, and a token set under
+// several keys is kept once, at its lowest index.
 func loadSpeakerTokens() []string {
 	type indexedToken struct {
 		index int
+		key   string
 		token string
 	}
 	var indexed []indexedToken
@@ -135,14 +138,28 @@ func loadSpeakerTokens() []string {
 		if m == nil {
 			continue
 		}
-		idx, _ := strconv.Atoi(m[1])
-		indexed = append(indexed, indexedToken{idx, val})
+		idx, err := strconv.Atoi(m[1])
+		if err != nil {
+			slog.Warn("ignoring speaker token with an unusable index", slog.String("key", key))
+			continue
+		}
+		indexed = append(indexed, indexedToken{idx, key, val})
 	}
 	sort.Slice(indexed, func(i, j int) bool {
-		return indexed[i].index < indexed[j].index
+		if indexed[i].index != indexed[j].index {
+			return indexed[i].index < indexed[j].index
+		}
+		return indexed[i].key < indexed[j].key
 	})
 	tokens := make([]string, 0, len(indexed))
+	seen := make(map[string]string, len(indexed))
 	for _, t := range indexed {
+		if first, dup := seen[t.token]; dup {
+			slog.Warn("ignoring duplicate speaker token",
+				slog.String("key", t.key), slog.String("same_as", first))
+			continue
+		}
+		seen[t.token] = t.key
 		tokens = append(tokens, t.token)
 	}
 	return tokens

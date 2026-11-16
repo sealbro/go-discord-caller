@@ -44,6 +44,8 @@ func (h levelHandler) WithGroup(name string) slog.Handler {
 
 const ServiceName = "go-discord-caller"
 
+const shutdownTimeout = 5 * time.Second
+
 // LevelVoiceOff disables the voice logger entirely. It sits above every slog
 // level, so no record from disgo's voice layer is ever enabled.
 const LevelVoiceOff = slog.Level(math.MaxInt32)
@@ -99,9 +101,11 @@ func VoiceLogger(botUserID snowflake.ID) *slog.Logger {
 
 // Setup initialises OpenTelemetry providers for traces, metrics and logs.
 // All three signals are exported via OTLP gRPC to a single endpoint.
-// Returns a shutdown function that flushes and closes all providers.
-// When endpoint is empty, no-op providers are used and nil shutdown is returned.
-func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), error) {
+// Returns a shutdown function that flushes and closes all providers, each with
+// its own timeout. When endpoint is empty, no-op providers are used and the
+// returned shutdown does nothing. If setup fails midway, whatever was already
+// created is shut down before the error is returned.
+func Setup(ctx context.Context, endpoint string, level slog.Level) (shutdown func(), err error) {
 	if endpoint == "" {
 		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
 			AddSource: true,
@@ -114,11 +118,11 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 	if err != nil {
 		return nil, err
 	}
-	// Close the connection on any setup error so we don't leak it.
-	var setupErr error
+	// Providers go first and the connection last, so they can still flush.
+	var steps []shutdownFunc
 	defer func() {
-		if setupErr != nil {
-			_ = conn.Close()
+		if err != nil {
+			shutdownAll(shutdownTimeout, append(steps, closeConn(conn))...)
 		}
 	}()
 
@@ -126,48 +130,46 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 		resource.WithAttributes(semconv.ServiceName(ServiceName), semconv.ServiceVersion(buildinfo.Version)),
 	)
 	if err != nil {
-		setupErr = err
 		return nil, err
 	}
 
 	// Traces
 	traceExporter, err := otlptracegrpc.New(ctx, otlptracegrpc.WithGRPCConn(conn))
 	if err != nil {
-		setupErr = err
 		return nil, err
 	}
 	tp := trace.NewTracerProvider(
 		trace.WithBatcher(traceExporter),
 		trace.WithResource(res),
 	)
+	steps = append(steps, tp.Shutdown)
 	otel.SetTracerProvider(tp)
 
 	// Metrics
 	metricExporter, err := otlpmetricgrpc.New(ctx, otlpmetricgrpc.WithGRPCConn(conn))
 	if err != nil {
-		setupErr = err
 		return nil, err
 	}
 	mp := metric.NewMeterProvider(
 		metric.WithReader(metric.NewPeriodicReader(metricExporter, metric.WithInterval(15*time.Second))),
 		metric.WithResource(res),
 	)
+	steps = append(steps, mp.Shutdown)
 	otel.SetMeterProvider(mp)
 	if err := startProcessMetrics(mp); err != nil {
-		setupErr = err
 		return nil, err
 	}
 
 	// Logs
 	logExporter, err := otlploggrpc.New(ctx, otlploggrpc.WithGRPCConn(conn))
 	if err != nil {
-		setupErr = err
 		return nil, err
 	}
 	lp := log.NewLoggerProvider(
 		log.WithProcessor(log.NewBatchProcessor(logExporter)),
 		log.WithResource(res),
 	)
+	steps = append(steps, lp.Shutdown)
 	olog.SetLoggerProvider(lp)
 
 	// Replace default slog with OTel bridge so all slog calls export via OTLP
@@ -178,14 +180,21 @@ func Setup(ctx context.Context, endpoint string, level slog.Level) (func(), erro
 	)
 	slog.SetDefault(slog.New(levelHandler{level: level, Handler: otelHandler}))
 
-	shutdown := func() {
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = tp.Shutdown(shutCtx)
-		_ = mp.Shutdown(shutCtx)
-		_ = lp.Shutdown(shutCtx)
-		_ = conn.Close()
-	}
+	return func() { shutdownAll(shutdownTimeout, append(steps, closeConn(conn))...) }, nil
+}
 
-	return shutdown, nil
+type shutdownFunc func(context.Context) error
+
+// shutdownAll runs each step with its own timeout so one stalled collector
+// connection cannot leave the later providers unflushed.
+func shutdownAll(budget time.Duration, fns ...shutdownFunc) {
+	for _, fn := range fns {
+		ctx, cancel := context.WithTimeout(context.Background(), budget)
+		_ = fn(ctx)
+		cancel()
+	}
+}
+
+func closeConn(conn *grpc.ClientConn) shutdownFunc {
+	return func(context.Context) error { return conn.Close() }
 }

@@ -157,6 +157,11 @@ E2E_GUEST_CALLER_ROLE_ID=        # optional; required for E5b / E5d / E5f
 
 # --- Audio (optional; defaults to integration/samples, all *.dca played randomly) ---
 # E2E_SAMPLES_DIR=integration/samples
+
+# --- Test-only: set on the bot under test (never in production) ---
+# Lets bot accounts with the caller role be captured and skips the guild channel-access check,
+# so the harness bots can act as callers.
+# TEST_ALLOW_BOTS=true
 ```
 
 How to find IDs: enable **Developer Mode** in Discord settings, then right-click

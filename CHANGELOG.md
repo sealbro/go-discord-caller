@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Language requests**: a GitHub issue form for asking for a language the bot does not have yet.
 
 ### Fixed
+- **Crash reasons and last telemetry were lost**: when startup or the bot failed, the process exited without flushing telemetry, so the reason never reached the log backend. It now flushes first.
+- **Changes made while shutting down could be lost**: the bindings file is now closed after the bot disconnects, so a late server event is still saved, and a change made after the file is closed is written at once.
+- **Two servers could share a relay code**: a hand-edited bindings file with a repeated code now gives the later server a new one.
+- **Speaker bot order and duplicates**: speaker order no longer depends on how tokens are numbered (`_1` against `_01`), an unusable number is ignored with a warning, and a token set twice is used once.
+- **Telemetry shutdown**: each signal now gets its own time to flush, so a slow collector no longer drops the final logs, and a failed telemetry setup no longer leaves exporters running.
 - **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel discarded one queued frame per tick, so a short burst of frames overflowed its queue and was counted in `gdc_fanout_frames_dropped_total` on the `direct` path. It now discards everything queued on each tick, and those drops no longer appear for it.
 - **Command duration histogram could not tell fast from slow**: `gdc_command_duration_seconds` took default buckets sized for milliseconds (0, 5, 10 … 10000), so every command landed in the one bucket up to 5 s and the dashboard's p50, p95 and p99 were interpolation. It now has buckets at 1, 3 and 5 s, around Discord's 3 s deadline, which also cuts its series by three quarters.
 - **Raids that nobody could hear never timed out**: the idle timeout (`SESSION_IDLE_TIMEOUT`) only asked whether a caller was in a channel, so a raid with a caller sitting muted, or alone with no one to hear them, ran for as long as they stayed. It now counts only callers who are not muted, and only while someone else is in the session's channels. A raid shared with another server keeps the old rule, because that server's members cannot be seen from here.

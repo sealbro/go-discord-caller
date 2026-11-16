@@ -7,37 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-11-16
+
+### Added
+- **CPU scheduling and GC pause metrics**: `gdc_sched_latency_over_total` and `gdc_gc_pause_duration_milliseconds` tell CPU starvation or GC from slow work in a late mixer tick.
+
 ### Fixed
-- **Crash reasons and last telemetry were lost**: when startup or the bot failed, the process exited without flushing telemetry, so the reason never reached the log backend. It now flushes first.
-- **Changes made while shutting down could be lost**: the bindings file is now closed after the bot disconnects, so a late server event is still saved, and a change made after the file is closed is written at once.
-- **Two servers could share a relay code**: a hand-edited bindings file with a repeated code now gives the later server a new one.
-- **Speaker bot order and duplicates**: speaker order no longer depends on how tokens are numbered (`_1` against `_01`), an unusable number is ignored with a warning, and a token set twice is used once.
-- **Telemetry shutdown**: each signal now gets its own time to flush, so a slow collector no longer drops the final logs, and a failed telemetry setup no longer leaves exporters running.
-- **Owner bot left in the voice channel after a failed start**: a start that failed after the owner bot joined, or was stopped halfway, now makes it leave. A guest join whose owner setup fails now reports the error instead of starting a session that relays nothing.
-- **A new `/start` during a stop could be undone by it**: a start sent while a raid is still shutting down is now refused until the stop finishes.
-- **Role grants while a raid was starting were lost**: a caller role given during startup is now applied.
-- **Speaker in the owner's channel**: a start where an enabled speaker shares the owner's channel is now refused up front.
-- **Speaker rejoined after a stop**: a speaker reconnecting just as a raid ended could rejoin its channel and stay there with nothing to relay. It now leaves.
-- **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel discarded one queued frame per tick, so a short burst of frames overflowed its queue and was counted in `gdc_fanout_frames_dropped_total` on the `direct` path. It now discards everything queued on each tick, and those drops no longer appear for it.
-- **A caller's voice could stop being relayed after overlapping joins**: when two callers joined or got the role at the same moment, an older update could overwrite a newer one and leave a caller off until the next change. Updates now apply one at a time.
-- **A stopped raid could leave audio paths behind**: an update still running when a raid stopped could install paths that were never removed. It now installs nothing after the stop.
-- **Relay audio stuck in mixing after a decoder failure**: if another server's relay input could not start its decoder, the channel stayed in mixing mode with nothing feeding it. It no longer registers in that case.
-- **Command duration histogram could not tell fast from slow**: `gdc_command_duration_seconds` took default buckets sized for milliseconds (0, 5, 10 … 10000), so every command landed in the one bucket up to 5 s and the dashboard's p50, p95 and p99 were interpolation. It now has buckets at 1, 3 and 5 s, around Discord's 3 s deadline, which also cuts its series by three quarters.
-- **A speaker bot that stayed offline was never replaced**: a speaker whose connection stayed down was only logged. It is now replaced after two minutes and retried every two minutes after that.
-- **Failed or doubled reconnects leaked connections**: a failed reconnect left its connection open, and two reconnects for one bot opened two logins. Both are fixed.
-- **Failure replies showed internal error text**: start, join, stop and speaker-toggle failures no longer show the underlying error to the user. It is logged instead.
-- **Channels could be rebound during a raid**: binding or unbinding a channel is now refused while a raid is running, as it already was for roles.
-- **Raids that nobody could hear never timed out**: the idle timeout (`SESSION_IDLE_TIMEOUT`) only asked whether a caller was in a channel, so a raid with a caller sitting muted, or alone with no one to hear them, ran for as long as they stayed. It now counts only callers who are not muted, and only while someone else is in the session's channels. A raid shared with another server keeps the old rule, because that server's members cannot be seen from here.
-- **Memory grew with every speaker over time**: per-speaker decrypt counters were only released when a member left, not when a connection closed. They are now released on close.
-- **Crackle with five or more loud callers**: mixing five or more near-full-volume callers in one channel could wrap and click. It now clamps.
-- **Oversized voice frame was truncated silently**: a frame larger than the buffer is now refused and counted instead of being played cut short.
-- **Leftovers after a start that failed at the owner bot's join**: the speakers' reconnect wiring stayed registered and could be reused by a later raid. A failed start now clears it.
-- **Garbled or missing audio when two other servers talked at once**: in a relay of three or more servers, audio from two servers speaking at the same moment was decoded as one stream and half of it was dropped; a listener-only server got both streams interleaved. Each server's audio is now kept apart and mixed. A listener-only server joined to a host in many-callers mode now hears the other guests too, and in one↔many mode hears the host only.
+- **Garbled audio when two other servers talked at once**: in a relay of three or more servers their audio is now kept apart and mixed instead of decoded as one stream. A listener-only server also hears the other guests in many-callers mode.
+- **Raids that nobody could hear never timed out**: the idle timeout now counts only callers who are not muted, and only while someone else is in the session's channels. A raid shared with another server keeps the old rule.
+- **Audio glitches**: five or more loud callers no longer wrap and click, and an oversized voice frame is refused instead of played cut short.
+- **A caller's voice could be lost to racing updates**: simultaneous joins, role grants during startup and updates running as a raid stops no longer leave a caller off or audio paths behind.
+- **Failed or overlapping starts and stops left things behind**: the owner bot and speakers now leave cleanly, a failed guest join reports its error, and a `/start` during a stop is refused.
+- **Invalid setups are refused up front**: a speaker in the owner's channel, and rebinding channels during a raid.
+- **Speaker bots that went offline or reconnected badly**: an offline speaker is replaced after two minutes, and failed or doubled reconnects no longer leak connections.
+- **Speaker order and duplicates**: order no longer depends on token numbering (`_1` against `_01`), and a token set twice is used once.
+- **Bindings file edge cases**: a change made while shutting down is no longer lost, and a repeated relay code gets a new one.
+- **Failure replies showed internal error text**: it is logged instead.
+- **Memory grew with every speaker over time**: per-speaker counters are now released when a connection closes.
+- **Crash reasons and final telemetry were lost**: telemetry now flushes on a crash, each signal gets its own time, and a failed setup leaves no exporters running.
+- **Command duration histogram could not tell fast from slow**: `gdc_command_duration_seconds` now has buckets at 1, 3 and 5 s, around Discord's 3 s deadline.
+- **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel no longer shows drops in `gdc_fanout_frames_dropped_total`.
 
 ### Changed
-- **`gdc_bot_online` is one series per server**: the value is now the number of bots (the owner and its speakers) in the server, and the `user_id` label is gone. It was one series per bot per server, always `1`, and only the count was ever read. Use `sum by (guild_id)` where you used `count by (guild_id)`.
-- **Lower CPU during a raid**: mixers that have nothing to play no longer wake 50 times a second, and the per-frame bookkeeping around audio and encryption is cheaper. Audio is unchanged.
-- **Mixer tick metrics skip paused mixers**: `gdc_mixer_tick_duration_milliseconds` and `gdc_mixer_tick_lateness_milliseconds` are recorded only while a mixer is running, so their sample counts drop and paused mixers no longer weigh on their quantiles.
+- **Lower CPU during a raid**: idle mixers no longer wake 50 times a second, and per-frame work is cheaper.
+- **Dependencies**: Go dependencies updated to their latest versions.
+- **`gdc_bot_online` is one series per server**: it now holds the bot count and the `user_id` label is gone; use `sum by (guild_id)` where you used `count by (guild_id)`.
+- **Mixer tick metrics skip paused mixers**: `gdc_mixer_tick_duration_milliseconds` and `gdc_mixer_tick_lateness_milliseconds` are recorded only while a mixer runs.
 
 ## [0.15.0] - 2026-11-09
 

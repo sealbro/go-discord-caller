@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 
 	"github.com/disgoorg/disgo/voice"
@@ -42,6 +43,9 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 		return nil, ErrNoBoundSpeakers
 	}
 	candidates = m.withLiveChannel(guildID, candidates)
+	if sharesOwnerChannel(m.store, guildID, m.ownerBotID, candidates) {
+		return nil, ErrChannelTaken
+	}
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.candidates", len(candidates)))
 
 	deaf := newDeafController(m, guildID)
@@ -91,6 +95,20 @@ func boundSpeakers(st store.Store, guildID snowflake.ID, speakers []guild.Speake
 		candidates = append(candidates, sp)
 	}
 	return candidates
+}
+
+// sharesOwnerChannel reports whether any candidate is bound to the owner bot's
+// channel. Bind rejects that, but a binding stored before the rule existed
+// would build a second destination for the owner's channel.
+func sharesOwnerChannel(st store.Store, guildID, ownerID snowflake.ID, candidates []guild.Speaker) bool {
+	ownerChannel, ok := st.GetBoundChannel(guildID, ownerID)
+	if !ok {
+		return false
+	}
+	return slices.ContainsFunc(candidates, func(sp guild.Speaker) bool {
+		ch, bound := st.GetBoundChannel(guildID, sp.ID)
+		return bound && ch == ownerChannel
+	})
 }
 
 // withLiveChannel drops the candidates whose bound channel no longer exists.
@@ -144,7 +162,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 			if err != nil {
 				endAttach(err)
 				slog.ErrorContext(ctx, "failed to consume voice data", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))
-				gv.Leave(ctx, guildID)
+				leaveWithoutCancel(ctx, gv, guildID)
 				return
 			}
 			deafCtx, endDeaf := startPhase(attachCtx, "voice.deaf.reconcile",

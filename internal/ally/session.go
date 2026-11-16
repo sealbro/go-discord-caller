@@ -274,6 +274,35 @@ func (m *Manager) Create(code Code, hostGuildID snowflake.ID, mode guild.RaidMod
 	return s
 }
 
+// ErrCodeInUse is returned by Open when the code or the host guild is already
+// registered to a session of another guild.
+var ErrCodeInUse = errors.New("relay code or host guild already belongs to another session")
+
+// Open is Create with guards: it refuses a code held by another guild's session
+// and a host guild that is attached to another guild's session as a guest. A
+// stale session of the same host is closed and replaced, so its guests are
+// released instead of being orphaned by the overwrite.
+func (m *Manager) Open(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) (*Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if held, ok := m.sessions[code]; ok && held.HostGuildID != hostGuildID {
+		return nil, ErrCodeInUse
+	}
+	if held, ok := m.byGuild[hostGuildID]; ok && held.HostGuildID != hostGuildID {
+		return nil, ErrCodeInUse
+	}
+	if stale, ok := m.byGuild[hostGuildID]; ok {
+		m.removeHostedLocked(stale)
+	}
+	if stale, ok := m.sessions[code]; ok {
+		m.removeHostedLocked(stale)
+	}
+	s := newSession(code, hostGuildID, mode)
+	m.sessions[s.Code] = s
+	m.byGuild[hostGuildID] = s
+	return s, nil
+}
+
 // Join attaches guildID to the session identified by code.
 func (m *Manager) Join(code Code, guildID snowflake.ID) (*Session, error) {
 	m.mu.Lock()
@@ -332,27 +361,54 @@ func (m *Manager) GetByGuild(guildID snowflake.ID) (*Session, bool) {
 	return s, ok
 }
 
-// RemoveGuest detaches a guest guild without affecting other participants.
-func (m *Manager) RemoveGuest(guildID snowflake.ID) {
+// RemoveGuest detaches a guest guild from session s without affecting other
+// participants. A guild registered to a different session (a newer join after
+// s ended) is left alone.
+func (m *Manager) RemoveGuest(guildID snowflake.ID, s *Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.byGuild, guildID)
+	if m.byGuild[guildID] == s {
+		delete(m.byGuild, guildID)
+	}
 }
 
-// RemoveHost closes the session and removes all participants from the registry.
+// RemoveHost closes the session hosted by hostGuildID and removes all
+// participants from the registry. A guild attached as a guest is not a host
+// and is left alone.
 // O(guests-of-this-session) thanks to Session.GuestGuildIDs (vs the prior
 // O(all-attached-guilds) scan of m.byGuild).
 func (m *Manager) RemoveHost(hostGuildID snowflake.ID) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.byGuild[hostGuildID]
-	if !ok {
+	if !ok || s.HostGuildID != hostGuildID {
 		return
 	}
+	m.removeHostedLocked(s)
+}
+
+// Remove closes s and removes it and its guests from the registry, unless s is
+// no longer the session registered for its host.
+func (m *Manager) Remove(s *Session) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.byGuild[s.HostGuildID] != s {
+		return
+	}
+	m.removeHostedLocked(s)
+}
+
+func (m *Manager) removeHostedLocked(s *Session) {
 	s.close()
-	delete(m.sessions, s.Code)
-	delete(m.byGuild, hostGuildID)
+	if m.sessions[s.Code] == s {
+		delete(m.sessions, s.Code)
+	}
+	if m.byGuild[s.HostGuildID] == s {
+		delete(m.byGuild, s.HostGuildID)
+	}
 	for _, guildID := range s.GuestGuildIDs() {
-		delete(m.byGuild, guildID)
+		if m.byGuild[guildID] == s {
+			delete(m.byGuild, guildID)
+		}
 	}
 }

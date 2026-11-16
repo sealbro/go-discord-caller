@@ -302,6 +302,7 @@ func (c *deafController) reconcileLocked(botID snowflake.ID, mem *deafMember, im
 	if !mem.want && immediate {
 		mem.stopTimer()
 		mem.inFlight = true
+		c.applying.Add(1)
 		return true
 	}
 	if mem.timer != nil {
@@ -330,18 +331,20 @@ func (c *deafController) applyAfterDelay(botID snowflake.ID) {
 	}
 	want := mem.want
 	mem.inFlight = true
+	c.applying.Add(1)
 	c.mu.Unlock()
 	c.apply(botID, want)
 }
 
 // apply issues the REST change off the caller's goroutine. The router invokes
 // Observe from its debounce timer, and a PATCH must never stall routing.
+// The caller must have counted it in c.applying while still holding c.mu, so
+// Close cannot miss a change it has already admitted.
 //
 // The member's recorded state is updated only after Discord accepts the change.
 // Recording it optimistically would make Close try to undo a deafen that never
 // happened, and would let a failed deafen masquerade as applied.
 func (c *deafController) apply(botID snowflake.ID, deaf bool) {
-	c.applying.Add(1)
 	go func() {
 		defer c.applying.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), deafApplyTimeout)

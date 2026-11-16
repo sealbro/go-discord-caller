@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Language requests**: a GitHub issue form for asking for a language the bot does not have yet.
 
 ### Fixed
+- **Crash reasons and last telemetry were lost**: when startup or the bot failed, the process exited without flushing telemetry, so the reason never reached the log backend. It now flushes first.
+- **Changes made while shutting down could be lost**: the bindings file is now closed after the bot disconnects, so a late server event is still saved, and a change made after the file is closed is written at once.
+- **Two servers could share a relay code**: a hand-edited bindings file with a repeated code now gives the later server a new one.
+- **Speaker bot order and duplicates**: speaker order no longer depends on how tokens are numbered (`_1` against `_01`), an unusable number is ignored with a warning, and a token set twice is used once.
+- **Telemetry shutdown**: each signal now gets its own time to flush, so a slow collector no longer drops the final logs, and a failed telemetry setup no longer leaves exporters running.
 - **Owner bot left in the voice channel after a failed start**: a start that failed after the owner bot joined, or was stopped halfway, now makes it leave. A guest join whose owner setup fails now reports the error instead of starting a session that relays nothing.
 - **A new `/start` during a stop could be undone by it**: a start sent while a raid is still shutting down is now refused until the stop finishes.
 - **Role grants while a raid was starting were lost**: a caller role given during startup is now applied.

@@ -93,7 +93,7 @@ flowchart TB
         A2 <-->|"🟢"| B2
     end
 
-    subgraph M3["3️⃣ One ↔ many / star — /start mode:one-many"]
+    subgraph M3["3️⃣ One ↔ many / star — /start mode:one_many"]
         direction LR
         O3["🎙️ Owner ⭐ hub"] -->|"🟢 owner → all"| A3["🔊 Speaker 1"]
         O3 -->|"🟢 owner → all"| B3["🔊 Speaker 2"]
@@ -119,7 +119,7 @@ flowchart TB
 - **Multi-speaker relay** – unlimited speaker bots, each bound to a different voice channel
 - **Three caller modes** 
   - default one-caller broadcast (`/start`) or single-caller broadcast (`/start mode:one`) where only the designated caller is captured,
-  - hub-and-spoke broadcast (`/start mode:one-many`) where speakers only hear the owner,
+  - hub-and-spoke broadcast (`/start mode:one_many`) where speakers only hear the owner,
   - full multi-channel conference (`/start mode:many`) where every bound channel captures and plays back audio with mix-minus echo prevention
 - **Automatic audio pause** – bots stop processing audio for channels with no active listeners, reducing idle resource usage
 - **Idle auto-stop** – a raid with no unmuted caller, or with no one to hear one, stops by itself after `SESSION_IDLE_TIMEOUT` (see [When a raid ends](#when-a-raid-ends))
@@ -134,17 +134,17 @@ flowchart TB
 
 ## Slash commands
 
-> The manager role is configured inside `/setup`. `/status` requires Manage Server or the manager role (it shows the relay code).
+> The manager role is configured inside `/setup`. "Manager" below means the Manage Server permission or the manager role; `/status` needs it too because it shows the relay code. The `mode` option is picked from a list (`one_many` appears as "One↔Many Callers").
 
 | Command                        | Required role | Description                                                                                                                                       |
 |--------------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
 | `/setup`                       | Administrator | Open the interactive setup panel (capture role, manager role, owner-channel picker, speaker binder, language)                                     |
 | `/start`                       | Manager       | Start a voice raid in **one-caller** mode — only the designated caller is captured; speakers play back in listen-only                             |
-| `/start mode:one-many`         | Manager       | Start a voice raid in **hub-and-spoke** mode — the owner hears all speakers, but speakers only hear the owner; prevents cross-talk in large raids |
+| `/start mode:one_many`         | Manager       | Start a voice raid in **hub-and-spoke** mode — the owner hears all speakers, but speakers only hear the owner; prevents cross-talk in large raids |
 | `/start mode:many`             | Manager       | Start a voice raid in **many-callers** mode — every bound channel captures and plays back audio with mix-minus echo prevention                    |
 | `/start code:XXXXXX`           | Manager       | Join an existing relay session as a **listener** — receives host audio but does not capture locally                                               |
-| `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when the host uses `mode:many` or `mode:one-many`) |
-| `/start code:XXXXXX mode:one-many` | Manager   | Join an existing relay session as a **hub-and-spoke participant** — members in your speaker channels are heard by the host owner, and every local channel hears the host owner (only effective when the host uses `mode:many` or `mode:one-many`) |
+| `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when the host uses `mode:many` or `mode:one_many`) |
+| `/start code:XXXXXX mode:one_many` | Manager   | Join an existing relay session as a **hub-and-spoke participant** — members in your speaker channels are heard by the host owner, and every local channel hears the host owner (only effective when the host uses `mode:many` or `mode:one_many`) |
 | `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
 | `/status`                      | Manager       | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
 
@@ -156,7 +156,7 @@ Each guild has a persistent **relay code** (8-character, e.g. `A3BX7KQP`) shown 
 
 1. Guild A runs `/start` (or `/start mode:many`) — its session becomes active; the relay code is visible in `/status`.
 2. Guild B runs `/start code:A3BX7KQP` — its speakers connect in **listener-only** mode and receive all audio from Guild A.
-3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` (or `mode:one-many`) and Guild B must join with `/start code:A3BX7KQP mode:many` (or `mode:one-many`). If the host does not allow it, a guest asking for more is downgraded to a listener.
+3. To have Guild B's users also heard in Guild A, Guild A must use `mode:many` (or `mode:one_many`) and Guild B must join with `/start code:A3BX7KQP mode:many` (or `mode:one_many`). If the host does not allow it, a guest asking for more is downgraded to a listener.
 4. When Guild A runs `/stop`, all guest sessions are torn down automatically.
 
 ## When a raid ends

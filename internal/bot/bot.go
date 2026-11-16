@@ -235,8 +235,8 @@ func (b *Bot) Run(ctx context.Context) error {
 		// Backstop for any audio sender whose conn never went through
 		// GuildVoice.Leave — disgo's Conn.Close leaves them running.
 		pool.CloseAllAudioSenders()
-		b.store.Close()
 		b.client.Close(shutdownCtx)
+		b.store.Close()
 	}()
 
 	// Wait for the Ready event to deliver guild IDs, then sync slash commands.

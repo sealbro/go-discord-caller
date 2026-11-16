@@ -113,9 +113,8 @@ type inputEntry struct {
 }
 
 // Mixer receives Opus frames from multiple named input channels, mixes their PCM,
-// and outputs a single re-encoded Opus stream on Output().
-// Call Run to start the 20 ms tick loop; it blocks until ctx is cancelled and
-// closes the output channel on return.
+// and outputs a single re-encoded Opus stream to the sink set by SetSink.
+// Call Run to start the 20 ms tick loop; it blocks until ctx is cancelled.
 //
 // A mixer can be paused when its destination channel has no listeners (e.g. no
 // non-bot users). While paused, tick still drains input channels to prevent
@@ -505,9 +504,10 @@ func (m *Mixer) mixAndEncode() ([]byte, error) {
 	// len(framesBuf) is always ≥ 2 here — the single-source case took the
 	// passthrough branch above. Computed in Q15 fixed-point to keep the
 	// clamp loop integer-only and SIMD-friendly.
-	scale := int32(float64(1<<15) / math.Sqrt(float64(len(m.framesBuf))))
+	// int64 product: the sum reaches 32768*N, so v*scale overflows int32 from N=5.
+	scale := int64(float64(1<<15) / math.Sqrt(float64(len(m.framesBuf))))
 	for i, v := range m.mixed {
-		m.pcm[i] = int16(max(math.MinInt16, min(math.MaxInt16, (v*scale)>>15)))
+		m.pcm[i] = int16(max(math.MinInt16, min(math.MaxInt16, (int64(v)*scale)>>15)))
 	}
 
 	n, err := m.enc.Encode(m.pcm, m.encodeBuf)

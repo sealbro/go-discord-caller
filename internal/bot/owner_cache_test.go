@@ -3,8 +3,10 @@ package bot
 import (
 	"testing"
 
+	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
+	"github.com/disgoorg/disgo/events"
 	"github.com/disgoorg/snowflake/v2"
 )
 
@@ -94,6 +96,47 @@ func TestEvictVoiceLeaverDropsHumansButKeepsBots(t *testing.T) {
 	}
 	if !isCached(caches, bot.User.ID) {
 		t.Error("bot was evicted after leaving voice")
+	}
+}
+
+func fireMemberUpdate(caches cache.Caches, m discord.Member) *fakeManager {
+	f := &fakeManager{}
+	client := &bot.Client{Caches: caches}
+	onGuildMemberUpdate(f)(&events.GuildMemberUpdate{
+		GenericGuildMember: &events.GenericGuildMember{
+			GenericEvent: events.NewGenericEvent(client, 0, 0),
+			GuildID:      cacheTestGuild,
+			Member:       m,
+		},
+	})
+	return f
+}
+
+func TestMemberUpdateDoesNotCacheMembersOutsideVoice(t *testing.T) {
+	caches := newOwnerCaches()
+
+	f := fireMemberUpdate(caches, testMember(1, false))
+
+	if isCached(caches, 1) {
+		t.Error("member update cached a user who is not in voice")
+	}
+	if got := len(f.snapshotCalls().notifyMemberCalls); got != 1 {
+		t.Errorf("NotifyMemberUpdate calls = %d, want 1", got)
+	}
+}
+
+func TestMemberUpdateRefreshesMembersInVoice(t *testing.T) {
+	caches := newOwnerCaches()
+	joinVoice(caches, 2)
+	caches.AddMember(testMember(2, false))
+
+	updated := testMember(2, false)
+	updated.RoleIDs = []snowflake.ID{7}
+	fireMemberUpdate(caches, updated)
+
+	got, ok := caches.Member(cacheTestGuild, 2)
+	if !ok || len(got.RoleIDs) != 1 || got.RoleIDs[0] != 7 {
+		t.Errorf("cached member = %+v (ok %v), want the updated roles", got.RoleIDs, ok)
 	}
 }
 

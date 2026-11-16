@@ -218,8 +218,8 @@ func TestReconnect(t *testing.T) {
 	})
 }
 
-// The watchdog reconnects only bots that have no gateway at all; a gateway
-// that exists but is down is already being retried by disgo.
+// Inside the grace period the watchdog reconnects only bots that have no
+// gateway at all; a gateway that exists but just went down is left to disgo.
 func TestWatchdogReconnectsOnlyBotsWithoutAGateway(t *testing.T) {
 	t.Parallel()
 	const (

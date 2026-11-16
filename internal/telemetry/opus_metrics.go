@@ -112,16 +112,21 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 // Obtain one via OpusMetrics.For and reuse it for the lifetime of a session.
 // All record calls are zero-alloc on the hot path.
 type OpusRecorder struct {
-	m    *OpusMetrics
-	attr metric.MeasurementOption
-	drop func() // optional drop counter; set via WithDrop
+	m *OpusMetrics
+	// Passing one option to a variadic Record or Add builds a slice for it on
+	// every call, so both are built once here.
+	record []metric.RecordOption
+	add    []metric.AddOption
+	drop   func() // optional drop counter; set via WithDrop
 }
 
 // For returns an OpusRecorder with guild_id pre-baked into every measurement.
 func (o *OpusMetrics) For(guildID string) OpusRecorder {
+	attr := metric.WithAttributes(attribute.String("guild_id", guildID))
 	return OpusRecorder{
-		m:    o,
-		attr: metric.WithAttributes(attribute.String("guild_id", guildID)),
+		m:      o,
+		record: []metric.RecordOption{attr},
+		add:    []metric.AddOption{attr},
 	}
 }
 
@@ -144,7 +149,7 @@ func (r OpusRecorder) RecordReceive(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.receiveDuration.Record(context.Background(), ms, r.attr)
+	r.m.receiveDuration.Record(context.Background(), ms, r.record...)
 }
 
 // RecordProvide records the execution duration of one ProvideOpusFrame drain+return path.
@@ -152,7 +157,7 @@ func (r OpusRecorder) RecordProvide(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.provideDuration.Record(context.Background(), ms, r.attr)
+	r.m.provideDuration.Record(context.Background(), ms, r.record...)
 }
 
 // RecordAllowUser records the execution duration of one allowUser filter call.
@@ -160,7 +165,7 @@ func (r OpusRecorder) RecordAllowUser(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.allowUserDuration.Record(context.Background(), ms, r.attr)
+	r.m.allowUserDuration.Record(context.Background(), ms, r.record...)
 }
 
 // RecordTick records a mixer tick duration in milliseconds.
@@ -168,7 +173,7 @@ func (r OpusRecorder) RecordTick(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.tickDuration.Record(context.Background(), ms, r.attr)
+	r.m.tickDuration.Record(context.Background(), ms, r.record...)
 }
 
 // RecordTickLateness records how late a mixer tick fired, in milliseconds.
@@ -176,7 +181,7 @@ func (r OpusRecorder) RecordTickLateness(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.tickLateness.Record(context.Background(), ms, r.attr)
+	r.m.tickLateness.Record(context.Background(), ms, r.record...)
 }
 
 // RecordCopyQueue records how many frames were queued ahead of a copy-mode
@@ -185,7 +190,7 @@ func (r OpusRecorder) RecordCopyQueue(ahead int) {
 	if r.m == nil {
 		return
 	}
-	r.m.copyQueueDepth.Record(context.Background(), int64(ahead), r.attr)
+	r.m.copyQueueDepth.Record(context.Background(), int64(ahead), r.record...)
 }
 
 // RecordReceiveInterval records the time between two consecutive frames from
@@ -194,7 +199,7 @@ func (r OpusRecorder) RecordReceiveInterval(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.receiveInterval.Record(context.Background(), ms, r.attr)
+	r.m.receiveInterval.Record(context.Background(), ms, r.record...)
 }
 
 // RecordSourceDepth records how many frames were already buffered in a mixer
@@ -203,7 +208,7 @@ func (r OpusRecorder) RecordSourceDepth(ahead int) {
 	if r.m == nil {
 		return
 	}
-	r.m.sourceDepth.Record(context.Background(), int64(ahead), r.attr)
+	r.m.sourceDepth.Record(context.Background(), int64(ahead), r.record...)
 }
 
 // RecordPipelineLatency records end-to-end pipeline latency in milliseconds.
@@ -211,7 +216,7 @@ func (r OpusRecorder) RecordPipelineLatency(ms float64) {
 	if r.m == nil {
 		return
 	}
-	r.m.pipelineLatency.Record(context.Background(), ms, r.attr)
+	r.m.pipelineLatency.Record(context.Background(), ms, r.record...)
 }
 
 // RecordSourceFramesLost counts one received frame that evicted an older frame
@@ -220,5 +225,5 @@ func (r OpusRecorder) RecordSourceFramesLost() {
 	if r.m == nil {
 		return
 	}
-	r.m.sourceFramesLost.Add(context.Background(), 1, r.attr)
+	r.m.sourceFramesLost.Add(context.Background(), 1, r.add...)
 }

@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -54,6 +55,15 @@ type YAMLStore struct {
 	locales    map[snowflake.ID]string
 	disabled   map[botKey]struct{}
 	closed     bool
+	// snapshots numbers every serialised state, in the order the states were
+	// taken under mu. Written with mu held, at least for reading.
+	snapshots atomic.Uint64
+
+	// saveMu orders the file writes, which happen outside mu so that a slow
+	// disk never stalls a lookup. Never acquire mu while holding it.
+	saveMu    sync.Mutex
+	saved     uint64 // newest snapshot on disk; guarded by saveMu
+	writeFile func(path string, data []byte) error
 
 	dirtyCh chan struct{} // signals the flush goroutine
 	done    chan struct{} // closed by Close to stop the flush goroutine
@@ -72,6 +82,7 @@ func NewYAMLStore(path string) (*YAMLStore, error) {
 		dirtyCh:    make(chan struct{}, 1),
 		done:       make(chan struct{}),
 		flushed:    make(chan struct{}),
+		writeFile:  writeFileAtomic,
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -97,22 +108,16 @@ func (s *YAMLStore) flushLoop() {
 	for {
 		select {
 		case <-s.done:
-			// Final flush on shutdown.
-			s.mu.RLock()
-			err := s.save()
-			s.mu.RUnlock()
-			if err != nil {
+			if err := s.flush(); err != nil {
 				slog.Error("yaml store: final flush failed", slog.Any("err", err))
 			}
 			return
 		case <-s.dirtyCh:
 			timer.Reset(saveDebounce)
 		case <-timer.C:
-			s.mu.RLock()
-			if err := s.save(); err != nil {
+			if err := s.flush(); err != nil {
 				slog.Error("yaml store: debounced flush failed", slog.Any("err", err))
 			}
-			s.mu.RUnlock()
 		}
 	}
 }
@@ -123,7 +128,11 @@ func (s *YAMLStore) flushLoop() {
 // Must be called with mu write-locked (the caller already holds it).
 func (s *YAMLStore) markDirty() {
 	if s.closed {
-		if err := s.save(); err != nil {
+		snap, err := s.snapshot()
+		if err == nil {
+			err = s.persist(snap)
+		}
+		if err != nil {
 			slog.Error("yaml store: write after close failed", slog.Any("err", err))
 		}
 		return
@@ -201,9 +210,43 @@ func (s *YAMLStore) relayCodeInUse(code string) bool {
 	return false
 }
 
-// save serialises the current state to the YAML file.
+// storeSnapshot is the store's state serialised at one moment.
+type storeSnapshot struct {
+	seq  uint64
+	yaml []byte
+}
+
+// flush writes the current state to the YAML file. Only the serialising holds
+// mu: an fsync can take long enough to matter, and a writer queued behind a
+// read lock blocks every later reader with it.
+func (s *YAMLStore) flush() error {
+	s.mu.RLock()
+	snap, err := s.snapshot()
+	s.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	return s.persist(snap)
+}
+
+// persist writes snap to the YAML file unless a newer snapshot already got
+// there, which a write after Close can do while the final flush is in flight.
+func (s *YAMLStore) persist(snap storeSnapshot) error {
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	if snap.seq < s.saved {
+		return nil
+	}
+	if err := s.writeFile(s.path, snap.yaml); err != nil {
+		return err
+	}
+	s.saved = snap.seq
+	return nil
+}
+
+// snapshot serialises the current state.
 // Must be called with mu at least read-locked.
-func (s *YAMLStore) save() error {
+func (s *YAMLStore) snapshot() (storeSnapshot, error) {
 	// Collect all guild IDs present in either map.
 	guildSet := make(map[snowflake.ID]*yamlGuildEntry)
 	ensureGuild := func(id snowflake.ID) *yamlGuildEntry {
@@ -268,13 +311,17 @@ func (s *YAMLStore) save() error {
 
 	out, err := yaml.Marshal(&yd)
 	if err != nil {
-		return fmt.Errorf("yaml store: marshal failed: %w", err)
+		return storeSnapshot{}, fmt.Errorf("yaml store: marshal failed: %w", err)
 	}
+	return storeSnapshot{seq: s.snapshots.Add(1), yaml: out}, nil
+}
 
-	// Atomic write: write to a temp file in the same directory, then rename.
-	// os.Rename is atomic on POSIX and prevents partial/empty files if the
-	// process is killed between truncate and write-complete.
-	dir := filepath.Dir(s.path)
+// writeFileAtomic replaces the file at path with out: it writes a temp file in
+// the same directory, then renames it. os.Rename is atomic on POSIX and
+// prevents partial/empty files if the process is killed between truncate and
+// write-complete.
+func writeFileAtomic(path string, out []byte) error {
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".store-*.yaml.tmp")
 	if err != nil {
 		return fmt.Errorf("yaml store: create temp file: %w", err)
@@ -296,7 +343,7 @@ func (s *YAMLStore) save() error {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: close temp file: %w", err)
 	}
-	if err := os.Rename(tmpPath, s.path); err != nil {
+	if err := os.Rename(tmpPath, path); err != nil {
 		_ = os.Remove(tmpPath)
 		return fmt.Errorf("yaml store: rename failed: %w", err)
 	}

@@ -27,7 +27,7 @@ type DaveMetrics struct {
 	positions    metric.Int64ObservableCounter
 
 	decryptDuration metric.Float64Histogram
-	durationAttrs   sync.Map // bot user ID -> metric.MeasurementOption
+	durationAttrs   sync.Map // bot user ID -> []metric.RecordOption
 }
 
 func (d *DaveMetrics) init(meter metric.Meter) (err error) {
@@ -68,9 +68,9 @@ func (d *DaveMetrics) RecordDecryptDuration(botUserID string, took time.Duration
 	opt, ok := d.durationAttrs.Load(botUserID)
 	if !ok {
 		opt, _ = d.durationAttrs.LoadOrStore(botUserID,
-			metric.WithAttributes(attribute.String("bot_user_id", botUserID)))
+			[]metric.RecordOption{metric.WithAttributes(attribute.String("bot_user_id", botUserID))})
 	}
-	d.decryptDuration.Record(context.Background(), float64(took.Microseconds())/1000, opt.(metric.MeasurementOption))
+	d.decryptDuration.Record(context.Background(), float64(took.Microseconds())/1000, opt.([]metric.RecordOption)...)
 }
 
 // RegisterObservers registers cb as the observable callback for every DAVE

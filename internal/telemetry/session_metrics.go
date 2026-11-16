@@ -135,21 +135,21 @@ const (
 // and must not be tied to the session span (which may be cancelled before the
 // goroutine exits, causing exporters to silently drop the metric).
 func (s *SessionMetrics) FrameDropper(_ context.Context, guildID snowflake.ID, path DropPath) func() {
-	opt := metric.WithAttributes(
+	opts := []metric.AddOption{metric.WithAttributes(
 		attribute.String("guild_id", guildID.String()),
 		attribute.String("path", string(path)),
-	)
-	return func() { s.dropped.Add(context.Background(), 1, opt) }
+	)}
+	return func() { s.dropped.Add(context.Background(), 1, opts...) }
 }
 
 // SpeakerFrameDropper is FrameDropper for a drop on one speaker bot's output
 // queue. The bot_id label tells one stuck speaker apart from every speaker
 // falling behind, which a guild-wide count cannot.
 func (s *SessionMetrics) SpeakerFrameDropper(guildID snowflake.ID, path DropPath, botID snowflake.ID) func() {
-	opt := metric.WithAttributes(
+	opts := []metric.AddOption{metric.WithAttributes(
 		attribute.String("guild_id", guildID.String()),
 		attribute.String("path", string(path)),
 		attribute.String("bot_id", botID.String()),
-	)
-	return func() { s.dropped.Add(context.Background(), 1, opt) }
+	)}
+	return func() { s.dropped.Add(context.Background(), 1, opts...) }
 }

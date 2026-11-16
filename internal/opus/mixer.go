@@ -30,7 +30,12 @@ const (
 	mixerFrameSize  = 960 // samples per channel for 20 ms at 48 kHz
 	mixerPCMBuf     = mixerFrameSize * mixerChannels
 	mixerFrameDur   = 20 * time.Millisecond
-	mixerBitrate    = 64000 // bits per second sent to Opus encoder; matches Discord source bitrate
+	// parkedTickDur is how often a paused mixer still looks at its inputs. Its
+	// SourceBuffers discard at Feed while it is paused, so there is normally
+	// nothing to drain and SetPaused(false) wakes it at once; the slow tick only
+	// covers frames that slipped in around the pause and foreign AudioSources.
+	parkedTickDur = 200 * time.Millisecond
+	mixerBitrate  = 64000 // bits per second sent to Opus encoder; matches Discord source bitrate
 )
 
 // mixerComplexity is the Opus encoder complexity (0–10). 8 keeps audible
@@ -117,16 +122,19 @@ type inputEntry struct {
 // Call Run to start the 20 ms tick loop; it blocks until ctx is cancelled.
 //
 // A mixer can be paused when its destination channel has no listeners (e.g. no
-// non-bot users). While paused, tick still drains input channels to prevent
-// upstream backpressure, but skips mixing, encoding, and output — saving CPU.
+// non-bot users). While paused, its inputs discard what they are fed, and the
+// mixer skips mixing, encoding and output and ticks only occasionally — saving
+// CPU.
 type Mixer struct {
 	mu             sync.Mutex
 	inputs         map[snowflake.ID]*inputEntry
 	inputsSnap     atomic.Pointer[[]*inputEntry] // lock-free read for tick; rebuilt on AddInput/RemoveInput
 	paused         atomic.Bool
 	lastActivityAt atomic.Int64  // UnixNano of last tick that consumed at least one frame
-	pausedDrops    atomic.Uint64 // diagnostic: frames discarded by tick because the mixer was paused
+	pausedDrops    atomic.Uint64 // diagnostic: frames discarded because the mixer was paused
 	metrics        telemetry.OpusRecorder
+	// wake interrupts a parked Run when the mixer is unpaused.
+	wake chan struct{}
 
 	// sink is the destination callback for produced frames. It is invoked
 	// synchronously from tick and must not block (multicast to destination
@@ -183,6 +191,7 @@ func NewMixer(metrics telemetry.OpusRecorder) (*Mixer, error) {
 		pcm:       make([]int16, mixerPCMBuf),
 		encodeBuf: make([]byte, 4096),
 		framesBuf: make([]Frame, 0, 8),
+		wake:      make(chan struct{}, 1),
 	}
 	mx.lastActivityAt.Store(time.Now().UnixNano())
 	return mx, nil
@@ -197,6 +206,9 @@ func (m *Mixer) SetSink(sink func(pkt []byte)) {
 
 // AddInput registers an AudioSource identified by id.
 func (m *Mixer) AddInput(id snowflake.ID, src AudioSource) error {
+	if sb, ok := src.(*SourceBuffer); ok {
+		sb.bind(m)
+	}
 	m.mu.Lock()
 	m.inputs[id] = &inputEntry{src: src}
 	m.rebuildSnapLocked()
@@ -235,10 +247,10 @@ func (m *Mixer) InputIDs() []snowflake.ID {
 	return ids
 }
 
-// SetPaused controls whether the mixer is paused. While paused, tick drains
-// input channels (preventing upstream backpressure) but skips mixing, encoding,
-// and output. Use this to suspend mixers whose destination channel has no
-// non-bot listeners.
+// SetPaused controls whether the mixer is paused. While paused, its
+// SourceBuffers discard what they are fed, tick skips mixing, encoding and
+// output, and Run slows to parkedTickDur. Use this to suspend mixers whose
+// destination channel has no non-bot listeners.
 //
 // On paused → running transition the activity timestamp is reset to "now" so
 // that DrainWatcher does not immediately re-pause a freshly-unpaused mixer
@@ -247,7 +259,18 @@ func (m *Mixer) SetPaused(p bool) {
 	prev := m.paused.Swap(p)
 	if prev && !p {
 		m.lastActivityAt.Store(time.Now().UnixNano())
+		select {
+		case m.wake <- struct{}{}:
+		default:
+		}
 	}
+}
+
+// discardPaused counts one frame a SourceBuffer threw away at Feed because
+// the mixer is paused. It is activity all the same; see tick.
+func (m *Mixer) discardPaused() {
+	m.pausedDrops.Add(1)
+	m.lastActivityAt.Store(time.Now().UnixNano())
 }
 
 // PausedDrops returns the cumulative number of input frames discarded by
@@ -292,36 +315,59 @@ func (m *Mixer) IdleFor() time.Duration {
 //
 // The first tick fires immediately so any frames already queued at session
 // start are processed without a one-off 20 ms wait.
+//
+// A paused mixer is parked: it ticks every parkedTickDur and records no tick
+// metrics, since most mixers of a raid are paused most of the time and each
+// 20 ms wake-up costs a scheduler round trip. Unpausing restarts the 20 ms
+// grid immediately.
 func (m *Mixer) Run(ctx context.Context) {
 	timer := time.NewTimer(time.Microsecond)
 	defer timer.Stop()
 
 	schedule := newTickSchedule(time.Now())
+	parked := false
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
-			start := time.Now()
-			m.metrics.RecordTickLateness(float64(schedule.lateness(start).Microseconds()) / 1000)
-			if err := m.tick(); err != nil {
-				slog.Error("mixer: tick error", slog.Any("err", err))
+		case <-m.wake:
+			if !parked {
+				continue
 			}
-			m.metrics.RecordTick(float64(time.Since(start).Microseconds()) / 1000)
-
-			timer.Reset(schedule.next(time.Now()))
+			schedule = newTickSchedule(time.Now())
+		case <-timer.C:
 		}
+
+		start := time.Now()
+		parked = m.paused.Load()
+		if !parked {
+			m.metrics.RecordTickLateness(float64(schedule.lateness(start).Microseconds()) / 1000)
+		}
+		if err := m.tick(); err != nil {
+			slog.Error("mixer: tick error", slog.Any("err", err))
+		}
+		if !parked {
+			m.metrics.RecordTick(float64(time.Since(start).Microseconds()) / 1000)
+		}
+
+		schedule.period = mixerFrameDur
+		if parked {
+			schedule.period = parkedTickDur
+		}
+		timer.Reset(schedule.next(time.Now()))
 	}
 }
 
-// tickSchedule holds the absolute 20 ms boundary the mixer aims to tick on.
+// tickSchedule holds the absolute boundary the mixer aims to tick on, one
+// period after the last.
 type tickSchedule struct {
 	deadline time.Time
+	period   time.Duration
 }
 
 func newTickSchedule(start time.Time) *tickSchedule {
-	return &tickSchedule{deadline: start}
+	return &tickSchedule{deadline: start, period: mixerFrameDur}
 }
 
 // lateness reports how far past its boundary a tick that fired at now is.
@@ -333,11 +379,11 @@ func (s *tickSchedule) lateness(now time.Time) time.Duration {
 // it. Boundaries already in the past are skipped so the mixer resumes on a
 // future one instead of replaying missed slots.
 func (s *tickSchedule) next(now time.Time) time.Duration {
-	s.deadline = s.deadline.Add(mixerFrameDur)
+	s.deadline = s.deadline.Add(s.period)
 	wait := s.deadline.Sub(now)
 	if wait < 0 {
-		missed := (-wait)/mixerFrameDur + 1
-		s.deadline = s.deadline.Add(missed * mixerFrameDur)
+		missed := (-wait)/s.period + 1
+		s.deadline = s.deadline.Add(missed * s.period)
 		wait = s.deadline.Sub(now)
 	}
 	return max(wait, time.Millisecond)
@@ -364,7 +410,6 @@ func (m *Mixer) tick() error {
 	// When paused (no non-bot listeners in the destination channel), skip
 	// mixing/encoding/output entirely. Inputs were already drained above.
 	if paused || len(m.framesBuf) == 0 {
-		m.recyclePCMBuffers()
 		return nil
 	}
 
@@ -402,8 +447,9 @@ func (m *Mixer) readInputsSnapshot() []*inputEntry {
 }
 
 // collectFrames pulls one frame per input into m.framesBuf. When paused, every
-// input is fully drained (incrementing pausedDrops by the drained count) so
-// SourceBuffer ring memory does not accumulate while the mixer is silent.
+// input is fully drained (incrementing pausedDrops by the drained count): a
+// SourceBuffer may hold a frame fed just before the pause, and an AudioSource
+// of another kind does not discard at Feed at all.
 //
 // Returns the number of frames discarded by the paused path, which the caller
 // needs in order to tell "no audio is arriving" apart from "audio is arriving
@@ -439,15 +485,6 @@ func (m *Mixer) collectFrames(entries []*inputEntry, paused bool) int {
 	return drained
 }
 
-// recyclePCMBuffers returns each frame's PCM buffer to the pool. Used by the
-// no-output paths (paused or zero frames) where we still have to release the
-// pool buffers that producers handed off to us.
-func (m *Mixer) recyclePCMBuffers() {
-	for _, f := range m.framesBuf {
-		PutPCM(f.PCM)
-	}
-}
-
 // recordPipelineLatency emits the gdc.mixer.pipeline.latency observation for
 // the oldest input frame in this tick (worst-case path through the pipeline).
 func (m *Mixer) recordPipelineLatency() {
@@ -475,7 +512,7 @@ func oldestCreatedAt(frames []Frame) time.Time {
 
 // mixAndEncode accumulates the PCM from every frame in m.framesBuf, clamps to
 // int16, encodes via libopus, and returns the pooled encoded buffer. Recycles
-// each frame's PCM buffer along the way.
+// each frame's buffers along the way.
 func (m *Mixer) mixAndEncode() ([]byte, error) {
 	// Zero the accumulator in-place instead of allocating a new slice.
 	clear(m.mixed)
@@ -493,8 +530,12 @@ func (m *Mixer) mixAndEncode() ([]byte, error) {
 			m.mixed[i+3] += int32(pcm[i+3])
 		}
 	}
+	// The Opus copies are only forwarded by the single-source passthrough.
 	for _, f := range m.framesBuf {
 		PutPCM(f.PCM)
+		if f.Opus != nil {
+			PutEncodedFrame(f.Opus)
+		}
 	}
 
 	// Equal-power attenuation: scale the sum by 1/sqrt(N) so two normal-volume

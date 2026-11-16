@@ -34,10 +34,11 @@ type fakeSession struct {
 	// delay makes Decrypt block, to stand in for a stalled backend.
 	delay time.Duration
 
-	mu       sync.Mutex
-	decrypts int
-	closes   int
-	known    map[godave.UserID]struct{}
+	mu         sync.Mutex
+	readyCalls int
+	decrypts   int
+	closes     int
+	known      map[godave.UserID]struct{}
 }
 
 func (f *fakeSession) Close() error {
@@ -47,7 +48,18 @@ func (f *fakeSession) Close() error {
 	return nil
 }
 
-func (f *fakeSession) Ready() bool { return f.ready }
+func (f *fakeSession) Ready() bool {
+	f.mu.Lock()
+	f.readyCalls++
+	f.mu.Unlock()
+	return f.ready
+}
+
+func (f *fakeSession) OnSelectProtocolAck(uint16)                      {}
+func (f *fakeSession) OnDavePrepareTransition(uint16, uint16)          {}
+func (f *fakeSession) OnDaveExecuteTransition(uint16)                  {}
+func (f *fakeSession) OnDaveMLSPrepareCommitTransition(uint16, []byte) {}
+func (f *fakeSession) OnDaveMLSWelcome(uint16, []byte)                 {}
 
 func (f *fakeSession) Decrypt(userID godave.UserID, frame []byte, out []byte) (int, error) {
 	f.mu.Lock()

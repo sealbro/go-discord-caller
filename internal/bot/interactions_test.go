@@ -433,7 +433,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 		{name: "no owner channel", m: &fakeManager{startFn: failStart(manager.ErrNoOwnerChannel)}, want: en.T("raid.no_owner_channel"), started: true},
 		{name: "no caller role", m: &fakeManager{startFn: failStart(manager.ErrNoCallerRole)}, want: en.T("raid.no_caller_role"), started: true},
 		{name: "no deafen permission", m: &fakeManager{startFn: failStart(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
-		{name: "other error", m: &fakeManager{startFn: failStart(boom)}, want: en.T("raid.start_failed", "Err", "boom"), started: true},
+		{name: "other error", m: &fakeManager{startFn: failStart(boom)}, want: en.T("raid.start_failed"), started: true},
 
 		{name: "join access blocked", opts: withCode, m: &fakeManager{accessFn: func() []manager.ChannelAccessWarning { return warning }},
 			want: en.T("raid.join_blocked_permissions") + formatAccessWarnings(en, warning)},
@@ -442,7 +442,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 		{name: "join no deafen permission", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
 		{name: "join session exists", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrSessionExists)}, want: en.T("raid.already_active"), started: true},
 		{name: "join locked out", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrJoinLockedOut)}, want: en.T("raid.join_locked_out"), started: true},
-		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE2345", "Err", "boom"), started: true},
+		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE2345"), started: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -489,7 +489,7 @@ func TestStopCommandFollowUps(t *testing.T) {
 	}{
 		{"stopped", nil, en.T("raid.stopped")},
 		{"none active", manager.ErrNoActiveSession, en.T("raid.none_active")},
-		{"failed", errors.New("boom"), en.T("raid.stop_failed", "Err", "boom")},
+		{"failed", errors.New("boom"), en.T("raid.stop_failed")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -540,6 +540,69 @@ func TestRoleMenuBindings(t *testing.T) {
 			wantUpdate(t, h.dispatch(componentPayload(who, tt.customID, componentRole, tt.data)), en.T("setup.roles_title"))
 			if len(m.bindings) != 1 || m.bindings[0] != tt.want {
 				t.Errorf("bindings = %v, want [%v]", m.bindings, tt.want)
+			}
+		})
+	}
+}
+
+const internalDetail = "rest: channel 12345 https://discord.example/api body={secret}"
+
+func TestFailureRepliesDoNotExposeErrorText(t *testing.T) {
+	t.Parallel()
+	leak := errors.New(internalDetail)
+	followUps := []struct {
+		name    string
+		m       *fakeManager
+		payload string
+	}{
+		{"start", &fakeManager{startFn: failStart(leak)}, slashPayload(memberJSON(permManage), "start")},
+		{"join", &fakeManager{joinFn: failJoin(leak)}, slashPayload(memberJSON(permManage), "start", stringOption("code", "CODE2345"))},
+		{"stop", &fakeManager{stopFn: func() error { return leak }}, slashPayload(memberJSON(permManage), "stop")},
+	}
+	for _, tt := range followUps {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			h := newInteractionHarness(t, tt.m)
+			h.dispatch(tt.payload)
+			if got := h.followUp(); strings.Contains(got, "12345") || strings.Contains(got, "secret") {
+				t.Errorf("follow-up exposes the error text: %q", got)
+			}
+		})
+	}
+	t.Run("toggle speaker", func(t *testing.T) {
+		t.Parallel()
+		m := &fakeManager{
+			statusFn: statusWithSpeakers(1, true),
+			toggleFn: func(snowflake.ID, bool) error { return leak },
+		}
+		h := newInteractionHarness(t, m)
+		resp := h.dispatch(componentPayload(memberJSON(permAdmin), fmt.Sprintf("/speakers/toggle/%s/0", speakerA), componentBtn, ""))
+		if got := messageContent(t, resp); strings.Contains(got, "12345") || strings.Contains(got, "secret") {
+			t.Errorf("reply exposes the error text: %q", got)
+		}
+	})
+}
+
+func TestChannelsCannotBeBoundDuringRaid(t *testing.T) {
+	t.Parallel()
+	who := memberJSON(permAdmin)
+	routes := map[string]string{
+		"speaker channel": componentPayload(who, fmt.Sprintf("/speakers/bind-channel/%s/0", speakerA), componentChan, channelSelectData(boundChannel)),
+		"speaker unbind":  componentPayload(who, fmt.Sprintf("/speakers/bind-channel/%s/0", speakerA), componentChan, channelSelectData()),
+		"owner channel":   componentPayload(who, "/owner/bind-channel", componentChan, channelSelectData(boundChannel)),
+		"owner unbind":    componentPayload(who, "/owner/bind-channel", componentChan, channelSelectData()),
+	}
+	for name, payload := range routes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := &fakeManager{
+				statusFn:    statusWithSpeakers(1, true),
+				hasActiveFn: func(snowflake.ID) bool { return true },
+			}
+			h := newInteractionHarness(t, m)
+			wantEphemeral(t, h.dispatch(payload), en.T("setup.blocked_active_raid"))
+			if len(m.bindings) != 0 {
+				t.Errorf("bindings = %v, want none", m.bindings)
 			}
 		})
 	}
@@ -678,7 +741,7 @@ func TestToggleSpeaker(t *testing.T) {
 			toggleFn: func(snowflake.ID, bool) error { return errors.New("raid active") },
 		}
 		h := newInteractionHarness(t, m)
-		wantEphemeral(t, h.dispatch(toggle), "❌ raid active")
+		wantEphemeral(t, h.dispatch(toggle), en.T("err.toggle_failed"))
 	})
 }
 

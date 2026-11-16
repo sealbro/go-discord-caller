@@ -145,7 +145,9 @@ func (h *CommandHandlers) handleToggleSpeaker(guildID snowflake.ID, loc *i18n.Lo
 	}
 
 	if err := h.manager.ToggleSpeaker(guildID, speakerID, !sp.Enabled); err != nil {
-		return e.CreateMessage(ephemeral("❌ " + err.Error()))
+		slog.WarnContext(e.Ctx, "failed to toggle speaker",
+			slog.String("guildID", guildID.String()), slog.String("speakerID", speakerID.String()), slog.Any("err", err))
+		return e.CreateMessage(ephemeral(loc.T("err.toggle_failed")))
 	}
 
 	msg, components := h.buildSpeakersPageMessage(guildID, loc, page)
@@ -178,6 +180,9 @@ func (h *CommandHandlers) handleAddSpeakerButton(guildID snowflake.ID, loc *i18n
 
 // handleBindChannel updates the voice channel bound to a speaker and refreshes the speaker page.
 func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	if h.manager.HasActiveSession(guildID) {
+		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
+	}
 	speakerID, err := snowflake.Parse(e.Vars["speakerID"])
 	if err != nil {
 		return e.CreateMessage(ephemeral(loc.T("err.invalid_speaker_id")))
@@ -215,6 +220,9 @@ func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, loc *i18n.Loca
 
 // handleBindOwnerChannel updates the owner bot's voice channel and refreshes the main setup message.
 func (h *CommandHandlers) handleBindOwnerChannel(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
+	if h.manager.HasActiveSession(guildID) {
+		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
+	}
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)
 	if !ok {
 		return e.CreateMessage(ephemeral(loc.T("err.unexpected_data_type")))

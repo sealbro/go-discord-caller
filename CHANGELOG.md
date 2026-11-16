@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel discarded one queued frame per tick, so a short burst of frames overflowed its queue and was counted in `gdc_fanout_frames_dropped_total` on the `direct` path. It now discards everything queued on each tick, and those drops no longer appear for it.
 - **Command duration histogram could not tell fast from slow**: `gdc_command_duration_seconds` took default buckets sized for milliseconds (0, 5, 10 … 10000), so every command landed in the one bucket up to 5 s and the dashboard's p50, p95 and p99 were interpolation. It now has buckets at 1, 3 and 5 s, around Discord's 3 s deadline, which also cuts its series by three quarters.
+- **A speaker bot that stayed offline was never replaced**: a speaker whose connection stayed down was only logged. It is now replaced after two minutes and retried every two minutes after that.
+- **Failed or doubled reconnects leaked connections**: a failed reconnect left its connection open, and two reconnects for one bot opened two logins. Both are fixed.
+- **Failure replies showed internal error text**: start, join, stop and speaker-toggle failures no longer show the underlying error to the user. It is logged instead.
+- **Channels could be rebound during a raid**: binding or unbinding a channel is now refused while a raid is running, as it already was for roles.
 - **Raids that nobody could hear never timed out**: the idle timeout (`SESSION_IDLE_TIMEOUT`) only asked whether a caller was in a channel, so a raid with a caller sitting muted, or alone with no one to hear them, ran for as long as they stayed. It now counts only callers who are not muted, and only while someone else is in the session's channels. A raid shared with another server keeps the old rule, because that server's members cannot be seen from here.
 
 ### Changed

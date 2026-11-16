@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- **New home page**: the site opens on a page of feature blocks, with a choice between the hosted bot and self-hosting. The previous home is now the Get started page.
-- **Language requests**: a GitHub issue form for asking for a language the bot does not have yet.
-
 ### Fixed
 - **Crash reasons and last telemetry were lost**: when startup or the bot failed, the process exited without flushing telemetry, so the reason never reached the log backend. It now flushes first.
 - **Changes made while shutting down could be lost**: the bindings file is now closed after the bot disconnects, so a late server event is still saved, and a change made after the file is closed is written at once.

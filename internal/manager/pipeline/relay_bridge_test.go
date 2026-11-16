@@ -2,11 +2,18 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/disgoorg/snowflake/v2"
+	hraban "github.com/hraban/opus"
+	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/metric/noop"
 )
 
 // Production, 2026-10-27: with no raid running, the idle goroutine profile
@@ -89,5 +96,41 @@ func TestRelayBridgeNeverStartsAfterEarlyTeardown(t *testing.T) {
 	hub := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
 	if slices.Contains(hub.InputIDs(), RelayInputID) {
 		t.Fatalf("relay bridge started after the raid was torn down; nothing will ever stop it")
+	}
+}
+
+func TestRelayInputsNotRegisteredWhenDecoderFails(t *testing.T) {
+	const (
+		hostGuildID  = snowflake.ID(50)
+		guestGuildID = snowflake.ID(60)
+		channelID    = snowflake.ID(2001)
+	)
+	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("relay_bridge_test"))
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+	gm := metrics.ForGuild(t.Context(), guestGuildID)
+	mx, err := opus.NewMixer(gm.Opus)
+	if err != nil {
+		t.Fatalf("NewMixer: %v", err)
+	}
+	session := ally.NewManager().Create("TESTCODE", hostGuildID, guild.RaidModeGuildCaller)
+	failingDecoder := func(int, int) (*hraban.Decoder, error) { return nil, errors.New("decoder unavailable") }
+
+	got := registerRelayInputs(gm, session, []*DestChannel{{ChannelID: channelID}},
+		map[snowflake.ID]*opus.Mixer{channelID: mx}, failingDecoder)
+
+	if got != nil {
+		t.Errorf("returned %d relay inputs, want none when the decoder cannot be created", len(got))
+	}
+	if slices.Contains(session.GuestGuildIDs(), guestGuildID) {
+		t.Error("guild stayed registered in the session with nothing consuming its relay input")
+	}
+	deadline := time.Now().Add(time.Second)
+	for slices.Contains(mx.InputIDs(), RelayInputID) {
+		if time.Now().After(deadline) {
+			t.Fatal("relay input left on the channel mixer after the decoder failed")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

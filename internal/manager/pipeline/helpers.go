@@ -120,6 +120,10 @@ func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, sessi
 // triggers bridge goroutine exit, which then closes all downstream frame
 // channels).
 func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *ally.Session, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
+	return registerRelayInputs(gm, session, dests, chanMixers, hraban.NewDecoder)
+}
+
+func registerRelayInputs(gm telemetry.GuildMetrics, session *ally.Session, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) []chan<- []byte {
 	type relaySource struct {
 		src *opus.SourceBuffer
 		mx  *opus.Mixer
@@ -142,6 +146,16 @@ func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *
 		return nil
 	}
 
+	dec, err := newDecoder(opus.MixerSampleRate, opus.MixerChannels)
+	if err != nil {
+		slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
+		for _, rs := range relaySources {
+			rs.mx.RemoveInput(RelayInputID)
+			rs.src.Drain()
+		}
+		return nil
+	}
+
 	// Single Opus input channel shared across all destination mixers.
 	// Bridge: decode once, fan Frame into every SourceBuffer via Feed.
 	relayOpusIn := make(chan []byte, opus.AudioChanBuf)
@@ -152,11 +166,6 @@ func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *
 				rs.src.Drain()
 			}
 		}()
-		dec, err := hraban.NewDecoder(opus.MixerSampleRate, opus.MixerChannels)
-		if err != nil {
-			slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
-			return
-		}
 		scratch := make([]int16, opus.MixerPCMBuf)
 		for pkt := range relayOpusIn {
 			if len(pkt) == 0 {

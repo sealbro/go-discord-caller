@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+store.yaml
+*.out
+*.test
+*.prof
+coverage.*
+.claude
+.idea
+docs/internal
+misc/www

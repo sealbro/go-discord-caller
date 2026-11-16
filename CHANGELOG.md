@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **`gdc_bot_online` is one series per server**: the value is now the number of bots (the owner and its speakers) in the server, and the `user_id` label is gone. It was one series per bot per server, always `1`, and only the count was ever read. Use `sum by (guild_id)` where you used `count by (guild_id)`.
+- **Lower CPU during a raid**: mixers that have nothing to play no longer wake 50 times a second, and the per-frame bookkeeping around audio and encryption is cheaper. Audio is unchanged.
+- **Mixer tick metrics skip paused mixers**: `gdc_mixer_tick_duration_milliseconds` and `gdc_mixer_tick_lateness_milliseconds` are recorded only while a mixer is running, so their sample counts drop and paused mixers no longer weigh on their quantiles.
 
 ## [0.15.0] - 2026-11-09
 

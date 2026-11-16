@@ -11,7 +11,8 @@ const audioSourceCap = 3
 
 // AudioSource is the pull interface consumed by the Mixer tick.
 // Producers (fanout dispatch, relay bridge) call Feed on the concrete
-// *SourceBuffer; the mixer calls Pull/Drain/Len via this interface.
+// *SourceBuffer; the mixer calls Pull/Drain/Len via this interface. Sources are
+// detached via Mixer.RemoveInput.
 type AudioSource interface {
 	// Pull removes and returns the oldest buffered frame.
 	// Returns (Frame{}, false) on underrun (no frame available this tick).
@@ -22,8 +23,6 @@ type AudioSource interface {
 	// Len returns the number of frames currently buffered. Used by the paused
 	// branch of Mixer.tick to count silently-dropped frames; racey by nature.
 	Len() int
-	// Close is a lifecycle no-op; sources are detached via Mixer.RemoveInput.
-	Close()
 }
 
 // SourceBuffer is a fixed-capacity lock-protected ring buffer that implements
@@ -145,6 +144,3 @@ func (s *SourceBuffer) Drain() {
 	}
 	s.mu.Unlock()
 }
-
-// Close is a no-op; lifecycle is managed via Mixer.RemoveInput.
-func (s *SourceBuffer) Close() {}

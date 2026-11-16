@@ -55,6 +55,7 @@ type YAMLStore struct {
 	locales    map[snowflake.ID]string
 	disabled   map[botKey]struct{}
 	closed     bool
+	closeOnce  sync.Once
 	// snapshots numbers every serialised state, in the order the states were
 	// taken under mu. Written with mu held, at least for reading.
 	snapshots atomic.Uint64
@@ -149,11 +150,7 @@ func (s *YAMLStore) Close() {
 	s.mu.Lock()
 	s.closed = true
 	s.mu.Unlock()
-	select {
-	case <-s.done:
-	default:
-		close(s.done)
-	}
+	s.closeOnce.Do(func() { close(s.done) })
 	<-s.flushed
 }
 

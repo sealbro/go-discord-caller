@@ -107,9 +107,7 @@ func TestChannelMixerDropsAreAttributedToTheSpeakerBot(t *testing.T) {
 		t.Fatalf("NewMixer: %v", err)
 	}
 	src := opus.NewSourceBuffer(nil)
-	if err := mx.AddInput(dropsSourceID, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	mx.AddInput(dropsSourceID, src)
 
 	// The stuck queue comes first, so its drop is recorded before the
 	// draining speaker is handed the frame this test waits for.

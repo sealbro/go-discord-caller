@@ -38,9 +38,7 @@ func TestChannelMixerSinkGivesEachSpeakerItsOwnBuffer(t *testing.T) {
 		t.Fatalf("NewMixer: %v", err)
 	}
 	src := opus.NewSourceBuffer(nil)
-	if err := mx.AddInput(sourceID, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	mx.AddInput(sourceID, src)
 
 	first := make(chan []byte, opus.AudioChanBuf)
 	second := make(chan []byte, opus.AudioChanBuf)

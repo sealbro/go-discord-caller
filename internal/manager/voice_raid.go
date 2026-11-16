@@ -59,31 +59,35 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	// so its startup cost gets a span of its own. See StartVoiceRaid.
 	setupCtx, endSetup := startPhase(ctx, "voice.session.setup")
 	defer func() { endSetup(err) }()
+	var undo startRollback
+	defer func() {
+		if err != nil {
+			undo.run()
+			endSpanErr(span, err)
+		}
+	}()
 
 	allySession, err := m.sessions.Join(code, guestGuildID)
 	if err != nil {
-		endSpanErr(span, err)
 		return guestMode, err
 	}
+	undo.relay = func() { m.sessions.RemoveGuest(guestGuildID, allySession) }
 	span.SetAttributes(attribute.String("host.mode", string(allySession.HostMode)))
 	if guestMode.WithCapture() && !allySession.HostMode.AllowGuestCapture() {
 		guestMode = guild.RaidModeAllyListener
 	}
 	if guestMode.WithCapture() && !m.hasBoundCallerRole(guestGuildID) {
-		m.sessions.RemoveGuest(guestGuildID, allySession)
-		endSpanErr(span, ErrNoCallerRole)
 		return guestMode, ErrNoCallerRole
 	}
 	allowUser := m.buildAllowUserFilter(guestGuildID)
 	defer m.trackStartupFilter(guestGuildID, allowUser)()
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
+	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
 	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm)
 	if err != nil {
-		m.sessions.RemoveGuest(guestGuildID, allySession)
-		m.clearReconnectState(guestGuildID)
-		endSpanErr(span, err)
 		return guestMode, err
 	}
+	undo.audio = setup.SpeakerCleanup
 
 	// Join the owner bot into its bound channel.
 	// In AllyCaller mode the owner also captures incoming audio (WithVoiceReceiver)
@@ -102,6 +106,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			leaveWithoutCancel(ctx, ownerVoice, guestGuildID)
 		}
 	}
+	undo.owner = guestCleanupOwner
 	ownerCtx, endOwner := startPhase(setupCtx, "voice.bot.attach",
 		botAttr(m.ownerBotID), attribute.String("bot.kind", "owner"))
 	openCtx, endOpen := startPhase(ownerCtx, "voice.conn.open", botAttr(m.ownerBotID))
@@ -126,11 +131,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		if err != nil {
 			endOwner(err)
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
-			setup.SpeakerCleanup()
-			guestCleanupOwner()
-			m.sessions.RemoveGuest(guestGuildID, allySession)
-			m.clearReconnectState(guestGuildID)
-			endSpanErr(span, err)
 			return guestMode, fmt.Errorf("join session: setup owner relay: %w", err)
 		} else {
 			ownerCleanup = cleanup
@@ -175,22 +175,15 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	session, start, pipelineCleanup, err := pipeline.GuestFor(guestMode).Build(ctx, params)
 	endBuild(err)
 	if err != nil {
-		setup.SpeakerCleanup()
-		guestCleanupOwner()
-		m.sessions.RemoveGuest(guestGuildID, allySession)
-		m.clearReconnectState(guestGuildID)
-		endSpanErr(span, err)
 		return guestMode, err
 	}
+	if session.Cleanup != nil {
+		undo.audio = session.Cleanup
+	}
+	undo.pipeline = pipelineCleanup
 	m.starting.hold(guestGuildID)
 	if err := m.commitSession(session); err != nil {
 		m.starting.release(guestGuildID)
-		session.Cleanup()
-		guestCleanupOwner()
-		pipelineCleanup()
-		m.sessions.RemoveGuest(guestGuildID, allySession)
-		m.clearReconnectState(guestGuildID)
-		endSpanErr(span, err)
 		return guestMode, fmt.Errorf("join session: commit: %w", err)
 	}
 	// Initial pause state (per-cascade + listener check) is seeded by the
@@ -325,20 +318,27 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// its own. Its children break that down per Discord round trip.
 	setupCtx, endSetup := startPhase(ctx, "voice.session.setup")
 	defer func() { endSetup(err) }()
+	var undo startRollback
+	defer func() {
+		if err != nil {
+			undo.run()
+			endSpanErr(span, err)
+		}
+	}()
 
 	if _, ok := m.liveBoundChannel(guildID, m.ownerBotID); !ok {
-		endSpanErr(span, ErrNoOwnerChannel)
 		return "", ErrNoOwnerChannel
 	}
 
 	gm := m.metrics.ForGuild(ctx, guildID)
 	allowUser := m.buildAllowUserFilter(guildID)
 	defer m.trackStartupFilter(guildID, allowUser)()
+	undo.reconnect = func() { m.clearReconnectState(guildID) }
 	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm)
 	if err != nil {
-		endSpanErr(span, err)
 		return "", err
 	}
+	undo.audio = setup.SpeakerCleanup
 	// Everything below runs only once every speaker is in, so the owner's phases
 	// sit end-to-end after the speakers' in the trace rather than beside them.
 	ownerCtx, endOwner := startPhase(setupCtx, "voice.bot.attach",
@@ -349,17 +349,14 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	endOpen(err)
 	if err != nil {
 		endOwner(err)
-		setup.SpeakerCleanup()
-		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: join owner channel: %w", err)
 	}
 	if conn == nil {
-		setup.SpeakerCleanup()
 		err = fmt.Errorf("start raid: owner voice connection nil")
 		endOwner(err)
-		endSpanErr(span, err)
 		return "", err
 	}
+	undo.leaveOwner = func() { leaveWithoutCancel(ctx, ov, guildID) }
 	m.prefetchChannelMembers(ownerCtx, conn, m.ownerBotID, guildID)
 	ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceReceiver(allowUser.Check, gm.Receiver())
 	// In multi-channel capture modes the owner bot must also play back the
@@ -374,12 +371,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	endApply(err)
 	if err != nil {
 		endOwner(err)
-		setup.SpeakerCleanup()
-		leaveWithoutCancel(ctx, ov, guildID)
-		m.clearReconnectState(guildID)
-		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
+	undo.owner = ownerCleanup
 	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Check))
 	m.watchVoiceReady(guildID, m.ownerBotID, conn)
 	// The host owner bot always captures, so it starts hearing; the controller
@@ -396,29 +390,13 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
 	allySession, err := m.sessions.Open(allyCode, guildID, mode)
 	if err != nil {
-		setup.SpeakerCleanup()
-		ownerCleanup()
-		leaveWithoutCancel(ctx, ov, guildID)
-		m.clearReconnectState(guildID)
-		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: register relay session: %w", err)
 	}
+	undo.relay = func() { m.sessions.Remove(allySession) }
 	// Owner bot always joins the host channel (join failures abort above), so
 	// it counts as a speaker alongside the pool bots in setup.Joined.
 	speakerCount := countSpeakers(len(setup.Joined), true)
 	span.SetAttributes(attribute.Int("speaker.count", speakerCount))
-	// errCleanup undoes everything that committed after allySession was created.
-	errCleanup := func(built *guild.Session) {
-		if built != nil && built.Cleanup != nil {
-			built.Cleanup()
-		} else {
-			setup.SpeakerCleanup()
-		}
-		ownerCleanup()
-		leaveWithoutCancel(ctx, ov, guildID)
-		m.sessions.Remove(allySession)
-		m.clearReconnectState(guildID)
-	}
 	p := pipeline.Params{
 		GuildID:      guildID,
 		OwnerBotID:   m.ownerBotID,
@@ -441,9 +419,10 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	session, start, err := pipeline.HostFor(mode).Build(ctx, p)
 	endBuild(err)
 	if err != nil {
-		errCleanup(nil)
-		endSpanErr(span, err)
 		return "", err
+	}
+	if session.Cleanup != nil {
+		undo.audio = session.Cleanup
 	}
 	// A /stop during startup cancels this context. Committing after that would
 	// leave the operator's stop undone: nothing watches ctx on the host path
@@ -451,13 +430,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// guest path needs no such check — the goroutine it starts right after its
 	// own commit tears the session down on ctx.Done.)
 	if err = ctx.Err(); err != nil {
-		errCleanup(session)
-		endSpanErr(span, err)
 		return "", err
 	}
 	if err := m.commitSession(session); err != nil {
-		errCleanup(session)
-		endSpanErr(span, err)
 		return "", err
 	}
 	// Initial pause state (per-cascade + listener check) is seeded by the

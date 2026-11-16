@@ -62,9 +62,7 @@ func TestDrainWatcher_ResumesAfterLull(t *testing.T) {
 	m, col := newTestMixer(t)
 
 	src := newSource()
-	if err := m.AddInput(1, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(1, src)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -111,9 +109,7 @@ func TestDrainWatcher_DoesNotOverrideRouterPause(t *testing.T) {
 	m, _ := newTestMixer(t)
 
 	src := newSource()
-	if err := m.AddInput(1, src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(1, src)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()

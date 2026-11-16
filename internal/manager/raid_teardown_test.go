@@ -55,6 +55,29 @@ func TestStartVoiceRaid_OwnerSetupFailureReleasesEverything(t *testing.T) {
 	}
 }
 
+// The speakers join before the owner does, so an owner that cannot join leaves
+// the same things behind as one that joins and then cannot be set up.
+func TestStartVoiceRaid_OwnerJoinFailureReleasesEverything(t *testing.T) {
+	f := withCallerRole(newCallerRoleFixture(t))
+	f.ownerConn.openErr = errors.New("join refused")
+
+	_, cancel, err := startHostRaid(t, f)
+	defer cancel()
+
+	if err == nil {
+		t.Fatal("a raid whose owner bot could not join must fail")
+	}
+	if f.speakerConn.closeCount() == 0 {
+		t.Error("speaker bot was left in its voice channel after the start failed")
+	}
+	if _, ok := f.m.reconnect.loadApplier(testGuildID, roleTestSpeakerID); ok {
+		t.Error("a failed start left a reconnect applier registered")
+	}
+	if f.m.HasActiveSession(testGuildID) {
+		t.Error("a failed start was committed")
+	}
+}
+
 func TestJoinSession_OwnerSetupFailureLeavesOwnerAndFails(t *testing.T) {
 	f := withCallerRole(newCallerRoleFixture(t))
 	f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)

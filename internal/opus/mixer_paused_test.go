@@ -18,9 +18,7 @@ func TestMixerPausedDropsAccumulate(t *testing.T) {
 	frames := generateTestFrames(t, 440, audioSourceCap, testAmplitude)
 
 	src := newSource()
-	if err := m.AddInput(newID(), src); err != nil {
-		t.Fatalf("AddInput: %v", err)
-	}
+	m.AddInput(newID(), src)
 
 	m.SetPaused(true)
 	if !m.Paused() {

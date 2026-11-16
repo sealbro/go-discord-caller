@@ -2,6 +2,7 @@ package opus
 
 import (
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
@@ -11,9 +12,10 @@ import (
 // VoiceProvider streams Opus frames from a channel into a voice connection.
 type VoiceProvider struct {
 	voice.OpusFrameProvider
-	ch      <-chan []byte
-	done    chan struct{}
-	metrics telemetry.OpusRecorder // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
+	ch        <-chan []byte
+	done      chan struct{}
+	closeOnce sync.Once
+	metrics   telemetry.OpusRecorder // zero-value is safe (no-op); drop callback set via OpusRecorder.WithDrop
 	// prev holds the buffer returned by the last ProvideOpusFrame call.
 	// It is recycled via PutEncodedFrame at the start of the next call —
 	// by that point disgo has finished sending the packet over UDP and no
@@ -126,11 +128,7 @@ func (v *VoiceProvider) DiscardFrame() bool {
 }
 
 func (v *VoiceProvider) Close() {
-	select {
-	case <-v.done:
-	default:
-		close(v.done)
-	}
+	v.closeOnce.Do(func() { close(v.done) })
 }
 
 // EmptyVoiceProvider is a no-op OpusFrameProvider that never sends audio.
@@ -143,7 +141,8 @@ func (v *VoiceProvider) Close() {
 // pool.AudioSenderRegistry's job, driven from pool.GuildVoice.Leave.
 type EmptyVoiceProvider struct {
 	voice.OpusFrameProvider
-	done chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 }
 
 func NewEmptyVoiceProvider() *EmptyVoiceProvider {
@@ -158,9 +157,5 @@ func (v *EmptyVoiceProvider) ProvideOpusFrame() ([]byte, error) {
 }
 
 func (v *EmptyVoiceProvider) Close() {
-	select {
-	case <-v.done:
-	default:
-		close(v.done)
-	}
+	v.closeOnce.Do(func() { close(v.done) })
 }

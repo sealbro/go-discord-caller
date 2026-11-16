@@ -3,6 +3,7 @@ package manager
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
@@ -180,6 +181,10 @@ func (m *Service) ReconnectBotChannel(ctx context.Context, guildID, botUserID sn
 	if conn == nil {
 		return // the channel was deleted after the check above
 	}
+	if !m.HasActiveSession(guildID) {
+		leaveWithoutCancel(ctx, gv, guildID)
+		return // session ended while we were joining
+	}
 	// Re-apply voice provider/receiver to the new conn so audio flows again.
 	// Pass ctx (the reconnect context) so the applier's FrameDroppers use a live,
 	// uncancelled context rather than the stale session-start context.
@@ -214,6 +219,17 @@ func (m *Service) clearReconnectState(guildID snowflake.ID) {
 // FrameDropper is created lazily inside the closure using the call-time ctx so
 // metrics never attach to a stale session-start span.
 func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte, handle *opus.FanoutHandle, allowUser func(snowflake.ID) bool) reconnectApplier {
+	var mu sync.Mutex
+	var releaseCurrent func()
+	release := func() {
+		mu.Lock()
+		fn := releaseCurrent
+		releaseCurrent = nil
+		mu.Unlock()
+		if fn != nil {
+			fn()
+		}
+	}
 	return func(ctx context.Context, conn voice.Conn) {
 		gm := m.metrics.ForGuild(ctx, guildID)
 		var provider voice.OpusFrameProvider
@@ -230,6 +246,21 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 			receiver = opus.NewVoiceReceiver(botID, allowUser, gm.Receiver(), handle)
 		}
 		conn.SetOpusFrameReceiver(receiver)
+
+		var closeOnce sync.Once
+		mu.Lock()
+		replaced := releaseCurrent
+		releaseCurrent = func() {
+			closeOnce.Do(func() {
+				provider.Close()
+				receiver.Close()
+			})
+		}
+		mu.Unlock()
+		if replaced != nil {
+			replaced()
+		}
+		m.reconnect.appliers.setRelease(botKey{guildID, botID}, release)
 
 		// Re-arm the re-identify watcher. ReconnectBotChannel reaches this with a
 		// brand-new conn that carries no handler yet; reapplyAfterVoiceReady

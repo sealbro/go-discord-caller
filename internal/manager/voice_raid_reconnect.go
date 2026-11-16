@@ -28,12 +28,21 @@ type botKey struct {
 // It replaces sync.Map to eliminate type assertions on every load and to
 // provide a clear, self-documenting API for the reconnect subsystem.
 type reconnectRegistry struct {
-	mu sync.RWMutex
-	m  map[botKey]reconnectApplier
+	mu       sync.RWMutex
+	m        map[botKey]reconnectApplier
+	releases map[botKey]func()
 }
 
 func newReconnectRegistry() reconnectRegistry {
-	return reconnectRegistry{m: make(map[botKey]reconnectApplier)}
+	return reconnectRegistry{m: make(map[botKey]reconnectApplier), releases: make(map[botKey]func())}
+}
+
+// setRelease registers what to run when k's applier is dropped: closing the
+// provider and receiver its latest run left on the conn.
+func (r *reconnectRegistry) setRelease(k botKey, release func()) {
+	r.mu.Lock()
+	r.releases[k] = release
+	r.mu.Unlock()
 }
 
 func (r *reconnectRegistry) store(k botKey, a reconnectApplier) {
@@ -52,7 +61,12 @@ func (r *reconnectRegistry) load(k botKey) (reconnectApplier, bool) {
 func (r *reconnectRegistry) delete(k botKey) {
 	r.mu.Lock()
 	delete(r.m, k)
+	release := r.releases[k]
+	delete(r.releases, k)
 	r.mu.Unlock()
+	if release != nil {
+		release()
+	}
 }
 
 // inFlightSet tracks in-progress reconnect attempts. It uses sync.Map because

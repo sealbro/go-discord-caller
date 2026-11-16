@@ -29,15 +29,35 @@ type fakeVoiceConn struct {
 	voice.Conn
 	channelID snowflake.ID
 
-	mu     sync.Mutex
-	closes int
+	mu           sync.Mutex
+	closes       int
+	closeCtxErrs []error
+	speakingErr  error
+	onClose      func()
 }
 
 func (c *fakeVoiceConn) Open(context.Context, snowflake.ID, bool, bool) error { return nil }
 
-func (c *fakeVoiceConn) Close(context.Context) {
+func (c *fakeVoiceConn) Close(ctx context.Context) {
 	c.mu.Lock()
 	c.closes++
+	c.closeCtxErrs = append(c.closeCtxErrs, ctx.Err())
+	hook := c.onClose
+	c.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+}
+
+func (c *fakeVoiceConn) closeContextErrors() []error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]error(nil), c.closeCtxErrs...)
+}
+
+func (c *fakeVoiceConn) setOnClose(fn func()) {
+	c.mu.Lock()
+	c.onClose = fn
 	c.mu.Unlock()
 }
 
@@ -48,7 +68,7 @@ func (c *fakeVoiceConn) closeCount() int {
 }
 
 func (c *fakeVoiceConn) ChannelID() *snowflake.ID                               { return &c.channelID }
-func (c *fakeVoiceConn) SetSpeaking(context.Context, voice.SpeakingFlags) error { return nil }
+func (c *fakeVoiceConn) SetSpeaking(context.Context, voice.SpeakingFlags) error { return c.speakingErr }
 func (c *fakeVoiceConn) SetOpusFrameProvider(voice.OpusFrameProvider)           {}
 func (c *fakeVoiceConn) SetOpusFrameReceiver(voice.OpusFrameReceiver)           {}
 func (c *fakeVoiceConn) Gateway() voice.Gateway                                 { return nil }

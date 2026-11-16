@@ -26,9 +26,20 @@ import (
 // what this guard does. It also holds each start's cancel func, so /stop can
 // abort a raid that is still coming up rather than report that there is
 // nothing to stop.
+//
+// Teardown holds a second kind of reservation: while a session of the guild is
+// being torn down, a new start would have its guild-keyed state (the owner's
+// voice conn, the ally registration, the reconnect appliers) removed by the old
+// teardown, so tryBegin refuses until every hold is released.
 type startGuard struct {
 	mu       sync.Mutex
 	inFlight map[snowflake.ID]context.CancelFunc
+	holds    map[snowflake.ID]*teardownHold
+}
+
+type teardownHold struct {
+	n    int
+	idle chan struct{}
 }
 
 // tryBegin reserves guildID for one start. When it returns false a start is
@@ -38,6 +49,9 @@ func (g *startGuard) tryBegin(guildID snowflake.ID, cancel context.CancelFunc) b
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if _, ok := g.inFlight[guildID]; ok {
+		return false
+	}
+	if g.holds[guildID] != nil {
 		return false
 	}
 	if g.inFlight == nil {
@@ -66,4 +80,55 @@ func (g *startGuard) end(guildID snowflake.ID) {
 	g.mu.Lock()
 	delete(g.inFlight, guildID)
 	g.mu.Unlock()
+}
+
+// hold keeps new starts out of guildID until the matching release. Holds nest.
+func (g *startGuard) hold(guildID snowflake.ID) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.holds == nil {
+		g.holds = make(map[snowflake.ID]*teardownHold)
+	}
+	h := g.holds[guildID]
+	if h == nil {
+		h = &teardownHold{idle: make(chan struct{})}
+		g.holds[guildID] = h
+	}
+	h.n++
+}
+
+func (g *startGuard) held(guildID snowflake.ID) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.holds[guildID] != nil
+}
+
+func (g *startGuard) release(guildID snowflake.ID) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	h := g.holds[guildID]
+	if h == nil {
+		return
+	}
+	h.n--
+	if h.n == 0 {
+		close(h.idle)
+		delete(g.holds, guildID)
+	}
+}
+
+// awaitReleased blocks until no hold on guildID remains, or ctx ends.
+func (g *startGuard) awaitReleased(ctx context.Context, guildID snowflake.ID) error {
+	g.mu.Lock()
+	h := g.holds[guildID]
+	g.mu.Unlock()
+	if h == nil {
+		return nil
+	}
+	select {
+	case <-h.idle:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

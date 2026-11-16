@@ -121,18 +121,22 @@ func (m *Service) NextSpeakerID(guildID snowflake.ID) (snowflake.ID, bool) {
 
 // ToggleSpeaker enables or disables a speaker within a specific guild.
 func (m *Service) ToggleSpeaker(guildID, speakerID snowflake.ID, enabled bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.toggleMu.Lock()
+	defer m.toggleMu.Unlock()
 
+	m.mu.Lock()
 	st := m.statuses[guildID]
 	if st == nil {
+		m.mu.Unlock()
 		return fmt.Errorf("toggle speaker: guild %s not registered", guildID)
 	}
 	sp, exists := st.Speakers[speakerID]
 	if !exists {
+		m.mu.Unlock()
 		return fmt.Errorf("toggle speaker: speaker %s not registered in guild %s", speakerID, guildID)
 	}
 	sp.Enabled = enabled
+	m.mu.Unlock()
 	m.store.SetSpeakerEnabled(guildID, speakerID, enabled)
 	return nil
 }

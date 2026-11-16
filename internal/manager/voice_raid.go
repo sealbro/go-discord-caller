@@ -10,6 +10,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -22,6 +23,14 @@ func countSpeakers(joined int, ownerJoined bool) int {
 		return joined + 1
 	}
 	return joined
+}
+
+// leaveWithoutCancel makes gv leave guildID on a context that outlives ctx: a
+// cancelled one makes disgo drop the leave, and the bot stays in the channel.
+func leaveWithoutCancel(ctx context.Context, gv pool.GuildVoice, guildID snowflake.ID) {
+	leaveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), voiceLeaveTimeout)
+	defer cancel()
+	gv.Leave(leaveCtx, guildID)
 }
 
 // JoinSession connects this guild as a guest to an existing relay session.
@@ -61,15 +70,17 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		guestMode = guild.RaidModeAllyListener
 	}
 	if guestMode.WithCapture() && !m.hasBoundCallerRole(guestGuildID) {
-		m.sessions.RemoveGuest(guestGuildID)
+		m.sessions.RemoveGuest(guestGuildID, allySession)
 		endSpanErr(span, ErrNoCallerRole)
 		return guestMode, ErrNoCallerRole
 	}
 	allowUser := m.buildAllowUserFilter(guestGuildID)
+	defer m.trackStartupFilter(guestGuildID, allowUser)()
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm)
 	if err != nil {
-		m.sessions.RemoveGuest(guestGuildID)
+		m.sessions.RemoveGuest(guestGuildID, allySession)
+		m.clearReconnectState(guestGuildID)
 		endSpanErr(span, err)
 		return guestMode, err
 	}
@@ -82,6 +93,15 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	var ownerCleanup func()
 	var ownerChOut chan []byte
 	var ownerHandle *opus.FanoutHandle
+	ownerJoined := false
+	guestCleanupOwner := func() {
+		if ownerCleanup != nil {
+			ownerCleanup()
+		}
+		if ownerJoined {
+			leaveWithoutCancel(ctx, ownerVoice, guestGuildID)
+		}
+	}
 	ownerCtx, endOwner := startPhase(setupCtx, "voice.bot.attach",
 		botAttr(m.ownerBotID), attribute.String("bot.kind", "owner"))
 	openCtx, endOpen := startPhase(ownerCtx, "voice.conn.open", botAttr(m.ownerBotID))
@@ -93,6 +113,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	} else if conn == nil {
 		endOwner(nil)
 	} else {
+		ownerJoined = true
 		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider(guestGm.Provider())
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ownerCtx, conn, m.ownerBotID, guestGuildID)
@@ -105,7 +126,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		if err != nil {
 			endOwner(err)
 			slog.WarnContext(ctx, "guest: failed to setup owner relay", slog.Any("err", err))
-			ownerChOut = nil
+			setup.SpeakerCleanup()
+			guestCleanupOwner()
+			m.sessions.RemoveGuest(guestGuildID, allySession)
+			m.clearReconnectState(guestGuildID)
+			endSpanErr(span, err)
+			return guestMode, fmt.Errorf("join session: setup owner relay: %w", err)
 		} else {
 			ownerCleanup = cleanup
 			ownerHandle = handle
@@ -125,14 +151,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			endDeaf(nil)
 			endOwner(nil)
 			setup.Deaf.Register(m.ownerBotID, !ownerCaptures && ownerUndeafen != nil)
-		}
-	}
-	guestCleanupOwner := func() {
-		if ownerCleanup != nil {
-			ownerCleanup()
-			leaveCtx, leaveCancel := context.WithTimeout(context.Background(), voiceLeaveTimeout)
-			defer leaveCancel()
-			ownerVoice.Leave(leaveCtx, guestGuildID)
 		}
 	}
 
@@ -159,14 +177,19 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if err != nil {
 		setup.SpeakerCleanup()
 		guestCleanupOwner()
-		m.sessions.RemoveGuest(guestGuildID)
+		m.sessions.RemoveGuest(guestGuildID, allySession)
+		m.clearReconnectState(guestGuildID)
 		endSpanErr(span, err)
 		return guestMode, err
 	}
+	m.starting.hold(guestGuildID)
 	if err := m.commitSession(session); err != nil {
-		setup.SpeakerCleanup()
+		m.starting.release(guestGuildID)
+		session.Cleanup()
 		guestCleanupOwner()
-		m.sessions.RemoveGuest(guestGuildID)
+		pipelineCleanup()
+		m.sessions.RemoveGuest(guestGuildID, allySession)
+		m.clearReconnectState(guestGuildID)
 		endSpanErr(span, err)
 		return guestMode, fmt.Errorf("join session: commit: %w", err)
 	}
@@ -187,20 +210,21 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	)
 	go func() {
 		defer func() {
+			defer m.starting.release(guestGuildID)
 			// Clear session first so that voice-leave events fired during cleanup
 			// do not trigger a spurious reconnect via ReconnectBotChannel.
 			m.mu.Lock()
-			if st := m.statuses[guestGuildID]; st != nil {
+			if st := m.statuses[guestGuildID]; st != nil && st.Session == session {
 				st.Session = nil
+				m.clearActiveRouter(guestGuildID)
 			}
-			m.clearActiveRouter(guestGuildID)
 			m.mu.Unlock()
-			setup.SpeakerCleanup()
+			session.Cleanup()
 			guestCleanupOwner()
 			// Remove from relay BEFORE closing channels to prevent send-on-closed-channel.
 			allySession.RemoveGuild(guestGuildID)
 			pipelineCleanup()
-			m.sessions.RemoveGuest(guestGuildID)
+			m.sessions.RemoveGuest(guestGuildID, allySession)
 			m.clearReconnectState(guestGuildID)
 			guestGm.SessionStopped(string(guestMode))
 			span.End()
@@ -246,9 +270,22 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 		m.mu.Unlock()
 		return ErrNoActiveSession
 	}
+	if session.IsGuest && m.starting.held(guildID) {
+		m.mu.Unlock()
+		// The guest's own goroutine owns its teardown; running it twice would
+		// race a start admitted in between.
+		session.Cancel()
+		if err := m.starting.awaitReleased(ctx, guildID); err != nil {
+			return err
+		}
+		slog.InfoContext(ctx, "voice raid stopped", slog.String("guildID", guildID.String()))
+		return nil
+	}
 	status.Session = nil
 	m.clearActiveRouter(guildID)
+	m.starting.hold(guildID)
 	m.mu.Unlock()
+	defer m.starting.release(guildID)
 	session.Cancel()
 	if session.Cleanup != nil {
 		session.Cleanup()
@@ -296,6 +333,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 
 	gm := m.metrics.ForGuild(ctx, guildID)
 	allowUser := m.buildAllowUserFilter(guildID)
+	defer m.trackStartupFilter(guildID, allowUser)()
 	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm)
 	if err != nil {
 		endSpanErr(span, err)
@@ -337,6 +375,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err != nil {
 		endOwner(err)
 		setup.SpeakerCleanup()
+		leaveWithoutCancel(ctx, ov, guildID)
+		m.clearReconnectState(guildID)
 		endSpanErr(span, err)
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
@@ -354,17 +394,30 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	endOwner(nil)
 	setup.Deaf.Register(m.ownerBotID, false)
 	allyCode := m.store.GetOrCreateAllyCode(guildID)
-	allySession := m.sessions.Create(allyCode, guildID, mode)
+	allySession, err := m.sessions.Open(allyCode, guildID, mode)
+	if err != nil {
+		setup.SpeakerCleanup()
+		ownerCleanup()
+		leaveWithoutCancel(ctx, ov, guildID)
+		m.clearReconnectState(guildID)
+		endSpanErr(span, err)
+		return "", fmt.Errorf("start raid: register relay session: %w", err)
+	}
 	// Owner bot always joins the host channel (join failures abort above), so
 	// it counts as a speaker alongside the pool bots in setup.Joined.
 	speakerCount := countSpeakers(len(setup.Joined), true)
 	span.SetAttributes(attribute.Int("speaker.count", speakerCount))
 	// errCleanup undoes everything that committed after allySession was created.
-	errCleanup := func() {
-		setup.SpeakerCleanup()
+	errCleanup := func(built *guild.Session) {
+		if built != nil && built.Cleanup != nil {
+			built.Cleanup()
+		} else {
+			setup.SpeakerCleanup()
+		}
 		ownerCleanup()
-		ov.Leave(ctx, guildID)
-		m.sessions.RemoveHost(guildID)
+		leaveWithoutCancel(ctx, ov, guildID)
+		m.sessions.Remove(allySession)
+		m.clearReconnectState(guildID)
 	}
 	p := pipeline.Params{
 		GuildID:      guildID,
@@ -388,7 +441,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	session, start, err := pipeline.HostFor(mode).Build(ctx, p)
 	endBuild(err)
 	if err != nil {
-		errCleanup()
+		errCleanup(nil)
 		endSpanErr(span, err)
 		return "", err
 	}
@@ -398,12 +451,12 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// guest path needs no such check — the goroutine it starts right after its
 	// own commit tears the session down on ctx.Done.)
 	if err = ctx.Err(); err != nil {
-		errCleanup()
+		errCleanup(session)
 		endSpanErr(span, err)
 		return "", err
 	}
 	if err := m.commitSession(session); err != nil {
-		errCleanup()
+		errCleanup(session)
 		endSpanErr(span, err)
 		return "", err
 	}

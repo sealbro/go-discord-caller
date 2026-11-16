@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Language requests**: a GitHub issue form for asking for a language the bot does not have yet.
 
 ### Fixed
+- **Owner bot left in the voice channel after a failed start**: a start that failed after the owner bot joined, or was stopped halfway, now makes it leave. A guest join whose owner setup fails now reports the error instead of starting a session that relays nothing.
+- **A new `/start` during a stop could be undone by it**: a start sent while a raid is still shutting down is now refused until the stop finishes.
+- **Role grants while a raid was starting were lost**: a caller role given during startup is now applied.
+- **Speaker in the owner's channel**: a start where an enabled speaker shares the owner's channel is now refused up front.
+- **Speaker rejoined after a stop**: a speaker reconnecting just as a raid ended could rejoin its channel and stay there with nothing to relay. It now leaves.
 - **Frame-drop counts on speakers nobody hears**: a speaker alone in its channel discarded one queued frame per tick, so a short burst of frames overflowed its queue and was counted in `gdc_fanout_frames_dropped_total` on the `direct` path. It now discards everything queued on each tick, and those drops no longer appear for it.
 - **Command duration histogram could not tell fast from slow**: `gdc_command_duration_seconds` took default buckets sized for milliseconds (0, 5, 10 … 10000), so every command landed in the one bucket up to 5 s and the dashboard's p50, p95 and p99 were interpolation. It now has buckets at 1, 3 and 5 s, around Discord's 3 s deadline, which also cuts its series by three quarters.
 - **Raids that nobody could hear never timed out**: the idle timeout (`SESSION_IDLE_TIMEOUT`) only asked whether a caller was in a channel, so a raid with a caller sitting muted, or alone with no one to hear them, ran for as long as they stayed. It now counts only callers who are not muted, and only while someone else is in the session's channels. A raid shared with another server keeps the old rule, because that server's members cannot be seen from here.

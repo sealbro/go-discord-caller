@@ -41,12 +41,14 @@ type Service struct {
 	ownerClient        *bot.Client
 	ownerBotID         snowflake.ID
 	bindMu             sync.Mutex
+	toggleMu           sync.Mutex // orders speaker toggles so the store write follows the in-memory change
 	test               config.TestConfig
 	sessions           *ally.Manager
 	metrics            *telemetry.Metrics
 	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
 	rejoinStalled      func(guildID, botUserID snowflake.ID)
 	starting           startGuard    // one raid start per guild at a time
+	startupFilters     sync.Map      // guild ID → *AllowFilter of the raid still starting
 	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
 	reportedCallers    reportedCallers
 	seeding            seedGroup

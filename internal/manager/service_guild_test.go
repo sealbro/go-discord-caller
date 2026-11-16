@@ -355,7 +355,7 @@ func TestGetStatusNamesRelayPeers(t *testing.T) {
 		if _, err := m.sessions.Join(sess.Code, g); err != nil {
 			t.Fatalf("Join: %v", err)
 		}
-		sess.AddGuild(g, nil)
+		sess.AddListener(g, nil)
 	}
 	m.statuses[host].Session = &guild.Session{}
 	m.statuses[namedGuest].Session = &guild.Session{IsGuest: true}

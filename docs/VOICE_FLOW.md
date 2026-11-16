@@ -202,7 +202,11 @@ guild's channel mixers so incoming relay audio is mixed alongside local sources.
 - **Host → Guest**: `Relay Mixer` (SetSink) → `BroadcastFromGuild(hostID)` → guest `relayOpusIn` chan → Bridge (decode once, Feed) → guest channel mixers
 - **Guest → Host**: guest `Relay Mixer` (SetSink) → `BroadcastFromGuild(guestID)` → host `relayOpusIn` chan → Bridge (decode once, Feed) → host channel mixers
 
-The relay bridge is the **only remaining decode goroutine** in the pipeline. It reads packets off `relayOpusIn` (a buffered chan because relay frames arrive from another guild rather than via inline `ReceiveOpusFrame`), decodes once per packet, and `Feed`s a `Frame` into one `SourceBuffer` per destination mixer.
+The relay bridge is the **only remaining decode goroutine** in the pipeline. It reads packets off its inbound chan (buffered because relay frames arrive from another guild rather than via inline `ReceiveOpusFrame`), decodes once per packet, and `Feed`s a `Frame` into one `SourceBuffer` per destination mixer.
+
+Every capturing guild broadcasts a stream of its own and nothing merges them on the way, so in a session of three or more guilds a receiver is sent several. Packets reach the bridge tagged with their source guild (`ally.Session.AddReceiver`), and the bridge keeps **one decoder and one mixer input per peer guild**: two peers talking at once are two inputs, which the mixer sums like two local callers. The first peer heard uses the input registered up front under `RelayInputID`; further peers get theirs when first heard, and lose them when they leave the session.
+
+Speaker queues registered directly with the session (`ally.Session.AddListener`) carry one stream each, so they are only sent the **host's**. A listener guest of a `GuildCaller` host is meant to hear the other guests as well, so it runs one mixer of its own behind the same bridge instead; with a single peer talking that mixer forwards the packets unchanged.
 
 ```mermaid
 ---
@@ -445,7 +449,7 @@ flowchart TD
 Both guilds use the star topology. The host owner is the central hub across guilds.
 
 - **Host**: as in the previous diagram — speakers hear only the owner (via owner's `OpusTargets`); owner hears all local speakers (hub mixer) plus host-side bridge-decoded guest relay packets.
-- **Guest**: all captures `Feed` only the relay mixer (no local cross-channel mixing). **Channel mixers are not created.** Host relay packets arrive on `relayOpusIn` and are written directly to speaker `chOut`s as raw Opus via `ally.Session.AddGuild` (no bridge, no mixer) — same delivery path as `AllyListener`.
+- **Guest**: all captures `Feed` only the relay mixer (no local cross-channel mixing). **Channel mixers are not created.** Host relay packets arrive on `relayOpusIn` and are written directly to speaker `chOut`s as raw Opus via `ally.Session.AddListener` (no bridge, no mixer), which delivers the host's stream only.
 
 ```mermaid
 ---
@@ -567,7 +571,7 @@ This prevents echo: users in channel X would otherwise hear their own audio play
 
 In star mode the rule tightens further:
 - Host: speakers do not get their own per-channel mixer; the owner's `FanoutHandle` writes raw Opus directly to each speaker `chOut` via `OpusTargets`. Speakers `Feed` only the hub mixer (and the relay mixer in mix mode).
-- Guest star: sources `Feed` the relay mixer only, and channel mixers are not created at all — host relay arrives as raw Opus bytes delivered directly to speaker `chOut`s via `ally.Session.AddGuild` (same as `AllyListener`).
+- Guest star: sources `Feed` the relay mixer only, and channel mixers are not created at all — host relay arrives as raw Opus bytes delivered directly to speaker `chOut`s via `ally.Session.AddListener` (host's stream only).
 
 ---
 
@@ -581,7 +585,7 @@ In star mode the rule tightens further:
 | Mixer input        | `SourceBuffer` (cap 3)                                   | Lock-protected ring; `Feed` evicts the oldest frame on overflow so the mixer is always within 60 ms of the live edge. One buffer per (user × destination mixer).                                          |
 | Per-channel mix    | `Mixer.tick` (20 ms timer, `startChannelMixers`)         | Pulls one `Frame` per input; single-source passthrough forwards `Frame.Opus` directly; multi-source mixes PCM and re-encodes.                     |
 | Relay mix          | `Mixer.tick` (relay), `startRelayBroadcast`              | Mixes all sources; `SetSink` calls `ally.Session.BroadcastFromGuild` synchronously. Modelled as a `destSlot` in the router under synthetic `relayDestID = 2` (below the Discord epoch-based snowflake range). |
-| Relay bridge       | one goroutine per attached guild (`registerRelayInputs`) | Reads incoming Opus packets, decodes **once**, `Feed`s a `Frame` into one `SourceBuffer` per destination mixer.                                   |
+| Relay bridge       | one goroutine per attached guild (`registerRelayInputs`) | Reads incoming Opus packets, decodes **once** with the sending guild's own decoder, `Feed`s a `Frame` into that guild's `SourceBuffer` on each destination mixer.                                   |
 | Guest delivery     | `ally.Session.BroadcastFromGuild`                        | One Opus channel per guest guild; direct to `chOut`s (Listener / OneManyAllyCaller) or to `relayOpusIn` for bridge → mixers (AllyCaller).         |
 | Playback           | `VoiceProvider.ProvideOpusFrame`                         | Reads from `chOut`; recycles previous frame to pool; bleed-off drains one extra frame per call when queue depth > 3.                              |
 

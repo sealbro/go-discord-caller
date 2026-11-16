@@ -69,8 +69,8 @@ func TestSession_RouteObserversFireOnMembershipChange(t *testing.T) {
 		}
 	}
 
-	s.AddGuild(guestID, nil)
-	waitFired("AddGuild")
+	s.AddListener(guestID, nil)
+	waitFired("AddListener")
 
 	s.SetCapturing(guestID)
 	waitFired("SetCapturing")
@@ -96,43 +96,61 @@ func TestSession_RemoveGuildDropsItsObserver(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	s.AddGuild(snowflake.ID(3), nil)
+	s.AddListener(snowflake.ID(3), nil)
 	time.Sleep(100 * time.Millisecond)
 	if guestCalls != 0 {
 		t.Errorf("removed observer fired %d time(s) on a later membership change", guestCalls)
 	}
 }
 
-func TestSession_BroadcastReachesEveryGuildAndDropsOnFullChannel(t *testing.T) {
+func TestSession_BroadcastReachesEveryOtherGuildAndDropsOnFullChannel(t *testing.T) {
 	t.Parallel()
+	const listenerID = snowflake.ID(3)
 	s := newTestSession(t)
 
-	hostCh := make(chan []byte, 1)
-	guestCh := make(chan []byte, 1)
-	s.AddGuild(hostID, []chan<- []byte{hostCh})
-	s.AddGuild(guestID, []chan<- []byte{guestCh})
+	type tagged struct {
+		src snowflake.ID
+		pkt []byte
+	}
+	var hostGot, guestGot []tagged
+	s.AddReceiver(hostID, func(src snowflake.ID, pkt []byte) { hostGot = append(hostGot, tagged{src, pkt}) })
+	s.AddReceiver(guestID, func(src snowflake.ID, pkt []byte) { guestGot = append(guestGot, tagged{src, pkt}) })
+	listenerCh := make(chan []byte, 1)
+	s.AddListener(listenerID, []chan<- []byte{listenerCh})
 
-	s.Broadcast([]byte{1, 2, 3})
-	for name, ch := range map[string]chan []byte{"host": hostCh, "guest": guestCh} {
-		select {
-		case got := <-ch:
-			if len(got) != 3 || got[0] != 1 {
-				t.Errorf("%s received %v, want the broadcast packet", name, got)
-			}
-		default:
-			t.Errorf("%s received nothing", name)
+	s.BroadcastFromGuild(hostID, []byte{1, 2, 3})
+	if len(hostGot) != 0 {
+		t.Errorf("host received %d of its own packets", len(hostGot))
+	}
+	if len(guestGot) != 1 || guestGot[0].src != hostID || guestGot[0].pkt[0] != 1 {
+		t.Errorf("guest receiver got %v, want the host's packet tagged with the host", guestGot)
+	}
+	select {
+	case got := <-listenerCh:
+		if len(got) != 3 || got[0] != 1 {
+			t.Errorf("listener received %v, want the host's packet", got)
 		}
+	default:
+		t.Error("listener received nothing")
 	}
 
-	hostCh <- []byte{9}
+	s.BroadcastFromGuild(guestID, []byte{7})
+	if len(hostGot) != 1 || hostGot[0].src != guestID {
+		t.Errorf("host receiver got %v, want the guest's packet tagged with the guest", hostGot)
+	}
+	if len(guestGot) != 1 {
+		t.Errorf("guest received its own packet back")
+	}
+
+	listenerCh <- []byte{9}
 	done := make(chan struct{})
 	go func() {
-		s.Broadcast([]byte{4})
+		s.BroadcastFromGuild(hostID, []byte{4})
 		close(done)
 	}()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
-		t.Fatal("Broadcast blocked on a full channel")
+		t.Fatal("broadcast blocked on a full channel")
 	}
 }

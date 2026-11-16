@@ -5,11 +5,48 @@ on:
     tags:
     - '*.*.*'
 
+permissions:
+  contents: read
+
 jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      stable: ${{ steps.tag.outputs.stable }}
+    steps:
+    -
+      name: Validate tag
+      id: tag
+      env:
+        TAG: ${{ github.ref_name }}
+      run: |
+        if ! printf '%s' "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$'; then
+          echo "Tag is not a semantic version: refusing to release" >&2
+          exit 1
+        fi
+        if printf '%s' "$TAG" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+          echo "stable=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "stable=false" >> "$GITHUB_OUTPUT"
+        fi
+
+  build:
+    needs: validate
+    uses: ./.github/workflows/build.yml
+
+  secrets:
+    needs: validate
+    uses: ./.github/workflows/secrets.yml
+
   release:
+    needs: [validate, build, secrets]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_VERSION: ${{ github.ref_name }}
+      STABLE: ${{ needs.validate.outputs.stable }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
     -
       name: Checkout
@@ -31,9 +68,15 @@ jobs:
     -
       name: Set env
       run: |
-        echo "IMAGE_NAME=go-discord-caller" >> $GITHUB_ENV
-        echo "GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' | cut -d. -f1,2)" >> $GITHUB_ENV
-        echo "RELEASE_VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+        image="${DOCKERHUB_USERNAME}/go-discord-caller"
+        tags="${image}:${RELEASE_VERSION}"
+        if [ "$STABLE" = "true" ]; then
+          tags="${tags},${image}:latest"
+        fi
+        {
+          echo "GO_VERSION=$(grep -m1 '^go ' go.mod | awk '{print $2}' | cut -d. -f1,2)"
+          echo "IMAGE_TAGS=${tags}"
+        } >> "$GITHUB_ENV"
     -
       name: Build and push
       uses: docker/build-push-action@v7
@@ -44,20 +87,21 @@ jobs:
           GO_VERSION=${{ env.GO_VERSION }}
           VERSION=${{ env.RELEASE_VERSION }}
         push: true
-        tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest,${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}
+        tags: ${{ env.IMAGE_TAGS }}
     -
       name: Extract changelog for release
       id: changelog
+      env:
+        REPO_URL: ${{ github.server_url }}/${{ github.repository }}
       run: |
-        version="${{ env.RELEASE_VERSION }}"
-        notes=$(awk "/^## \[${version}\]/{found=1; next} found && /^## \[/{exit} found{print}" CHANGELOG.md)
+        version="$RELEASE_VERSION"
+        notes=$(awk -v v="$version" 'index($0, "## [" v "]") == 1 {found=1; next} found && /^## \[/ {exit} found {print}' CHANGELOG.md)
         notes=$(printf '%s\n' "$notes" | sed -e 's/^[[:space:]]*$//' -e '/./,$!d')
-        repo_url="${{ github.server_url }}/${{ github.repository }}"
         previous=$(git describe --tags --abbrev=0 "${version}^" 2>/dev/null || true)
         if [ -n "$previous" ]; then
-          full_changelog="**Full Changelog**: ${repo_url}/compare/${previous}...${version}"
+          full_changelog="**Full Changelog**: ${REPO_URL}/compare/${previous}...${version}"
         else
-          full_changelog="**Full Changelog**: ${repo_url}/commits/${version}"
+          full_changelog="**Full Changelog**: ${REPO_URL}/commits/${version}"
         fi
         {
           echo "notes<<EOF"
@@ -65,7 +109,7 @@ jobs:
           echo ""
           echo "$full_changelog"
           echo "EOF"
-        } >> $GITHUB_OUTPUT
+        } >> "$GITHUB_OUTPUT"
     -
       name: Create GitHub Release
       uses: softprops/action-gh-release@v3
@@ -73,5 +117,6 @@ jobs:
         tag_name: ${{ env.RELEASE_VERSION }}
         name: ${{ env.RELEASE_VERSION }}
         body: ${{ steps.changelog.outputs.notes }}
+        prerelease: ${{ env.STABLE != 'true' }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

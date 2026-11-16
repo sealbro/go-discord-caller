@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
+	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
@@ -13,14 +14,28 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/opus"
 )
 
-// GuestListenerPipeline handles RaidModeAllyListener: raw Opus relay, no local mixing.
+// GuestListenerPipeline handles RaidModeAllyListener. The host's stream goes
+// to the speakers as raw Opus, with no local mixing — unless the host lets
+// other guests capture into a shared mix (RaidModeGuildCaller). Then those
+// guests are to be heard too, each sends a stream of its own, and a speaker
+// can only play one: the listener runs a single mixer over all of them. With
+// one peer talking the mixer forwards its packets unchanged; the cost is the
+// wait for the next mixer tick, up to 20 ms.
 type GuestListenerPipeline struct{}
 
-func (GuestListenerPipeline) Build(_ context.Context, p GuestParams) (*guild.Session, func(), func(), error) {
+func (GuestListenerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Session, func(), func(), error) {
 	outs := make([]chan<- []byte, len(p.Setup.Outs))
 	copy(outs, p.Setup.Outs)
 	if p.OwnerChOut != nil {
 		outs = append(outs, p.OwnerChOut)
+	}
+	var listenMixer *opus.Mixer
+	if p.AllySession.HostMode == guild.RaidModeGuildCaller {
+		mx, err := opus.NewMixer(p.GuestGM.Opus)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("guest listener: create mixer: %w", err)
+		}
+		listenMixer = mx
 	}
 	session := &guild.Session{
 		GuildID:     p.GuestGuildID,
@@ -31,10 +46,26 @@ func (GuestListenerPipeline) Build(_ context.Context, p GuestParams) (*guild.Ses
 		Speakers:    p.Setup.Speakers,
 		AllowFilter: p.AllowFilter,
 	}
+	var bridge *relayBridge
 	start := func() {
-		p.AllySession.AddGuild(p.GuestGuildID, outs)
+		if listenMixer != nil {
+			dests := []*DestChannel{{ChannelID: ListenDestID, Outs: outs}}
+			mixers := map[snowflake.ID]*opus.Mixer{ListenDestID: listenMixer}
+			bridge = registerRelayInputs(p.GuestGM, p.AllySession, dests, mixers, hraban.NewDecoder)
+			if bridge != nil {
+				// Nothing else decides when this mixer runs, and a peer can
+				// talk at any moment, so it is never auto-paused.
+				alwaysFed := func() bool { return true }
+				StartChannelMixers(ctx, p.GuestGM, dests, mixers, alwaysFed, p.outputBots())
+				return
+			}
+		}
+		p.AllySession.AddListener(p.GuestGuildID, outs)
 	}
 	cleanup := func() {
+		if bridge != nil {
+			bridge.stop()
+		}
 		for _, ch := range outs {
 			close(ch)
 		}
@@ -119,11 +150,11 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 
 	start := func() {
 		// Local destination ChOuts receive audio from the host's broadcast
-		// via AddGuild → ally session → speaker chOut. The router only
+		// via AddListener → ally session → speaker chOut. The router only
 		// handles the outbound (capture → relay) side, so no destination here
 		// is relay-fed — but this guest captures, so peers must know.
 		WatchRelayMembership(p.AllySession, p.GuestGuildID, r, true)
-		p.AllySession.AddGuild(p.GuestGuildID, allOuts)
+		p.AllySession.AddListener(p.GuestGuildID, allOuts)
 		StartGuestRelayBroadcast(ctx, relayMixer, p.AllySession, p.GuestGuildID)
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)
@@ -243,22 +274,22 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 		AutoRouter:    r,
 	}
 
-	// relayInputs is populated inside start() and closed by cleanup(); safe
+	// bridge is populated inside start() and stopped by cleanup(); safe
 	// because the teardown goroutine in JoinSession only runs after start().
-	var relayInputs []chan<- []byte
+	var bridge *relayBridge
 	start := func() {
 		// AllyCaller guests capture, so peers must route their relay-fed
 		// destinations as live for as long as this guest is attached.
 		WatchRelayMembership(p.AllySession, p.GuestGuildID, r, true)
-		relayInputs = RegisterRelayInputs(ctx, p.GuestGM, p.AllySession, destinations, channelMixers)
+		bridge = registerRelayInputs(p.GuestGM, p.AllySession, destinations, channelMixers, hraban.NewDecoder)
 		StartChannelMixers(ctx, p.GuestGM, destinations, channelMixers, relayFeed, bots)
 		StartGuestRelayBroadcast(ctx, relayMixer, p.AllySession, p.GuestGuildID)
 		r.Recompute()
 		r.ScheduleRecompute(500 * time.Millisecond)
 	}
 	cleanup := func() {
-		for _, ch := range relayInputs {
-			close(ch)
+		if bridge != nil {
+			bridge.stop()
 		}
 	}
 	return session, start, cleanup, nil

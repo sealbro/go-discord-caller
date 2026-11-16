@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
+	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -160,8 +161,8 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 			// Guest broadcasts enter at the hub mixer only — speakers don't
 			// receive guest audio in star mode.
 			channelMixers := map[snowflake.ID]*opus.Mixer{p.OV.ChannelID(): hubMixer}
-			relayInputs.register(func() []chan<- []byte {
-				return RegisterRelayInputs(ctx, p.GM, p.AllySession, ownerDests, channelMixers)
+			relayInputs.register(func() *relayBridge {
+				return registerRelayInputs(p.GM, p.AllySession, ownerDests, channelMixers, hraban.NewDecoder)
 			})
 		}
 		WatchRelayMembership(p.AllySession, p.GuildID, r, true)

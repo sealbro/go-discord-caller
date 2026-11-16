@@ -30,6 +30,10 @@ const RelayInputID snowflake.ID = 1
 // RelayInputID uses 1, so 2 is the next safe choice.
 const RelayDestID snowflake.ID = 2
 
+// ListenDestID is the synthetic destination a listener guest's mixer is keyed
+// by when it has to mix several peers' streams; see GuestListenerPipeline.
+const ListenDestID snowflake.ID = 3
+
 // VoiceLeaveTimeout caps how long a voice.Conn.Leave call may block. Used by
 // the speaker-cleanup goroutine spawned in BuildSpeakerCleanup.
 const VoiceLeaveTimeout = 5 * time.Second

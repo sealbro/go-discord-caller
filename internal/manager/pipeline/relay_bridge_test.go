@@ -121,7 +121,7 @@ func TestRelayInputsNotRegisteredWhenDecoderFails(t *testing.T) {
 		map[snowflake.ID]*opus.Mixer{channelID: mx}, failingDecoder)
 
 	if got != nil {
-		t.Errorf("returned %d relay inputs, want none when the decoder cannot be created", len(got))
+		t.Error("returned a relay bridge, want none when the decoder cannot be created")
 	}
 	if slices.Contains(session.GuestGuildIDs(), guestGuildID) {
 		t.Error("guild stayed registered in the session with nothing consuming its relay input")

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
+	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -138,8 +139,8 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 		// as needed. RegisterRelayInputs still attaches guest broadcast feeds
 		// into host channel mixers when AllyCaller guests are permitted.
 		if p.Mode.AllowGuestCapture() {
-			relayInputs.register(func() []chan<- []byte {
-				return RegisterRelayInputs(ctx, p.GM, p.AllySession, destinations, channelMixers)
+			relayInputs.register(func() *relayBridge {
+				return registerRelayInputs(p.GM, p.AllySession, destinations, channelMixers, hraban.NewDecoder)
 			})
 		}
 		// The host always broadcasts, so guests' relay-fed destinations must

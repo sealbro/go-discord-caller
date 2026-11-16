@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Crackle with five or more loud callers**: mixing five or more near-full-volume callers in one channel could wrap and click. It now clamps.
 - **Oversized voice frame was truncated silently**: a frame larger than the buffer is now refused and counted instead of being played cut short.
 - **Leftovers after a start that failed at the owner bot's join**: the speakers' reconnect wiring stayed registered and could be reused by a later raid. A failed start now clears it.
+- **Garbled or missing audio when two other servers talked at once**: in a relay of three or more servers, audio from two servers speaking at the same moment was decoded as one stream and half of it was dropped; a listener-only server got both streams interleaved. Each server's audio is now kept apart and mixed. A listener-only server joined to a host in many-callers mode now hears the other guests too, and in one↔many mode hears the host only.
 
 ### Changed
 - **`gdc_bot_online` is one series per server**: the value is now the number of bots (the owner and its speakers) in the server, and the `user_id` label is gone. It was one series per bot per server, always `1`, and only the count was ever read. Use `sum by (guild_id)` where you used `count by (guild_id)`.

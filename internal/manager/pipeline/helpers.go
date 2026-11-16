@@ -4,10 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/disgoorg/snowflake/v2"
-	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -107,122 +105,6 @@ func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, sessi
 		session.BroadcastFromGuild(guestGuildID, pkt)
 	})
 	go relayMixer.Run(ctx)
-}
-
-// RegisterRelayInputs wires a guild as a relay receiver in the ally session.
-// A single Opus input channel is registered with the session. One bridge
-// goroutine decodes each incoming packet exactly once and fans the resulting
-// opus.Frame out to every destination channel mixer — the relay equivalent of
-// what installFanoutSource sets up for local VoiceReceiver-backed sources
-// (the bridge stays as a goroutine because relay packets arrive on a chan
-// from another guild rather than via inline ReceiveOpusFrame). Returns the
-// single Opus input channel so the caller can close it on teardown (closing
-// triggers bridge goroutine exit, which then closes all downstream frame
-// channels).
-func RegisterRelayInputs(_ context.Context, gm telemetry.GuildMetrics, session *ally.Session, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer) []chan<- []byte {
-	return registerRelayInputs(gm, session, dests, chanMixers, hraban.NewDecoder)
-}
-
-func registerRelayInputs(gm telemetry.GuildMetrics, session *ally.Session, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) []chan<- []byte {
-	type relaySource struct {
-		src *opus.SourceBuffer
-		mx  *opus.Mixer
-	}
-
-	drop := gm.Drop(telemetry.DropPathRelayBridge)
-	relaySources := make([]relaySource, 0, len(dests))
-	for _, dest := range dests {
-		mx := chanMixers[dest.ChannelID]
-		src := opus.NewSourceBuffer(drop)
-		mx.AddInput(RelayInputID, src)
-		relaySources = append(relaySources, relaySource{src: src, mx: mx})
-	}
-	if len(relaySources) == 0 {
-		return nil
-	}
-
-	dec, err := newDecoder(opus.MixerSampleRate, opus.MixerChannels)
-	if err != nil {
-		slog.Error("relay bridge: failed to create decoder", slog.Any("err", err))
-		for _, rs := range relaySources {
-			rs.mx.RemoveInput(RelayInputID)
-			rs.src.Drain()
-		}
-		return nil
-	}
-
-	// Single Opus input channel shared across all destination mixers.
-	// Bridge: decode once, fan Frame into every SourceBuffer via Feed.
-	relayOpusIn := make(chan []byte, opus.AudioChanBuf)
-	go func() {
-		defer func() {
-			for _, rs := range relaySources {
-				rs.mx.RemoveInput(RelayInputID)
-				rs.src.Drain()
-			}
-		}()
-		scratch := make([]int16, opus.MixerPCMBuf)
-		for pkt := range relayOpusIn {
-			if len(pkt) == 0 {
-				opus.PutEncodedFrame(pkt)
-				continue
-			}
-			n, err := dec.Decode(pkt, scratch)
-			if err != nil {
-				slog.Debug("relay bridge: decode failed", slog.Any("err", err))
-				opus.PutEncodedFrame(pkt)
-				continue
-			}
-			now := time.Now()
-			for _, rs := range relaySources {
-				pcm := opus.GetPCM()[:n*opus.MixerChannels]
-				copy(pcm, scratch[:n*opus.MixerChannels])
-				opusCopy := opus.CopyOpusFrame(pkt)
-				rs.src.Feed(opus.Frame{PCM: pcm, Opus: opusCopy, CreatedAt: now})
-			}
-			// Each source took its own copy, so the inbound buffer goes back.
-			opus.PutEncodedFrame(pkt)
-		}
-	}()
-
-	session.AddGuild(gm.GuildID(), []chan<- []byte{relayOpusIn})
-	return []chan<- []byte{relayOpusIn}
-}
-
-// hostRelayInputs owns the relay inputs a host pipeline registers, whose
-// bridge goroutines run until the inputs are closed. A /stop can tear the
-// session down before start registers them, so registering after close is a
-// no-op rather than a leak.
-type hostRelayInputs struct {
-	mu     sync.Mutex
-	chs    []chan<- []byte
-	closed bool
-}
-
-func (r *hostRelayInputs) register(registerFn func() []chan<- []byte) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !r.closed {
-		r.chs = registerFn()
-	}
-}
-
-// close detaches guildID from the session before closing its inputs, so no
-// broadcast can send on a closed channel (see ally.Session.broadcast).
-func (r *hostRelayInputs) close(session *ally.Session, guildID snowflake.ID) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return
-	}
-	r.closed = true
-	if len(r.chs) == 0 {
-		return
-	}
-	session.RemoveGuild(guildID)
-	for _, ch := range r.chs {
-		close(ch)
-	}
 }
 
 // RelayFeedFor returns the router.DestSlot.RelayFeed predicate for guildID:

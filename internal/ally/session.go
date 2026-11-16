@@ -15,12 +15,19 @@ import (
 // Code is the unique 8-character code that identifies an ally session.
 type Code = string
 
+// RelaySink receives every packet another guild broadcasts into a session,
+// with the guild it came from. It takes ownership of pkt and must return it
+// via opus.PutEncodedFrame. It runs on the broadcaster's goroutine with the
+// session lock held, so it must not block or call back into the session.
+type RelaySink func(srcGuildID snowflake.ID, pkt []byte)
+
 // Session is an active cross-guild audio relay owned by one host guild.
-// Guest guilds attach their speaker output channels via AddGuild; the host's
-// relay goroutine calls Broadcast on every incoming packet.
-// In AllyCaller mode guest guilds can also relay captured audio to all OTHER
-// guilds via BroadcastFromGuild — their own guild is excluded to prevent
-// speakers playing back audio to the users who originally produced it.
+// Every capturing guild broadcasts its own stream via BroadcastFromGuild, and
+// nothing merges them on the way: a guild in a session of three is sent two.
+// A guild therefore attaches in one of two ways. AddReceiver takes each peer's
+// packets tagged with their source, for a guild that mixes them. AddListener
+// takes speaker output queues, which carry a single stream each and so are
+// only ever sent the host's.
 type Session struct {
 	Code        Code
 	HostGuildID snowflake.ID
@@ -30,10 +37,11 @@ type Session struct {
 	closeOnce sync.Once
 
 	mu        sync.RWMutex
-	outs      map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
-	guests    map[snowflake.ID]struct{}        // guest guild IDs (host not included)
-	capturing map[snowflake.ID]struct{}        // guilds that may broadcast into the session
-	observers map[snowflake.ID]func()          // guildID → membership-change callback
+	listeners map[snowflake.ID][]chan<- []byte // guildID → speaker chOut channels
+	receivers map[snowflake.ID]RelaySink
+	guests    map[snowflake.ID]struct{} // guest guild IDs (host not included)
+	capturing map[snowflake.ID]struct{} // guilds that may broadcast into the session
+	observers map[snowflake.ID]func()   // guildID → membership-change callback
 }
 
 func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Session {
@@ -42,17 +50,19 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 		HostGuildID: hostGuildID,
 		HostMode:    mode,
 		done:        make(chan struct{}),
-		outs:        make(map[snowflake.ID][]chan<- []byte),
+		listeners:   make(map[snowflake.ID][]chan<- []byte),
+		receivers:   make(map[snowflake.ID]RelaySink),
 		guests:      make(map[snowflake.ID]struct{}),
 		capturing:   make(map[snowflake.ID]struct{}),
 		observers:   make(map[snowflake.ID]func()),
 	}
 }
 
-// broadcast sends pkt to every guild except excludeGuildID.
-// Pass 0 to send to all guilds. Must be called with s.mu held for reading.
-// Takes ownership of pkt: each channel receives its own copy so that
-// VoiceProviders can independently return their buffer to the pool via
+// broadcast sends pkt from srcGuildID to every other guild's receiver and,
+// when the source is the host, to every other guild's listener queues.
+// Must be called with s.mu held for reading.
+// Takes ownership of pkt: each channel and sink receives its own copy so that
+// they can independently return their buffer to the pool via
 // PutEncodedFrame. The original pkt is returned to the pool at the end.
 //
 // LOCK-ORDERING CONTRACT: Send-to-closed-channel would panic here. The
@@ -67,35 +77,35 @@ func newSession(code Code, hostGuildID snowflake.ID, mode guild.RaidMode) *Sessi
 // Both owners follow this order: the host pipelines' session cleanup
 // (`pipeline.hostRelayInputs.close`) and the guest JoinSession defer in
 // `manager/voice_raid.go`. If you add a new caller that
-// owns channels registered via AddGuild, preserve this ordering.
-func (s *Session) broadcast(pkt []byte, excludeGuildID snowflake.ID) {
-	for guildID, chs := range s.outs {
-		if guildID == excludeGuildID {
-			continue
-		}
-		for _, ch := range chs {
-			buf := opus.CopyOpusFrame(pkt)
-			select {
-			case ch <- buf:
-			default:
-				opus.PutEncodedFrame(buf)
+// owns channels registered via AddListener, or a sink that sends on a channel
+// it closes, preserve this ordering.
+func (s *Session) broadcast(pkt []byte, srcGuildID snowflake.ID) {
+	if srcGuildID == s.HostGuildID {
+		for guildID, chs := range s.listeners {
+			if guildID == srcGuildID {
+				continue
+			}
+			for _, ch := range chs {
+				buf := opus.CopyOpusFrame(pkt)
+				select {
+				case ch <- buf:
+				default:
+					opus.PutEncodedFrame(buf)
+				}
 			}
 		}
+	}
+	for guildID, sink := range s.receivers {
+		if guildID == srcGuildID {
+			continue
+		}
+		sink(srcGuildID, opus.CopyOpusFrame(pkt))
 	}
 	opus.PutEncodedFrame(pkt)
 }
 
-// Broadcast fans a packet out to every registered guild's speaker channels.
-// Non-blocking: full channels drop the frame.
-func (s *Session) Broadcast(pkt []byte) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	s.broadcast(pkt, 0)
-}
-
-// BroadcastFromGuild fans a packet out to every guild except srcGuildID.
-// Used by AllyCaller guests to relay captured audio without echoing it back
-// to the guild that produced it.
+// BroadcastFromGuild fans a packet out to every guild except srcGuildID, so a
+// guild's speakers never play back what its own users said.
 // Non-blocking: full channels drop the frame.
 func (s *Session) BroadcastFromGuild(srcGuildID snowflake.ID, pkt []byte) {
 	s.mu.RLock()
@@ -103,16 +113,38 @@ func (s *Session) BroadcastFromGuild(srcGuildID snowflake.ID, pkt []byte) {
 	s.broadcast(pkt, srcGuildID)
 }
 
-// AddGuild registers a guild's speaker output channels with this session.
-func (s *Session) AddGuild(guildID snowflake.ID, chs []chan<- []byte) {
+// AddListener attaches a guild that plays the host's stream straight into its
+// speaker output channels.
+func (s *Session) AddListener(guildID snowflake.ID, chs []chan<- []byte) {
+	s.attach(guildID, func() { s.listeners[guildID] = chs })
+}
+
+// AddReceiver attaches a guild that takes every peer's stream through sink.
+func (s *Session) AddReceiver(guildID snowflake.ID, sink RelaySink) {
+	s.attach(guildID, func() { s.receivers[guildID] = sink })
+}
+
+func (s *Session) attach(guildID snowflake.ID, register func()) {
 	s.mu.Lock()
-	s.outs[guildID] = chs
+	register()
 	if guildID != s.HostGuildID {
 		s.guests[guildID] = struct{}{}
 	}
 	fns := s.observersLocked()
 	s.mu.Unlock()
 	notify(fns)
+}
+
+// Attached reports whether guildID is the host or a guest currently attached,
+// i.e. whether it can still broadcast into the session.
+func (s *Session) Attached(guildID snowflake.ID) bool {
+	if guildID == s.HostGuildID {
+		return true
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.guests[guildID]
+	return ok
 }
 
 // SetCapturing marks guildID as a guild that may broadcast captured audio into
@@ -182,7 +214,8 @@ func notify(fns []func()) {
 // finished sending, after which it is safe to close the channels.
 func (s *Session) RemoveGuild(guildID snowflake.ID) {
 	s.mu.Lock()
-	delete(s.outs, guildID)
+	delete(s.listeners, guildID)
+	delete(s.receivers, guildID)
 	delete(s.guests, guildID)
 	delete(s.capturing, guildID)
 	delete(s.observers, guildID)
@@ -192,7 +225,7 @@ func (s *Session) RemoveGuild(guildID snowflake.ID) {
 }
 
 // GuestGuildIDs returns the IDs of all guest guilds attached to this session
-// (host excluded). O(guests) — the set is maintained by AddGuild/RemoveGuild.
+// (host excluded). O(guests) — the set is maintained on attach and RemoveGuild.
 func (s *Session) GuestGuildIDs() []snowflake.ID {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

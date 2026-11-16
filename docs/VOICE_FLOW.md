@@ -646,7 +646,7 @@ Not an end: the 5 second mixer drain and the router's pause for a channel withou
 
 ## Auto-router-driven pause state
 
-Channel mixers are **paused** when **either** the cascade rule has nothing to mix (no live source feeding the destination) **or** the destination voice channel has no non-bot listeners. A paused mixer calls `src.Drain()` on every input (releasing pooled buffers) and skips mixing, encoding, and sink invocation — eliminating the Opus encode cost for silent or unwatched channels.
+Channel mixers are **paused** when **either** the cascade rule has nothing to mix (no live source feeding the destination) **or** the destination voice channel has no non-bot listeners. A paused mixer skips mixing, encoding, and sink invocation — eliminating the Opus encode cost for silent or unwatched channels. Its inputs discard what they are fed (releasing pooled buffers), so it also drops from a 20 ms tick to a 200 ms one until it is unpaused.
 
 Pause ownership is single: the router computes `shouldRun = destMix && hasListeners` in `applyModes` and calls `SetPaused(!shouldRun)`. Synthetic destinations (relay mixer; `chOuts == nil`) skip the listener check — their consumers are ally guests, not local voice-channel humans.
 

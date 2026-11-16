@@ -134,6 +134,11 @@ type countingSession struct {
 	encryptFails atomic.Int64
 	now          func() time.Time
 
+	// readyUntil is the unix nanos up to which ready may be answered without
+	// asking the backend; 0 forces the question. See Ready.
+	readyUntil atomic.Int64
+	ready      atomic.Bool
+
 	mu    sync.RWMutex
 	known map[godave.UserID]*talkSpurt
 
@@ -224,6 +229,57 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 	s.stats.Record(s.botUserID, string(userID), err)
 	s.stats.RecordPosition(s.botUserID, position, err)
 	return n, err
+}
+
+// readyTTL bounds how stale Ready may be if the backend changes its mind
+// outside the handlers that forget the answer.
+const readyTTL = 100 * time.Millisecond
+
+// Ready remembers the backend's answer. disgo's audio sender and receiver each
+// ask on every 20 ms tick, and golibdave answers with two calls into libdave,
+// for something that changes a few times per session.
+//
+// The answer is forgotten by every handler through which golibdave v0.3.0
+// reconfigures the encryptor, so a transition is seen on the next tick.
+// Decrypt's own check goes to the backend directly: there a stale answer would
+// pass ciphertext through.
+//
+// UPSTREAM(golibdave v0.3.0): the handlers below are assumed to be the only
+// ones that reach setupKeyRatchetForUser for the bot itself.
+func (s *countingSession) Ready() bool {
+	now := s.now().UnixNano()
+	if until := s.readyUntil.Load(); until != 0 && now < until {
+		return s.ready.Load()
+	}
+	ready := s.Session.Ready()
+	s.ready.Store(ready)
+	s.readyUntil.Store(now + int64(readyTTL))
+	return ready
+}
+
+func (s *countingSession) OnSelectProtocolAck(protocolVersion uint16) {
+	s.Session.OnSelectProtocolAck(protocolVersion)
+	s.readyUntil.Store(0)
+}
+
+func (s *countingSession) OnDavePrepareTransition(transitionID uint16, protocolVersion uint16) {
+	s.Session.OnDavePrepareTransition(transitionID, protocolVersion)
+	s.readyUntil.Store(0)
+}
+
+func (s *countingSession) OnDaveExecuteTransition(transitionID uint16) {
+	s.Session.OnDaveExecuteTransition(transitionID)
+	s.readyUntil.Store(0)
+}
+
+func (s *countingSession) OnDaveMLSPrepareCommitTransition(transitionID uint16, commitMessage []byte) {
+	s.Session.OnDaveMLSPrepareCommitTransition(transitionID, commitMessage)
+	s.readyUntil.Store(0)
+}
+
+func (s *countingSession) OnDaveMLSWelcome(transitionID uint16, welcomeMessage []byte) {
+	s.Session.OnDaveMLSWelcome(transitionID, welcomeMessage)
+	s.readyUntil.Store(0)
 }
 
 // Encrypt counts the outcome, and reports the session through onStall once

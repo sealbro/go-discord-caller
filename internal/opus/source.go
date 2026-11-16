@@ -40,6 +40,10 @@ type SourceBuffer struct {
 	head int // index of oldest entry
 	n    int // number of valid entries
 	drop func()
+	// mixer is the mixer this buffer feeds, set by Mixer.AddInput. While that
+	// mixer is paused Feed discards instead of buffering, so the mixer does
+	// not have to tick at the frame rate just to throw the frames away.
+	mixer *Mixer
 }
 
 // NewSourceBuffer creates a SourceBuffer. drop is called each time overflow
@@ -54,8 +58,23 @@ func NewSourceBuffer(drop func()) *SourceBuffer {
 // (its pool buffers returned) and drop is invoked AFTER releasing the mutex
 // so a slow drop callback doesn't widen the buffer's critical section.
 // Safe to call concurrently with Pull/Drain.
+//
+// A frame fed while the buffer's mixer is paused is discarded and counted as
+// a paused drop rather than buffered; that is not an overflow, so drop is not
+// invoked for it.
 func (s *SourceBuffer) Feed(f Frame) (ahead int) {
 	s.mu.Lock()
+	if m := s.mixer; m != nil && m.paused.Load() {
+		s.mu.Unlock()
+		if f.PCM != nil {
+			PutPCM(f.PCM)
+		}
+		if f.Opus != nil {
+			PutEncodedFrame(f.Opus)
+		}
+		m.discardPaused()
+		return 0
+	}
 	ahead = s.n
 	dropped := false
 	if s.n == audioSourceCap {
@@ -78,6 +97,12 @@ func (s *SourceBuffer) Feed(f Frame) (ahead int) {
 		drop()
 	}
 	return ahead
+}
+
+func (s *SourceBuffer) bind(m *Mixer) {
+	s.mu.Lock()
+	s.mixer = m
+	s.mu.Unlock()
 }
 
 // Len returns the number of frames currently buffered. Intended for

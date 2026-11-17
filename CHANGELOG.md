@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`/status` for the capture role**: members with the capture role can now run it. The relay code stays visible to managers only.
 
 ### Fixed
+- **Resetting the relay code piled up messages**: the button now refreshes the setup menu in place and shows the new code at the bottom, instead of posting a new message on every click.
 - **A speaker that was reconnecting at start sat out the whole raid**: `/start` now waits up to 3 s for it to come back. Speakers left out because they are disabled or have no bound channel are now logged.
 
 ## [0.16.0] - 2026-11-16

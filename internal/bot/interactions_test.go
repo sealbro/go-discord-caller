@@ -370,10 +370,17 @@ func TestStatusCommandRendersGuildStatus(t *testing.T) {
 
 func TestResetAllyCodeButton(t *testing.T) {
 	t.Parallel()
-	t.Run("reports the new code", func(t *testing.T) {
+	t.Run("refreshes the setup menu with the new code at the bottom", func(t *testing.T) {
 		h := newInteractionHarness(t, &fakeManager{})
 		resp := h.dispatch(componentPayload(memberJSON(permAdmin), "/setup/reset-ally-code", componentBtn, ""))
-		wantEphemeral(t, resp, en.T("setup.ally_code_reset", "Code", "NEWCODE1"))
+		upd := wantUpdate(t, resp, en.T("setup.main_title"))
+		notice := en.T("setup.ally_code_reset", "Code", "NEWCODE1")
+		if !strings.HasSuffix(*upd.Content, notice) {
+			t.Errorf("menu should end with the reset notice %q, got %q", notice, *upd.Content)
+		}
+		if upd.Components == nil || len(*upd.Components) == 0 {
+			t.Error("the setup menu must keep its components so the next click works")
+		}
 	})
 	t.Run("blocked during a raid", func(t *testing.T) {
 		h := newInteractionHarness(t, &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }})

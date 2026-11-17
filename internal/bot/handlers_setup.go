@@ -42,7 +42,10 @@ func (h *CommandHandlers) handleResetAllyCode(guildID snowflake.ID, loc *i18n.Lo
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 	code := h.manager.ResetAllyCode(guildID)
-	return e.CreateMessage(ephemeral(loc.T("setup.ally_code_reset", "Code", code)))
+	msg, components := h.buildMainSetupMessage(guildID, loc)
+	return e.UpdateMessage(discord.NewMessageUpdate().
+		WithContent(msg + "\n" + loc.T("setup.ally_code_reset", "Code", code)).
+		WithComponents(components...))
 }
 
 // handleMainMenu returns the user to the main setup message.

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A speaker that was reconnecting at start sat out the whole raid**: `/start` now waits up to 3 s for it to come back. Speakers left out because they are disabled or have no bound channel are now logged.
+
 ## [0.16.0] - 2026-11-16
 
 ### Added

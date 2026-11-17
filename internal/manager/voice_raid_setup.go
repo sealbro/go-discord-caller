@@ -7,12 +7,14 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -87,9 +89,17 @@ func boundSpeakers(st store.Store, guildID snowflake.ID, speakers []guild.Speake
 	var candidates []guild.Speaker
 	for _, sp := range speakers {
 		if !sp.Enabled {
+			slog.Info("speaker skipped: disabled",
+				slog.String("speakerID", sp.ID.String()),
+				slog.String("guildID", guildID.String()),
+			)
 			continue
 		}
 		if _, ok := st.GetBoundChannel(guildID, sp.ID); !ok {
+			slog.Info("speaker skipped: no bound channel",
+				slog.String("speakerID", sp.ID.String()),
+				slog.String("guildID", guildID.String()),
+			)
 			continue
 		}
 		candidates = append(candidates, sp)
@@ -127,6 +137,36 @@ func (m *Service) withLiveChannel(guildID snowflake.ID, candidates []guild.Speak
 	return live
 }
 
+// speakerReconnectWait bounds how long a raid start waits for a pool bot whose
+// gateway is mid-reconnect; a bot still down after it is left out.
+const speakerReconnectWait = 3 * time.Second
+
+// speakerVoiceWhenReconnected is speakerVoice, but a bot the pool knows and
+// reports as not connected is given speakerReconnectWait to come back.
+func (m *Service) speakerVoiceWhenReconnected(ctx context.Context, guildID, botUserID snowflake.ID) (pool.GuildVoice, bool) {
+	if gv, ok := m.speakerVoice(guildID, botUserID); ok {
+		return gv, true
+	}
+	if !slices.Contains(m.poolSvc.GetIDs(), botUserID) {
+		return pool.GuildVoice{}, false
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(speakerReconnectWait)
+	for {
+		select {
+		case <-ctx.Done():
+			return pool.GuildVoice{}, false
+		case <-deadline:
+			return pool.GuildVoice{}, false
+		case <-ticker.C:
+			if gv, ok := m.speakerVoice(guildID, botUserID); ok {
+				return gv, true
+			}
+		}
+	}
+}
+
 // joinSpeakers joins the given candidate speakers in parallel; callers filter
 // with boundSpeakers first.
 // When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
@@ -137,7 +177,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 	for _, sp := range candidates {
 		go func(sp guild.Speaker) {
 			defer wg.Done()
-			gv, ok := m.speakerVoice(guildID, sp.ID)
+			gv, ok := m.speakerVoiceWhenReconnected(ctx, guildID, sp.ID)
 			if !ok {
 				slog.WarnContext(ctx, "speaker not in pool", slog.String("speakerID", sp.ID.String()))
 				return

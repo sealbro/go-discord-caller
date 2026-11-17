@@ -28,7 +28,7 @@ err.no_more_tokens: "❌ Все speaker-токены из пула уже доб
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Настройка недоступна во время активного рейда. Сначала остановите рейд."
-setup.ally_code_reset: "🔑 Ally-код сброшен. Новый relay-код: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Ally-код сброшен."
 
 raid.already_active: "⚠️ На этом сервере уже идёт голосовой рейд."
 raid.none_active: "⚠️ На этом сервере нет активного голосового рейда."
@@ -55,7 +55,6 @@ permissions.warning_header: "\n\n⚠️ **Некоторые боты не мо�
 raid.skipped_missing_channel: "\n\n⚠️ **Пропущены — их голосовой канал больше не существует (выберите новый в `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Настройка Speaker-ботов**"
 setup.roles_title: "**Привязка ролей**"
 setup.speakers_title: "**Привязка Speaker-ботов** — страница {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Speaker-боты ещё не зарегистрированы._"

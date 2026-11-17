@@ -28,7 +28,7 @@ err.no_more_tokens: "❌ Wszystkie tokeny speakerów z puli zostały już dodane
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Konfiguracja jest niedostępna, gdy voice raid jest aktywny. Najpierw zatrzymaj raid."
-setup.ally_code_reset: "🔑 Kod ally zresetowany. Nowy kod relay: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Kod ally zresetowany."
 
 raid.already_active: "⚠️ Na tym serwerze już trwa voice raid."
 raid.none_active: "⚠️ Na tym serwerze nie ma aktywnego voice raidu."
@@ -55,7 +55,6 @@ permissions.warning_header: "\n\n⚠️ **Niektóre boty nie mogą uzyskać dost
 raid.skipped_missing_channel: "\n\n⚠️ **Pominięte — ich kanał głosowy już nie istnieje (wybierz nowy w `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Konfiguracja speakerów**"
 setup.roles_title: "**Powiązania ról**"
 setup.speakers_title: "**Powiązania speakerów** — Strona {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Brak zarejestrowanych speakerów._"

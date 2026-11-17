@@ -28,7 +28,7 @@ err.no_more_tokens: "❌ Alle Speaker-Tokens aus dem Pool wurden bereits hinzuge
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Die Einrichtung ist während eines aktiven Voice-Raids nicht verfügbar. Stoppe zuerst den Raid."
-setup.ally_code_reset: "🔑 Ally-Code zurückgesetzt. Neuer Relay-Code: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Ally-Code zurückgesetzt."
 
 raid.already_active: "⚠️ Auf diesem Server läuft bereits ein Voice-Raid."
 raid.none_active: "⚠️ Auf diesem Server läuft kein Voice-Raid."
@@ -55,7 +55,6 @@ permissions.warning_header: "\n\n⚠️ **Einige Bots können nicht auf ihren Ka
 raid.skipped_missing_channel: "\n\n⚠️ **Übersprungen — ihr Sprachkanal existiert nicht mehr (wähle in `/setup` einen neuen):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Speaker-Einrichtung**"
 setup.roles_title: "**Rollen-Bindungen**"
 setup.speakers_title: "**Speaker-Bindungen** — Seite {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Noch keine Speaker registriert._"

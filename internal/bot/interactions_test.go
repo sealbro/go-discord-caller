@@ -208,6 +208,12 @@ func wantEphemeral(t *testing.T, r interactionResponse, want string) {
 	}
 }
 
+// mainMenuStart is how the setup main menu begins when no guild name is set:
+// its first status line, in the localizer's language.
+func mainMenuStart(l *i18n.Localizer) string {
+	return "**" + l.T("status.capture_role") + ":**"
+}
+
 func wantUpdate(t *testing.T, r interactionResponse, prefix string) discord.MessageUpdate {
 	t.Helper()
 	if r.typ != discord.InteractionResponseTypeUpdateMessage {
@@ -322,7 +328,7 @@ func TestSetupCommand(t *testing.T) {
 		h := newInteractionHarness(t, &fakeManager{})
 		resp := h.dispatch(slashPayload(memberJSON(permAdmin), "setup"))
 		msg := resp.data.(discord.MessageCreate)
-		if !strings.HasPrefix(msg.Content, en.T("setup.main_title")) || len(msg.Components) == 0 {
+		if !strings.HasPrefix(msg.Content, mainMenuStart(en)) || len(msg.Components) == 0 {
 			t.Errorf("setup message = %q with %d components, want the main menu", msg.Content, len(msg.Components))
 		}
 		if msg.Flags&discord.MessageFlagEphemeral == 0 {
@@ -371,12 +377,19 @@ func TestStatusCommandRendersGuildStatus(t *testing.T) {
 func TestResetAllyCodeButton(t *testing.T) {
 	t.Parallel()
 	t.Run("refreshes the setup menu with the new code at the bottom", func(t *testing.T) {
-		h := newInteractionHarness(t, &fakeManager{})
+		h := newInteractionHarness(t, &fakeManager{statusFn: func(g snowflake.ID) guild.Status {
+			st := guild.NewStatus(g, 0)
+			st.AllyCode = "NEWCODE1"
+			return *st
+		}})
 		resp := h.dispatch(componentPayload(memberJSON(permAdmin), "/setup/reset-ally-code", componentBtn, ""))
-		upd := wantUpdate(t, resp, en.T("setup.main_title"))
-		notice := en.T("setup.ally_code_reset", "Code", "NEWCODE1")
+		upd := wantUpdate(t, resp, mainMenuStart(en))
+		notice := en.T("setup.ally_code_reset")
 		if !strings.HasSuffix(*upd.Content, notice) {
 			t.Errorf("menu should end with the reset notice %q, got %q", notice, *upd.Content)
+		}
+		if n := strings.Count(*upd.Content, "NEWCODE1"); n != 1 {
+			t.Errorf("new code appears %d times in the menu, want once:\n%s", n, *upd.Content)
 		}
 		if upd.Components == nil || len(*upd.Components) == 0 {
 			t.Error("the setup menu must keep its components so the next click works")
@@ -548,7 +561,7 @@ func TestSetupNavigation(t *testing.T) {
 	who := memberJSON(permAdmin)
 
 	wantUpdate(t, h.dispatch(componentPayload(who, "/roles/menu", componentBtn, "")), en.T("setup.roles_title"))
-	wantUpdate(t, h.dispatch(componentPayload(who, "/speakers/menu", componentBtn, "")), en.T("setup.main_title"))
+	wantUpdate(t, h.dispatch(componentPayload(who, "/speakers/menu", componentBtn, "")), mainMenuStart(en))
 	wantUpdate(t, h.dispatch(componentPayload(who, "/speakers/page/0", componentBtn, "")),
 		en.T("setup.speakers_title", "Page", 1, "Total", 1))
 	// A malformed page falls back to the first page instead of failing.
@@ -685,8 +698,8 @@ func TestLocaleMenuRedrawsInNewLocale(t *testing.T) {
 	who := memberJSON(permAdmin)
 	de := i18n.MustBundle().For("de", discord.LocaleEnglishUS)
 
-	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, `"values":["de"]`)), de.T("setup.main_title"))
-	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, fmt.Sprintf(`"values":[%q]`, localeAutoValue))), en.T("setup.main_title"))
+	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, `"values":["de"]`)), mainMenuStart(de))
+	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, fmt.Sprintf(`"values":[%q]`, localeAutoValue))), mainMenuStart(en))
 
 	want := []bindCall{{"bind-locale", "", "de"}, {"unbind-locale", "", ""}}
 	if fmt.Sprint(m.bindings) != fmt.Sprint(want) {
@@ -703,9 +716,9 @@ func TestChannelMenuBindings(t *testing.T) {
 		name, customID, data, title string
 		want                        bindCall
 	}{
-		{"bind owner", "/owner/bind-channel", channelSelectData(boundChannel), en.T("setup.main_title"),
+		{"bind owner", "/owner/bind-channel", channelSelectData(boundChannel), mainMenuStart(en),
 			bindCall{"bind-channel", fakeOwnerBotID.String(), boundChannel.String()}},
-		{"unbind owner", "/owner/bind-channel", channelSelectData(), en.T("setup.main_title"),
+		{"unbind owner", "/owner/bind-channel", channelSelectData(), mainMenuStart(en),
 			bindCall{"unbind-channel", fakeOwnerBotID.String(), ""}},
 		{"bind speaker", speakerPath, channelSelectData(boundChannel), speakersTitle,
 			bindCall{"bind-channel", speakerA.String(), boundChannel.String()}},

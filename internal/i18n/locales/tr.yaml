@@ -28,7 +28,7 @@ err.no_more_tokens: "❌ Havuzdaki tüm speaker token'ları zaten eklendi."
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Sesli baskın aktifken kurulum kullanılamaz. Önce baskını durdurun."
-setup.ally_code_reset: "🔑 Ally kodu sıfırlandı. Yeni aktarma kodu: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Ally kodu sıfırlandı."
 
 raid.already_active: "⚠️ Bu sunucuda zaten aktif bir sesli baskın var."
 raid.none_active: "⚠️ Bu sunucuda aktif bir sesli baskın yok."
@@ -55,7 +55,6 @@ permissions.warning_header: "\n\n⚠️ **Bazı botlar kanallarına erişemiyor 
 raid.skipped_missing_channel: "\n\n⚠️ **Atlandı — ses kanalları artık mevcut değil (`/setup` içinden yenisini seçin):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Speaker Kurulumu**"
 setup.roles_title: "**Rol Bağlamaları**"
 setup.speakers_title: "**Speaker Bağlamaları** — Sayfa {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Henüz kayıtlı speaker yok._"

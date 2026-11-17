@@ -29,7 +29,7 @@ err.no_more_tokens: "❌ All speaker tokens from the pool have already been adde
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Setup is not available while a voice raid is active. Stop the raid first."
-setup.ally_code_reset: "🔑 Ally code reset. New relay code: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Ally code reset."
 
 raid.already_active: "⚠️ A voice raid is already active in this server."
 raid.none_active: "⚠️ There is no active voice raid in this server."
@@ -56,7 +56,6 @@ permissions.warning_header: "\n\n⚠️ **Some bots cannot access their channel 
 raid.skipped_missing_channel: "\n\n⚠️ **Skipped — their voice channel no longer exists (pick a new one in `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Speaker Setup**"
 setup.roles_title: "**Role Bindings**"
 setup.speakers_title: "**Speaker Bindings** — Page {{.Page}}/{{.Total}}"
 setup.no_speakers: "_No speakers registered yet._"

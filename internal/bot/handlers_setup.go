@@ -41,10 +41,10 @@ func (h *CommandHandlers) handleResetAllyCode(guildID snowflake.ID, loc *i18n.Lo
 	if h.manager.HasActiveSession(guildID) {
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
-	code := h.manager.ResetAllyCode(guildID)
+	h.manager.ResetAllyCode(guildID)
 	msg, components := h.buildMainSetupMessage(guildID, loc)
 	return e.UpdateMessage(discord.NewMessageUpdate().
-		WithContent(msg + "\n" + loc.T("setup.ally_code_reset", "Code", code)).
+		WithContent(msg + "\n" + loc.T("setup.ally_code_reset")).
 		WithComponents(components...))
 }
 

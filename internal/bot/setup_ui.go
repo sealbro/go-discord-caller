@@ -57,7 +57,7 @@ func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID, loc *i18n.
 	buttons = append(buttons, discord.NewSecondaryButton(loc.T("btn.reset_ally_code"), "/setup/reset-ally-code"))
 	components = append(components, discord.NewActionRow(buttons...))
 
-	return loc.T("setup.main_title") + "\n" + status.Render(loc), components
+	return status.Render(loc), components
 }
 
 // buildLocaleSelect builds the per-guild language select menu. The currently

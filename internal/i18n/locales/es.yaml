@@ -15,6 +15,7 @@ cmd.status.description: "Mostrar las vinculaciones actuales de speakers y el est
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Necesitas el permiso «Administrar servidor» o el rol de gestor para usar este comando."
+err.need_status_access: "❌ Necesitas el permiso «Administrar servidor», el rol de gestor o el rol de captura del servidor para usar este comando."
 err.need_admin: "❌ Necesitas el permiso «Administrador» para usar este comando."
 err.role_not_bindable: "❌ No se puede usar este rol: elige un rol normal, no @everyone ni un rol gestionado por un bot."
 err.guild_only: "este comando solo se puede usar dentro de un servidor"
@@ -27,7 +28,7 @@ err.no_more_tokens: "❌ Todos los tokens de speaker del pool ya han sido añadi
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ La configuración no está disponible mientras un voice raid está activo. Detén el raid primero."
-setup.ally_code_reset: "🔑 Código ally restablecido. Nuevo código de relay: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Código ally restablecido."
 
 raid.already_active: "⚠️ Ya hay un voice raid activo en este servidor."
 raid.none_active: "⚠️ No hay ningún voice raid activo en este servidor."
@@ -45,6 +46,9 @@ raid.stop_failed: "❌ Error al detener el voice raid"
 raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. Los speakers se están conectando a sus canales."
 raid.started: "🔴 **Voice raid iniciado.** Los speakers se han unido a sus canales."
 raid.started_with_code: "🔴 **Voice raid iniciado.** Los speakers se han unido a sus canales. Código de relay: `{{.Code}}`"
+raid.speakers_joined:
+  one: "{{.Joined}} de {{.Count}} speaker se unió a su canal."
+  other: "{{.Joined}} de {{.Count}} speakers se unieron a sus canales."
 raid.deafen_unavailable: "⚠️ Consejo: coloca el rol del bot owner por encima de los roles de los bots speaker en Ajustes del servidor → Roles para reducir la carga y el riesgo de cortes de audio."
 raid.stopped: "⚫ **Voice raid detenido.** Todos los speakers han abandonado sus canales."
 
@@ -53,7 +57,6 @@ permissions.warning_header: "\n\n⚠️ **Algunos bots no pueden acceder a su ca
 raid.skipped_missing_channel: "\n\n⚠️ **Omitidos: su canal de voz ya no existe (elige uno nuevo en `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Configuración de speakers**"
 setup.roles_title: "**Vinculación de roles**"
 setup.speakers_title: "**Vinculación de speakers** — Página {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Aún no hay speakers registrados._"
@@ -77,6 +80,7 @@ btn.bind_roles: "🎭 Vincular roles"
 btn.bind_speakers: "⚙️ Vincular speakers"
 btn.add_speaker: "➕ Añadir speaker"
 btn.reset_ally_code: "🔄 Restablecer código ally"
+btn.status: "📊 Estado"
 btn.invite: "🔗 Invitar al servidor"
 btn.enable: "Activar"
 btn.disable: "Desactivar"
@@ -85,16 +89,24 @@ btn.disable: "Desactivar"
 status.guild: "Servidor"
 status.capture_role: "Rol de captura"
 status.manager_role: "Rol de gestor"
-status.owner_channel: "Canal del bot owner"
 status.not_set: "no establecido"
 status.capture_role_required: "⚠️ sin configurar — obligatorio: los voice raids no pueden iniciarse"
 status.unbound: "sin vincular"
+status.speakers_ready:
+  one: "✅ {{.Count}} listo"
+  other: "✅ {{.Count}} listos"
+status.speakers_disabled:
+  one: "🔇 {{.Count}} desactivado"
+  other: "🔇 {{.Count}} desactivados"
+status.speakers_unbound_count:
+  one: "⚠️ {{.Count}} sin vincular"
+  other: "⚠️ {{.Count}} sin vincular"
 status.ally_code: "Código aliado"
 status.raid: "Voice raid"
 status.raid_inactive: "⚫ inactivo"
-status.speakers_header:
-  one: "Speakers ({{.Count}}):"
-  other: "Speakers ({{.Count}}):"
+status.bots_header:
+  one: "Bots ({{.Count}}):"
+  other: "Bots ({{.Count}}):"
 status.raid_active:
   one: "🔴 activo ({{.Count}} speaker conectado)"
   other: "🔴 activo ({{.Count}} speakers conectados)"

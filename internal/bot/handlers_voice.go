@@ -130,7 +130,8 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			h.followUp(e, loc.T("raid.start_blocked_permissions")+formatAccessWarnings(loc, warnings))
 			return
 		}
-		skipped := formatSkippedSpeakers(loc, h.manager.SpeakersWithMissingChannel(guildID))
+		missing := h.manager.SpeakersWithMissingChannel(guildID)
+		skipped := formatSkippedSpeakers(loc, missing)
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
@@ -171,12 +172,27 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		if readiness := h.manager.CheckDeafenReadiness(guildID); !readiness.OK() {
 			msg += "\n\n" + loc.T("raid.deafen_unavailable")
 		}
+		msg += h.speakersJoinedLine(loc, guildID, len(missing))
 		msg += skipped
 		slog.InfoContext(cmdCtx, "voice raid started")
-		h.followUp(e, msg)
+		h.followUpWithStatusButton(e, loc, msg)
 	}()
 
 	return nil
+}
+
+// speakersJoinedLine reports how many of the speakers the raid tried are now in
+// their channels, or nothing when the raid has already ended. Speakers whose
+// bound channel is gone are listed separately and not tried, so they are left
+// out of the total, which then matches the start log's candidate count.
+func (h *CommandHandlers) speakersJoinedLine(loc *i18n.Localizer, guildID snowflake.ID, missingChannel int) string {
+	status := h.manager.GetStatus(guildID)
+	if status.Session == nil {
+		return ""
+	}
+	ready, _, _ := status.SpeakerCounts()
+	tried := max(ready-missingChannel, 0)
+	return "\n" + loc.T("raid.speakers_joined", "Joined", len(status.Session.Speakers), "Count", tried)
 }
 
 // handleStopVoiceRaid stops the active voice raid.
@@ -208,13 +224,40 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, loc *i18n.Lo
 }
 
 // handleStatus responds with an ephemeral snapshot of the guild's configuration and
-// session state. Authorization handled by withManager middleware.
+// session state. Authorization handled by withManagerOrCaller middleware; the
+// relay code lets another server join the raid, so only managers see it.
 func (h *CommandHandlers) handleStatus(guildID snowflake.ID, loc *i18n.Localizer, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	status := h.manager.GetStatus(guildID)
 	return e.CreateMessage(discord.MessageCreate{
-		Content: status.Render(loc),
+		Content: h.statusContent(guildID, loc, e.Member()),
 		Flags:   discord.MessageFlagEphemeral,
 	})
+}
+
+// handleStatusButton answers a click with the current status as its own
+// message, leaving the message that carries the button as it was.
+func (h *CommandHandlers) handleStatusButton(guildID snowflake.ID, loc *i18n.Localizer, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+	return e.CreateMessage(ephemeral(h.statusContent(guildID, loc, e.Member())))
+}
+
+func (h *CommandHandlers) statusContent(guildID snowflake.ID, loc *i18n.Localizer, member *discord.ResolvedMember) string {
+	status := h.manager.GetStatus(guildID)
+	if !h.isManagerAuthorized(guildID, member) {
+		status.AllyCode = ""
+	}
+	return status.Render(loc)
+}
+
+func statusButtonRow(loc *i18n.Localizer) discord.LayoutComponent {
+	return discord.NewActionRow(discord.NewSecondaryButton(loc.T("btn.status"), "/status/show"))
+}
+
+// followUpWithStatusButton is followUp with a button that shows the status.
+func (h *CommandHandlers) followUpWithStatusButton(e *handler.CommandEvent, loc *i18n.Localizer, content string) {
+	msg := ephemeral(content)
+	msg.Components = []discord.LayoutComponent{statusButtonRow(loc)}
+	if _, err := e.CreateFollowupMessage(msg); err != nil {
+		slog.Warn("failed to send follow-up message", slog.Any("err", err))
+	}
 }
 
 // followUp sends an ephemeral follow-up message after a deferred response.

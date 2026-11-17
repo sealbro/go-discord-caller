@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -54,6 +55,7 @@ type interactionHarness struct {
 	router    *handler.Mux
 	client    *bot.Client
 	followups chan string
+	buttons   chan []string
 }
 
 type interactionResponse struct {
@@ -64,10 +66,33 @@ type interactionResponse struct {
 func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 	t.Helper()
 	followups := make(chan string, 4)
+	buttons := make(chan []string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read follow-up: %v", err)
+		}
 		var msg discord.MessageCreate
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		if err := json.Unmarshal(body, &msg); err != nil {
 			t.Errorf("decode follow-up: %v", err)
+		}
+		var raw struct {
+			Components []struct {
+				Components []struct {
+					CustomID string `json:"custom_id"`
+				} `json:"components"`
+			} `json:"components"`
+		}
+		_ = json.Unmarshal(body, &raw)
+		var ids []string
+		for _, row := range raw.Components {
+			for _, c := range row.Components {
+				ids = append(ids, c.CustomID)
+			}
+		}
+		select {
+		case buttons <- ids:
+		default:
 		}
 		followups <- msg.Content
 		w.Header().Set("Content-Type", "application/json")
@@ -87,6 +112,7 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 			Rest:   rest.New(rest.NewClient("", rest.WithURL(srv.URL))),
 		},
 		followups: followups,
+		buttons:   buttons,
 	}
 }
 
@@ -208,6 +234,12 @@ func wantEphemeral(t *testing.T, r interactionResponse, want string) {
 	}
 }
 
+// mainMenuStart is how the setup main menu begins when no guild name is set:
+// its first status line, in the localizer's language.
+func mainMenuStart(l *i18n.Localizer) string {
+	return "**" + l.T("status.capture_role") + ":**"
+}
+
 func wantUpdate(t *testing.T, r interactionResponse, prefix string) discord.MessageUpdate {
 	t.Helper()
 	if r.typ != discord.InteractionResponseTypeUpdateMessage {
@@ -264,7 +296,7 @@ func TestCommandPermissions(t *testing.T) {
 		{"start", permNone, "err.need_manager"},
 		{"start", permManage, ""},
 		{"stop", permNone, "err.need_manager"},
-		{"status", permNone, "err.need_manager"},
+		{"status", permNone, "err.need_status_access"},
 		{"status", permManage, ""},
 	}
 	for _, tt := range tests {
@@ -277,11 +309,120 @@ func TestCommandPermissions(t *testing.T) {
 				wantEphemeral(t, resp, en.T(tt.denied))
 				return
 			}
-			if got == en.T("err.need_admin") || got == en.T("err.need_manager") {
+			if got == en.T("err.need_admin") || got == en.T("err.need_manager") || got == en.T("err.need_status_access") {
 				t.Errorf("authorized member was denied: %q", got)
 			}
 			if resp.typ == discord.InteractionResponseTypeDeferredCreateMessage {
 				h.followUp()
+			}
+		})
+	}
+}
+
+func TestStatusForCaptureRole(t *testing.T) {
+	t.Parallel()
+	const allyCode = "WWS7KFDB"
+	statusFn := func(g snowflake.ID) guild.Status {
+		st := guild.NewStatus(g, 0)
+		st.AllyCode = allyCode
+		return *st
+	}
+	callerOnly := func(snowflake.ID, []snowflake.ID) bool { return true }
+
+	t.Run("capture role may run status but does not see the relay code", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{statusFn: statusFn, hasCallerRoleFn: callerOnly})
+		got := messageContent(t, h.dispatch(slashPayload(memberJSON(permNone), "status")))
+		if got == en.T("err.need_status_access") {
+			t.Fatalf("capture role member was denied: %q", got)
+		}
+		if strings.Contains(got, allyCode) {
+			t.Errorf("relay code must stay hidden from non-managers:\n%s", got)
+		}
+	})
+	t.Run("manager still sees the relay code", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{statusFn: statusFn})
+		got := messageContent(t, h.dispatch(slashPayload(memberJSON(permManage), "status")))
+		if !strings.Contains(got, allyCode) {
+			t.Errorf("manager should see the relay code:\n%s", got)
+		}
+	})
+}
+
+func TestStatusButton(t *testing.T) {
+	t.Parallel()
+	const statusButtonID = "/status/show"
+	m := func(callerOnly bool) *fakeManager {
+		f := &fakeManager{statusFn: statusWithSpeakers(2, true)}
+		if callerOnly {
+			f.hasCallerRoleFn = func(snowflake.ID, []snowflake.ID) bool { return true }
+		}
+		return f
+	}
+
+	t.Run("manager gets the status as a message of its own", func(t *testing.T) {
+		f := m(false)
+		h := newInteractionHarness(t, f)
+		wantEphemeral(t, h.dispatch(componentPayload(memberJSON(permManage), statusButtonID, componentBtn, "")), f.GetStatus(testGuildID).Render(en))
+	})
+	t.Run("capture role may use it", func(t *testing.T) {
+		h := newInteractionHarness(t, m(true))
+		resp := h.dispatch(componentPayload(memberJSON(permNone), statusButtonID, componentBtn, ""))
+		if got := messageContent(t, resp); got == en.T("err.need_status_access") {
+			t.Errorf("capture role member was denied: %q", got)
+		}
+	})
+	t.Run("anyone else is turned away", func(t *testing.T) {
+		h := newInteractionHarness(t, m(false))
+		wantEphemeral(t, h.dispatch(componentPayload(memberJSON(permNone), statusButtonID, componentBtn, "")), en.T("err.need_status_access"))
+	})
+	t.Run("start reply carries the button", func(t *testing.T) {
+		h := newInteractionHarness(t, m(false))
+		h.dispatch(slashPayload(memberJSON(permManage), "start"))
+		h.followUp()
+		if got := <-h.buttons; len(got) != 1 || got[0] != statusButtonID {
+			t.Errorf("start reply buttons = %v, want [%s]", got, statusButtonID)
+		}
+	})
+}
+
+func TestStartReplyCountsJoinedSpeakers(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		missing []manager.ChannelAccessWarning
+		want    string
+	}{
+		{"every ready speaker tried", nil, en.T("raid.speakers_joined", "Joined", 2, "Count", 3)},
+		// A speaker whose bound channel is gone is listed as skipped and never
+		// tried, so it must not count towards the total.
+		{"missing channel left out of the total", []manager.ChannelAccessWarning{{BotID: speakerA + 2, ChannelID: boundChannel}},
+			en.T("raid.speakers_joined", "Joined", 2, "Count", 2)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var started atomic.Bool
+			m := &fakeManager{
+				missingFn: func() []manager.ChannelAccessWarning { return tt.missing },
+				startFn: func(guild.RaidMode) (ally.Code, error) {
+					started.Store(true)
+					return "", nil
+				},
+				statusFn: func(g snowflake.ID) guild.Status {
+					st := statusWithSpeakers(3, true)(g)
+					for id := range st.Speakers {
+						st.BoundChannels[id] = boundChannel
+					}
+					if started.Load() {
+						st.Session = &guild.Session{Speakers: []guild.Speaker{{ID: speakerA}, {ID: speakerA + 1}}}
+					}
+					return st
+				},
+			}
+			h := newInteractionHarness(t, m)
+			h.dispatch(slashPayload(memberJSON(permManage), "start"))
+			if got := h.followUp(); !strings.Contains(got, tt.want) {
+				t.Errorf("start reply = %q, want it to contain %q", got, tt.want)
 			}
 		})
 	}
@@ -293,7 +434,7 @@ func TestSetupCommand(t *testing.T) {
 		h := newInteractionHarness(t, &fakeManager{})
 		resp := h.dispatch(slashPayload(memberJSON(permAdmin), "setup"))
 		msg := resp.data.(discord.MessageCreate)
-		if !strings.HasPrefix(msg.Content, en.T("setup.main_title")) || len(msg.Components) == 0 {
+		if !strings.HasPrefix(msg.Content, mainMenuStart(en)) || len(msg.Components) == 0 {
 			t.Errorf("setup message = %q with %d components, want the main menu", msg.Content, len(msg.Components))
 		}
 		if msg.Flags&discord.MessageFlagEphemeral == 0 {
@@ -341,10 +482,24 @@ func TestStatusCommandRendersGuildStatus(t *testing.T) {
 
 func TestResetAllyCodeButton(t *testing.T) {
 	t.Parallel()
-	t.Run("reports the new code", func(t *testing.T) {
-		h := newInteractionHarness(t, &fakeManager{})
+	t.Run("refreshes the setup menu with the new code at the bottom", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{statusFn: func(g snowflake.ID) guild.Status {
+			st := guild.NewStatus(g, 0)
+			st.AllyCode = "NEWCODE1"
+			return *st
+		}})
 		resp := h.dispatch(componentPayload(memberJSON(permAdmin), "/setup/reset-ally-code", componentBtn, ""))
-		wantEphemeral(t, resp, en.T("setup.ally_code_reset", "Code", "NEWCODE1"))
+		upd := wantUpdate(t, resp, mainMenuStart(en))
+		notice := en.T("setup.ally_code_reset")
+		if !strings.HasSuffix(*upd.Content, notice) {
+			t.Errorf("menu should end with the reset notice %q, got %q", notice, *upd.Content)
+		}
+		if n := strings.Count(*upd.Content, "NEWCODE1"); n != 1 {
+			t.Errorf("new code appears %d times in the menu, want once:\n%s", n, *upd.Content)
+		}
+		if upd.Components == nil || len(*upd.Components) == 0 {
+			t.Error("the setup menu must keep its components so the next click works")
+		}
 	})
 	t.Run("blocked during a raid", func(t *testing.T) {
 		h := newInteractionHarness(t, &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }})
@@ -512,7 +667,7 @@ func TestSetupNavigation(t *testing.T) {
 	who := memberJSON(permAdmin)
 
 	wantUpdate(t, h.dispatch(componentPayload(who, "/roles/menu", componentBtn, "")), en.T("setup.roles_title"))
-	wantUpdate(t, h.dispatch(componentPayload(who, "/speakers/menu", componentBtn, "")), en.T("setup.main_title"))
+	wantUpdate(t, h.dispatch(componentPayload(who, "/speakers/menu", componentBtn, "")), mainMenuStart(en))
 	wantUpdate(t, h.dispatch(componentPayload(who, "/speakers/page/0", componentBtn, "")),
 		en.T("setup.speakers_title", "Page", 1, "Total", 1))
 	// A malformed page falls back to the first page instead of failing.
@@ -649,8 +804,8 @@ func TestLocaleMenuRedrawsInNewLocale(t *testing.T) {
 	who := memberJSON(permAdmin)
 	de := i18n.MustBundle().For("de", discord.LocaleEnglishUS)
 
-	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, `"values":["de"]`)), de.T("setup.main_title"))
-	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, fmt.Sprintf(`"values":[%q]`, localeAutoValue))), en.T("setup.main_title"))
+	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, `"values":["de"]`)), mainMenuStart(de))
+	wantUpdate(t, h.dispatch(componentPayload(who, "/setup/locale", componentText, fmt.Sprintf(`"values":[%q]`, localeAutoValue))), mainMenuStart(en))
 
 	want := []bindCall{{"bind-locale", "", "de"}, {"unbind-locale", "", ""}}
 	if fmt.Sprint(m.bindings) != fmt.Sprint(want) {
@@ -667,9 +822,9 @@ func TestChannelMenuBindings(t *testing.T) {
 		name, customID, data, title string
 		want                        bindCall
 	}{
-		{"bind owner", "/owner/bind-channel", channelSelectData(boundChannel), en.T("setup.main_title"),
+		{"bind owner", "/owner/bind-channel", channelSelectData(boundChannel), mainMenuStart(en),
 			bindCall{"bind-channel", fakeOwnerBotID.String(), boundChannel.String()}},
-		{"unbind owner", "/owner/bind-channel", channelSelectData(), en.T("setup.main_title"),
+		{"unbind owner", "/owner/bind-channel", channelSelectData(), mainMenuStart(en),
 			bindCall{"unbind-channel", fakeOwnerBotID.String(), ""}},
 		{"bind speaker", speakerPath, channelSelectData(boundChannel), speakersTitle,
 			bindCall{"bind-channel", speakerA.String(), boundChannel.String()}},

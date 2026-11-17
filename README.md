@@ -134,7 +134,7 @@ flowchart TB
 
 ## Slash commands
 
-> The manager role is configured inside `/setup`. "Manager" below means the Manage Server permission or the manager role; `/status` needs it too because it shows the relay code. The `mode` option is picked from a list (`one_many` appears as "One↔Many Callers").
+> The manager role is configured inside `/setup`. "Manager" below means the Manage Server permission or the manager role; `/status` also accepts the capture role, but only managers see the relay code. The `mode` option is picked from a list (`one_many` appears as "One↔Many Callers").
 
 | Command                        | Required role | Description                                                                                                                                       |
 |--------------------------------|---------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -146,7 +146,7 @@ flowchart TB
 | `/start code:XXXXXX mode:many` | Manager       | Join an existing relay session as an **active participant** — also captures local audio (only effective when the host uses `mode:many` or `mode:one_many`) |
 | `/start code:XXXXXX mode:one_many` | Manager   | Join an existing relay session as a **hub-and-spoke participant** — members in your speaker channels are heard by the host owner, and every local channel hears the host owner (only effective when the host uses `mode:many` or `mode:one_many`) |
 | `/stop`                        | Manager       | Stop the active voice raid and make all speakers leave their channels                                                                             |
-| `/status`                      | Manager       | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
+| `/status`                      | Manager, capture role | Show the current capture role, manager role, owner channel, speaker bindings, relay code, and session state                                       |
 
 ## Inter-guild relay
 

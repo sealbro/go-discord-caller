@@ -15,6 +15,7 @@ cmd.status.description: "Показать текущие привязки speake
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Требуется право «Управление сервером» или роль менеджера сервера, чтобы использовать эту команду."
+err.need_status_access: "❌ Требуется право «Управление сервером», роль менеджера или роль захвата сервера, чтобы использовать эту команду."
 err.need_admin: "❌ Требуется право «Администратор», чтобы использовать эту команду."
 err.role_not_bindable: "❌ Эту роль нельзя использовать: выберите обычную роль, а не @everyone и не роль, управляемую ботом."
 err.guild_only: "эту команду можно использовать только внутри сервера"
@@ -27,7 +28,7 @@ err.no_more_tokens: "❌ Все speaker-токены из пула уже доб
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Настройка недоступна во время активного рейда. Сначала остановите рейд."
-setup.ally_code_reset: "🔑 Ally-код сброшен. Новый relay-код: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Ally-код сброшен."
 
 raid.already_active: "⚠️ На этом сервере уже идёт голосовой рейд."
 raid.none_active: "⚠️ На этом сервере нет активного голосового рейда."
@@ -45,6 +46,11 @@ raid.stop_failed: "❌ Не удалось остановить голосово
 raid.joined: "🔴 **Подключено к relay-сессии** `{{.Code}}` как {{.Mode}}. Speaker-боты подключаются к своим каналам."
 raid.started: "🔴 **Голосовой рейд запущен.** Speaker-боты подключились к своим каналам."
 raid.started_with_code: "🔴 **Голосовой рейд запущен.** Speaker-боты подключились к своим каналам. Relay-код: `{{.Code}}`"
+raid.speakers_joined:
+  one: "{{.Joined}} из {{.Count}} speaker-бота подключились к каналу."
+  few: "{{.Joined}} из {{.Count}} speaker-ботов подключились к своим каналам."
+  many: "{{.Joined}} из {{.Count}} speaker-ботов подключились к своим каналам."
+  other: "{{.Joined}} из {{.Count}} speaker-ботов подключились к своим каналам."
 raid.deafen_unavailable: "⚠️ Совет: поднимите роль Owner-бота выше ролей speaker-ботов в разделе «Настройки сервера» → «Роли», чтобы снизить нагрузку и риск помех в звуке."
 raid.stopped: "⚫ **Голосовой рейд остановлен.** Все speaker-боты покинули свои каналы."
 
@@ -53,7 +59,6 @@ permissions.warning_header: "\n\n⚠️ **Некоторые боты не мо�
 raid.skipped_missing_channel: "\n\n⚠️ **Пропущены — их голосовой канал больше не существует (выберите новый в `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Настройка Speaker-ботов**"
 setup.roles_title: "**Привязка ролей**"
 setup.speakers_title: "**Привязка Speaker-ботов** — страница {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Speaker-боты ещё не зарегистрированы._"
@@ -79,6 +84,7 @@ btn.bind_roles: "🎭 Привязать роли"
 btn.bind_speakers: "⚙️ Привязать speaker-ботов"
 btn.add_speaker: "➕ Добавить speaker-бота"
 btn.reset_ally_code: "🔄 Сбросить Ally-код"
+btn.status: "📊 Статус"
 btn.invite: "🔗 Пригласить на сервер"
 btn.enable: "Включить"
 btn.disable: "Выключить"
@@ -87,18 +93,32 @@ btn.disable: "Выключить"
 status.guild: "Сервер"
 status.capture_role: "Роль захвата"
 status.manager_role: "Роль менеджера"
-status.owner_channel: "Канал Owner-бота"
 status.not_set: "не задано"
 status.capture_role_required: "⚠️ не задана — обязательно: голосовые рейды не запустятся"
 status.unbound: "не привязан"
+status.speakers_ready:
+  one: "✅ {{.Count}} готов"
+  few: "✅ {{.Count}} готовы"
+  many: "✅ {{.Count}} готовы"
+  other: "✅ {{.Count}} готовы"
+status.speakers_disabled:
+  one: "🔇 {{.Count}} отключён"
+  few: "🔇 {{.Count}} отключены"
+  many: "🔇 {{.Count}} отключены"
+  other: "🔇 {{.Count}} отключены"
+status.speakers_unbound_count:
+  one: "⚠️ {{.Count}} не привязан"
+  few: "⚠️ {{.Count}} не привязаны"
+  many: "⚠️ {{.Count}} не привязаны"
+  other: "⚠️ {{.Count}} не привязаны"
 status.ally_code: "Ally-код"
 status.raid: "Голосовой рейд"
 status.raid_inactive: "⚫ неактивен"
-status.speakers_header:
-  one: "Speaker-боты ({{.Count}}):"
-  few: "Speaker-боты ({{.Count}}):"
-  many: "Speaker-боты ({{.Count}}):"
-  other: "Speaker-боты ({{.Count}}):"
+status.bots_header:
+  one: "Боты ({{.Count}}):"
+  few: "Боты ({{.Count}}):"
+  many: "Боты ({{.Count}}):"
+  other: "Боты ({{.Count}}):"
 status.raid_active:
   one: "🔴 активен ({{.Count}} speaker подключён)"
   few: "🔴 активен ({{.Count}} speaker-а подключено)"

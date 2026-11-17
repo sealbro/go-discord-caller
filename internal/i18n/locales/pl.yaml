@@ -15,6 +15,7 @@ cmd.status.description: "Pokaż bieżące powiązania speakerów i stan voice ra
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Potrzebujesz uprawnienia „Zarządzaj serwerem” lub roli menedżera serwera, aby użyć tego polecenia."
+err.need_status_access: "❌ Potrzebujesz uprawnienia „Zarządzaj serwerem”, roli menedżera lub roli przechwytywania serwera, aby użyć tego polecenia."
 err.need_admin: "❌ Potrzebujesz uprawnienia „Administrator”, aby użyć tego polecenia."
 err.role_not_bindable: "❌ Tej roli nie można użyć: wybierz zwykłą rolę, a nie @everyone ani rolę zarządzaną przez bota."
 err.guild_only: "to polecenie można używać tylko wewnątrz serwera"
@@ -27,7 +28,7 @@ err.no_more_tokens: "❌ Wszystkie tokeny speakerów z puli zostały już dodane
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Konfiguracja jest niedostępna, gdy voice raid jest aktywny. Najpierw zatrzymaj raid."
-setup.ally_code_reset: "🔑 Kod ally zresetowany. Nowy kod relay: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Kod ally zresetowany."
 
 raid.already_active: "⚠️ Na tym serwerze już trwa voice raid."
 raid.none_active: "⚠️ Na tym serwerze nie ma aktywnego voice raidu."
@@ -45,6 +46,11 @@ raid.stop_failed: "❌ Nie udało się zatrzymać voice raidu"
 raid.joined: "🔴 **Dołączono do sesji relay** `{{.Code}}` jako {{.Mode}}. Speakerzy łączą się ze swoimi kanałami."
 raid.started: "🔴 **Voice raid rozpoczęty.** Speakerzy dołączyli do swoich kanałów."
 raid.started_with_code: "🔴 **Voice raid rozpoczęty.** Speakerzy dołączyli do swoich kanałów. Kod relay: `{{.Code}}`"
+raid.speakers_joined:
+  one: "{{.Joined}} z {{.Count}} speakera dołączyło do kanału."
+  few: "{{.Joined}} z {{.Count}} speakerów dołączyło do swoich kanałów."
+  many: "{{.Joined}} z {{.Count}} speakerów dołączyło do swoich kanałów."
+  other: "{{.Joined}} z {{.Count}} speakerów dołączyło do swoich kanałów."
 raid.deafen_unavailable: "⚠️ Wskazówka: przenieś rolę bota owner nad role botów speaker w Ustawienia serwera → Role, aby zmniejszyć obciążenie i ryzyko zakłóceń dźwięku."
 raid.stopped: "⚫ **Voice raid zatrzymany.** Wszyscy speakerzy opuścili swoje kanały."
 
@@ -53,7 +59,6 @@ permissions.warning_header: "\n\n⚠️ **Niektóre boty nie mogą uzyskać dost
 raid.skipped_missing_channel: "\n\n⚠️ **Pominięte — ich kanał głosowy już nie istnieje (wybierz nowy w `/setup`):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Konfiguracja speakerów**"
 setup.roles_title: "**Powiązania ról**"
 setup.speakers_title: "**Powiązania speakerów** — Strona {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Brak zarejestrowanych speakerów._"
@@ -79,6 +84,7 @@ btn.bind_roles: "🎭 Powiąż role"
 btn.bind_speakers: "⚙️ Powiąż speakerów"
 btn.add_speaker: "➕ Dodaj speakera"
 btn.reset_ally_code: "🔄 Zresetuj kod ally"
+btn.status: "📊 Status"
 btn.invite: "🔗 Zaproś na serwer"
 btn.enable: "Włącz"
 btn.disable: "Wyłącz"
@@ -87,18 +93,32 @@ btn.disable: "Wyłącz"
 status.guild: "Serwer"
 status.capture_role: "Rola przechwytywania"
 status.manager_role: "Rola menedżera"
-status.owner_channel: "Kanał bota owner"
 status.not_set: "nie ustawiono"
 status.capture_role_required: "⚠️ nie ustawiono — wymagane: voice raidy nie mogą się rozpocząć"
 status.unbound: "niepowiązany"
+status.speakers_ready:
+  one: "✅ {{.Count}} gotowy"
+  few: "✅ {{.Count}} gotowe"
+  many: "✅ {{.Count}} gotowych"
+  other: "✅ {{.Count}} gotowych"
+status.speakers_disabled:
+  one: "🔇 {{.Count}} wyłączony"
+  few: "🔇 {{.Count}} wyłączone"
+  many: "🔇 {{.Count}} wyłączonych"
+  other: "🔇 {{.Count}} wyłączonych"
+status.speakers_unbound_count:
+  one: "⚠️ {{.Count}} niepowiązany"
+  few: "⚠️ {{.Count}} niepowiązane"
+  many: "⚠️ {{.Count}} niepowiązanych"
+  other: "⚠️ {{.Count}} niepowiązanych"
 status.ally_code: "Kod sojusznika"
 status.raid: "Voice raid"
 status.raid_inactive: "⚫ nieaktywny"
-status.speakers_header:
-  one: "Speakerzy ({{.Count}}):"
-  few: "Speakerzy ({{.Count}}):"
-  many: "Speakerzy ({{.Count}}):"
-  other: "Speakerzy ({{.Count}}):"
+status.bots_header:
+  one: "Boty ({{.Count}}):"
+  few: "Boty ({{.Count}}):"
+  many: "Boty ({{.Count}}):"
+  other: "Boty ({{.Count}}):"
 status.raid_active:
   one: "🔴 aktywny ({{.Count}} speaker podłączony)"
   few: "🔴 aktywny ({{.Count}} speakerów podłączonych)"

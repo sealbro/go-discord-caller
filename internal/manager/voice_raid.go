@@ -199,6 +199,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		slog.String("hostMode", string(allySession.HostMode)),
 		slog.String("guestMode", string(guestMode)),
 		slog.Int("activeSpeakers", speakerCount),
+		slog.Int("speakersJoined", len(setup.Joined)),
+		slog.Int("speakersCandidates", setup.Candidates),
 		slog.Bool("ownerRelaying", ownerCleanup != nil),
 	)
 	go func() {
@@ -449,6 +451,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		slog.String("guildID", guildID.String()),
 		slog.String("mode", string(mode)),
 		slog.Int("activeSpeakers", speakerCount),
+		slog.Int("speakersJoined", len(setup.Joined)),
+		slog.Int("speakersCandidates", setup.Candidates),
 	)
 	start()
 	return allyCode, nil

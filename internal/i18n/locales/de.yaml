@@ -15,6 +15,7 @@ cmd.status.description: "Aktuelle Speaker-Bindungen und den Voice-Raid-Status an
 
 # ── Generic errors ────────────────────────────────────────────────────────────
 err.need_manager: "❌ Du benötigst die Berechtigung „Server verwalten“ oder die Manager-Rolle des Servers, um diesen Befehl zu nutzen."
+err.need_status_access: "❌ Du benötigst die Berechtigung „Server verwalten“, die Manager-Rolle oder die Aufnahme-Rolle des Servers, um diesen Befehl zu nutzen."
 err.need_admin: "❌ Du benötigst die Berechtigung „Administrator“, um diesen Befehl zu nutzen."
 err.role_not_bindable: "❌ Diese Rolle kann nicht verwendet werden: Wähle eine normale Rolle, nicht @everyone oder eine von einem Bot verwaltete Rolle."
 err.guild_only: "dieser Befehl kann nur innerhalb eines Servers verwendet werden"
@@ -27,7 +28,7 @@ err.no_more_tokens: "❌ Alle Speaker-Tokens aus dem Pool wurden bereits hinzuge
 
 # ── Voice raid responses ──────────────────────────────────────────────────────
 setup.blocked_active_raid: "⚠️ Die Einrichtung ist während eines aktiven Voice-Raids nicht verfügbar. Stoppe zuerst den Raid."
-setup.ally_code_reset: "🔑 Ally-Code zurückgesetzt. Neuer Relay-Code: `{{.Code}}`"
+setup.ally_code_reset: "🔑 Ally-Code zurückgesetzt."
 
 raid.already_active: "⚠️ Auf diesem Server läuft bereits ein Voice-Raid."
 raid.none_active: "⚠️ Auf diesem Server läuft kein Voice-Raid."
@@ -45,6 +46,9 @@ raid.stop_failed: "❌ Stoppen des Voice-Raids fehlgeschlagen"
 raid.joined: "🔴 **Relay-Sitzung beigetreten** `{{.Code}}` als {{.Mode}}. Speaker verbinden sich mit ihren Kanälen."
 raid.started: "🔴 **Voice-Raid gestartet.** Die Speaker haben ihre Kanäle betreten."
 raid.started_with_code: "🔴 **Voice-Raid gestartet.** Die Speaker haben ihre Kanäle betreten. Relay-Code: `{{.Code}}`"
+raid.speakers_joined:
+  one: "{{.Joined}} von {{.Count}} Speaker hat seinen Kanal betreten."
+  other: "{{.Joined}} von {{.Count}} Speakern sind ihren Kanälen beigetreten."
 raid.deafen_unavailable: "⚠️ Tipp: Ziehe die Rolle des Owner-Bots unter Servereinstellungen → Rollen über die Rollen der Speaker-Bots, um die Last zu senken und Audiostörungen vorzubeugen."
 raid.stopped: "⚫ **Voice-Raid gestoppt.** Alle Speaker haben ihre Kanäle verlassen."
 
@@ -53,7 +57,6 @@ permissions.warning_header: "\n\n⚠️ **Einige Bots können nicht auf ihren Ka
 raid.skipped_missing_channel: "\n\n⚠️ **Übersprungen — ihr Sprachkanal existiert nicht mehr (wähle in `/setup` einen neuen):**"
 
 # ── Setup UI ──────────────────────────────────────────────────────────────────
-setup.main_title: "**Speaker-Einrichtung**"
 setup.roles_title: "**Rollen-Bindungen**"
 setup.speakers_title: "**Speaker-Bindungen** — Seite {{.Page}}/{{.Total}}"
 setup.no_speakers: "_Noch keine Speaker registriert._"
@@ -77,6 +80,7 @@ btn.bind_roles: "🎭 Rollen binden"
 btn.bind_speakers: "⚙️ Speaker binden"
 btn.add_speaker: "➕ Speaker hinzufügen"
 btn.reset_ally_code: "🔄 Ally-Code zurücksetzen"
+btn.status: "📊 Status"
 btn.invite: "🔗 Auf Server einladen"
 btn.enable: "Aktivieren"
 btn.disable: "Deaktivieren"
@@ -85,16 +89,24 @@ btn.disable: "Deaktivieren"
 status.guild: "Server"
 status.capture_role: "Aufnahmerolle"
 status.manager_role: "Manager-Rolle"
-status.owner_channel: "Owner-Bot-Kanal"
 status.not_set: "nicht gesetzt"
 status.capture_role_required: "⚠️ nicht festgelegt — erforderlich: Voice-Raids können nicht starten"
 status.unbound: "ungebunden"
+status.speakers_ready:
+  one: "✅ {{.Count}} bereit"
+  other: "✅ {{.Count}} bereit"
+status.speakers_disabled:
+  one: "🔇 {{.Count}} deaktiviert"
+  other: "🔇 {{.Count}} deaktiviert"
+status.speakers_unbound_count:
+  one: "⚠️ {{.Count}} ungebunden"
+  other: "⚠️ {{.Count}} ungebunden"
 status.ally_code: "Ally-Code"
 status.raid: "Voice-Raid"
 status.raid_inactive: "⚫ inaktiv"
-status.speakers_header:
-  one: "Speaker ({{.Count}}):"
-  other: "Speaker ({{.Count}}):"
+status.bots_header:
+  one: "Bots ({{.Count}}):"
+  other: "Bots ({{.Count}}):"
 status.raid_active:
   one: "🔴 aktiv ({{.Count}} Speaker beigetreten)"
   other: "🔴 aktiv ({{.Count}} Speaker beigetreten)"

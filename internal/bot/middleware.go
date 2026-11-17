@@ -62,6 +62,17 @@ func (h *CommandHandlers) withManager(fn guildCommandHandler) func(discord.Slash
 	})
 }
 
+// withManagerOrCaller wraps a handler to additionally let members holding the
+// capture role through, for commands that only read state.
+func (h *CommandHandlers) withManagerOrCaller(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
+	return h.withGuild(func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+		if !h.canViewStatus(guildID, e.Member()) {
+			return e.CreateMessage(ephemeral(loc.T("err.need_status_access")))
+		}
+		return fn(guildID, loc, data, e)
+	})
+}
+
 // withAdmin wraps a handler to require Administrator permission.
 func (h *CommandHandlers) withAdmin(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
 	return h.withGuild(func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
@@ -133,4 +144,33 @@ func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *disc
 		return true
 	}
 	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
+}
+
+// canViewStatus reports who may see /status: managers and capture-role members.
+func (h *CommandHandlers) canViewStatus(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+	return h.isManagerAuthorized(guildID, member) || h.isCallerAuthorized(guildID, member)
+}
+
+// isCallerAuthorized reports whether the member holds the guild's capture role.
+func (h *CommandHandlers) isCallerAuthorized(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+	if member == nil {
+		return false
+	}
+	return h.manager.HasCallerRole(guildID, member.Member.RoleIDs)
+}
+
+// withStatusAccessButton wraps a button handler to require what /status
+// requires: Manage Server, the manager role or the capture role.
+func (h *CommandHandlers) withStatusAccessButton(fn guildButtonHandler) func(discord.ButtonInteractionData, *handler.ComponentEvent) error {
+	return func(data discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+		guildID, errMsg := requireGuild(h.bundle.For("", e.Locale()), e.GuildID())
+		if errMsg != nil {
+			return e.CreateMessage(*errMsg)
+		}
+		loc := h.loc(guildID, e.Locale())
+		if !h.canViewStatus(guildID, e.Member()) {
+			return e.CreateMessage(ephemeral(loc.T("err.need_status_access")))
+		}
+		return fn(guildID, loc, data, e)
+	}
 }

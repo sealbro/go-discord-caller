@@ -48,6 +48,57 @@ func (s Status) GetSortedSpeakers() []*Speaker {
 	}, func(a, b *Speaker) int { return strings.Compare(a.Username, b.Username) })
 }
 
+// SpeakerCounts splits the guild's speakers into those that would run in a
+// raid (enabled and bound to a channel), disabled ones, and enabled ones with
+// no channel. A disabled speaker counts as disabled whether or not it is bound,
+// so the three always sum to len(Speakers).
+func (s Status) SpeakerCounts() (ready, disabled, unbound int) {
+	for _, sp := range s.Speakers {
+		_, bound := s.BoundChannels[sp.ID]
+		switch {
+		case !sp.Enabled:
+			disabled++
+		case !bound:
+			unbound++
+		default:
+			ready++
+		}
+	}
+	return ready, disabled, unbound
+}
+
+// hasOwner reports whether the owner bot is known; a status built before the
+// owner logged in has none to list.
+func (s Status) hasOwner() bool { return s.OwnerUserID != 0 }
+
+// botBreakdown is the " ✅ 2 ready · 🔇 1 disabled" tail of the bots header,
+// counting the owner bot as ready when it has a channel. It is empty when every
+// bot is ready, since the header count then says it all, and it leaves out
+// categories with no bots.
+func (s Status) botBreakdown(t func(string, ...any) string) string {
+	ready, disabled, unbound := s.SpeakerCounts()
+	if s.hasOwner() {
+		if _, ok := s.BoundChannels[s.OwnerUserID]; ok {
+			ready++
+		} else {
+			unbound++
+		}
+	}
+	if disabled == 0 && unbound == 0 {
+		return ""
+	}
+	var parts []string
+	for _, c := range []struct {
+		key string
+		n   int
+	}{{"status.speakers_ready", ready}, {"status.speakers_disabled", disabled}, {"status.speakers_unbound_count", unbound}} {
+		if c.n > 0 {
+			parts = append(parts, t(c.key, "Count", c.n))
+		}
+	}
+	return " " + strings.Join(parts, " · ")
+}
+
 // Render returns a human-readable, localized summary of the status. Pass a
 // localizer obtained from internal/i18n. A nil loc uses English fallbacks
 // (useful for logs and tests).
@@ -62,31 +113,36 @@ func (s Status) Render(loc Translator) string {
 	var sb strings.Builder
 
 	if s.GuildName != "" {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.guild"), escapeMarkdown(s.GuildName))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.guild"), escapeMarkdown(s.GuildName))
 	}
 
 	if s.CallerRoleID != nil {
-		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.capture_role"), s.CallerRoleID)
+		fmt.Fprintf(&sb, "**%s:** <@&%s>\n", t("status.capture_role"), s.CallerRoleID)
 	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.capture_role"), t("status.capture_role_required"))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.capture_role"), t("status.capture_role_required"))
 	}
 
 	if s.ManagerRoleID != nil {
-		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.manager_role"), s.ManagerRoleID)
+		fmt.Fprintf(&sb, "**%s:** <@&%s>\n", t("status.manager_role"), s.ManagerRoleID)
 	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.manager_role"), t("status.not_set"))
-	}
-
-	if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
-		fmt.Fprintf(&sb, "\n**%s:** <#%s>\n", t("status.owner_channel"), chID)
-	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.owner_channel"), t("status.not_set"))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.manager_role"), t("status.not_set"))
 	}
 
 	speakers := s.GetSortedSpeakers()
+	botCount := len(speakers)
+	if s.hasOwner() {
+		botCount++
+	}
 
-	fmt.Fprintf(&sb, "\n**%s**\n", t("status.speakers_header", "Count", len(speakers)))
+	fmt.Fprintf(&sb, "\n**%s**%s\n", t("status.bots_header", "Count", botCount), s.botBreakdown(t))
 	unbound := t("status.unbound")
+	if s.hasOwner() {
+		bound := unbound
+		if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
+			bound = fmt.Sprintf("<#%s>", chID)
+		}
+		fmt.Fprintf(&sb, "- 🎙️ <@%s> → %s\n", s.OwnerUserID, bound)
+	}
 	for _, sp := range speakers {
 		enabled := "🔊"
 		if !sp.Enabled {
@@ -152,22 +208,26 @@ func englishStatusFallback(key string, args ...any) string {
 		return "Capture Role"
 	case "status.manager_role":
 		return "Manager Role"
-	case "status.owner_channel":
-		return "Owner Bot Channel"
 	case "status.not_set":
 		return "not set"
 	case "status.capture_role_required":
 		return "⚠️ not set — required: voice raids cannot start"
 	case "status.unbound":
 		return "unbound"
+	case "status.speakers_ready":
+		return fmt.Sprintf("✅ %d ready", count)
+	case "status.speakers_disabled":
+		return fmt.Sprintf("🔇 %d disabled", count)
+	case "status.speakers_unbound_count":
+		return fmt.Sprintf("⚠️ %d unbound", count)
 	case "status.ally_code":
 		return "Ally Code"
 	case "status.raid":
 		return "Voice Raid"
 	case "status.raid_inactive":
 		return "⚫ inactive"
-	case "status.speakers_header":
-		return fmt.Sprintf("Speakers (%d):", count)
+	case "status.bots_header":
+		return fmt.Sprintf("Bots (%d):", count)
 	case "status.raid_active":
 		return fmt.Sprintf("🔴 active (%d speakers joined)", count)
 	case "status.raid_active_with_guests":

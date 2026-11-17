@@ -14,9 +14,13 @@ func TestAuthorization(t *testing.T) {
 		managerRole snowflake.ID = 100
 		otherRole   snowflake.ID = 200
 	)
+	const callerRole snowflake.ID = 300
 	h := &CommandHandlers{manager: &fakeManager{
 		hasManagerFn: func(g snowflake.ID, roles []snowflake.ID) bool {
 			return g == guildID && slices.Contains(roles, managerRole)
+		},
+		hasCallerRoleFn: func(g snowflake.ID, roles []snowflake.ID) bool {
+			return g == guildID && slices.Contains(roles, callerRole)
 		},
 	}}
 	member := func(perms discord.Permissions, roles ...snowflake.ID) *discord.ResolvedMember {
@@ -31,12 +35,14 @@ func TestAuthorization(t *testing.T) {
 		member      *discord.ResolvedMember
 		wantAdmin   bool
 		wantManager bool
+		wantCaller  bool
 	}{
-		{"nil member", nil, false, false},
-		{"no permissions or roles", member(0, otherRole), false, false},
-		{"administrator", member(discord.PermissionAdministrator), true, false},
-		{"manage server", member(discord.PermissionManageGuild), false, true},
-		{"manager role", member(0, otherRole, managerRole), false, true},
+		{"nil member", nil, false, false, false},
+		{"no permissions or roles", member(0, otherRole), false, false, false},
+		{"administrator", member(discord.PermissionAdministrator), true, false, false},
+		{"manage server", member(discord.PermissionManageGuild), false, true, false},
+		{"manager role", member(0, otherRole, managerRole), false, true, false},
+		{"capture role", member(0, otherRole, callerRole), false, false, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,6 +51,9 @@ func TestAuthorization(t *testing.T) {
 			}
 			if got := h.isManagerAuthorized(guildID, tt.member); got != tt.wantManager {
 				t.Errorf("isManagerAuthorized = %v, want %v", got, tt.wantManager)
+			}
+			if got := h.isCallerAuthorized(guildID, tt.member); got != tt.wantCaller {
+				t.Errorf("isCallerAuthorized = %v, want %v", got, tt.wantCaller)
 			}
 		})
 	}

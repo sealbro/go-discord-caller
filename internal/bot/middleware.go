@@ -66,7 +66,7 @@ func (h *CommandHandlers) withManager(fn guildCommandHandler) func(discord.Slash
 // capture role through, for commands that only read state.
 func (h *CommandHandlers) withManagerOrCaller(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
 	return h.withGuild(func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-		if !h.isManagerAuthorized(guildID, e.Member()) && !h.isCallerAuthorized(guildID, e.Member()) {
+		if !h.canViewStatus(guildID, e.Member()) {
 			return e.CreateMessage(ephemeral(loc.T("err.need_status_access")))
 		}
 		return fn(guildID, loc, data, e)
@@ -146,6 +146,11 @@ func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *disc
 	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
 }
 
+// canViewStatus reports who may see /status: managers and capture-role members.
+func (h *CommandHandlers) canViewStatus(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+	return h.isManagerAuthorized(guildID, member) || h.isCallerAuthorized(guildID, member)
+}
+
 // isCallerAuthorized reports whether the member holds the guild's capture role.
 func (h *CommandHandlers) isCallerAuthorized(guildID snowflake.ID, member *discord.ResolvedMember) bool {
 	if member == nil {
@@ -163,7 +168,7 @@ func (h *CommandHandlers) withStatusAccessButton(fn guildButtonHandler) func(dis
 			return e.CreateMessage(*errMsg)
 		}
 		loc := h.loc(guildID, e.Locale())
-		if !h.isManagerAuthorized(guildID, e.Member()) && !h.isCallerAuthorized(guildID, e.Member()) {
+		if !h.canViewStatus(guildID, e.Member()) {
 			return e.CreateMessage(ephemeral(loc.T("err.need_status_access")))
 		}
 		return fn(guildID, loc, data, e)

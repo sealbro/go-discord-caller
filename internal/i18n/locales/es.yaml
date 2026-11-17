@@ -46,7 +46,9 @@ raid.stop_failed: "❌ Error al detener el voice raid"
 raid.joined: "🔴 **Unido a la sesión de relay** `{{.Code}}` como {{.Mode}}. Los speakers se están conectando a sus canales."
 raid.started: "🔴 **Voice raid iniciado.** Los speakers se han unido a sus canales."
 raid.started_with_code: "🔴 **Voice raid iniciado.** Los speakers se han unido a sus canales. Código de relay: `{{.Code}}`"
-raid.speakers_joined: "{{.Joined}} de {{.Total}} speakers se unieron a sus canales."
+raid.speakers_joined:
+  one: "{{.Joined}} de {{.Count}} speaker se unió a su canal."
+  other: "{{.Joined}} de {{.Count}} speakers se unieron a sus canales."
 raid.deafen_unavailable: "⚠️ Consejo: coloca el rol del bot owner por encima de los roles de los bots speaker en Ajustes del servidor → Roles para reducir la carga y el riesgo de cortes de audio."
 raid.stopped: "⚫ **Voice raid detenido.** Todos los speakers han abandonado sus canales."
 
@@ -87,19 +89,24 @@ btn.disable: "Desactivar"
 status.guild: "Servidor"
 status.capture_role: "Rol de captura"
 status.manager_role: "Rol de gestor"
-status.owner_channel: "Canal del bot owner"
 status.not_set: "no establecido"
 status.capture_role_required: "⚠️ sin configurar — obligatorio: los voice raids no pueden iniciarse"
 status.unbound: "sin vincular"
-status.speakers_ready: "✅ {{.N}} listos"
-status.speakers_disabled: "🔇 {{.N}} desactivados"
-status.speakers_unbound_count: "⚠️ {{.N}} sin vincular"
+status.speakers_ready:
+  one: "✅ {{.Count}} listo"
+  other: "✅ {{.Count}} listos"
+status.speakers_disabled:
+  one: "🔇 {{.Count}} desactivado"
+  other: "🔇 {{.Count}} desactivados"
+status.speakers_unbound_count:
+  one: "⚠️ {{.Count}} sin vincular"
+  other: "⚠️ {{.Count}} sin vincular"
 status.ally_code: "Código aliado"
 status.raid: "Voice raid"
 status.raid_inactive: "⚫ inactivo"
-status.speakers_header:
-  one: "Speakers ({{.Count}}):"
-  other: "Speakers ({{.Count}}):"
+status.bots_header:
+  one: "Bots ({{.Count}}):"
+  other: "Bots ({{.Count}}):"
 status.raid_active:
   one: "🔴 activo ({{.Count}} speaker conectado)"
   other: "🔴 activo ({{.Count}} speakers conectados)"

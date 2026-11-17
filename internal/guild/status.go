@@ -67,11 +67,23 @@ func (s Status) SpeakerCounts() (ready, disabled, unbound int) {
 	return ready, disabled, unbound
 }
 
-// speakerBreakdown is the " ✅ 2 ready · 🔇 1 disabled" tail of the speakers
-// header. It is empty when every speaker is ready, since the header count then
-// says it all, and it leaves out categories with no speakers.
-func (s Status) speakerBreakdown(t func(string, ...any) string) string {
+// hasOwner reports whether the owner bot is known; a status built before the
+// owner logged in has none to list.
+func (s Status) hasOwner() bool { return s.OwnerUserID != 0 }
+
+// botBreakdown is the " ✅ 2 ready · 🔇 1 disabled" tail of the bots header,
+// counting the owner bot as ready when it has a channel. It is empty when every
+// bot is ready, since the header count then says it all, and it leaves out
+// categories with no bots.
+func (s Status) botBreakdown(t func(string, ...any) string) string {
 	ready, disabled, unbound := s.SpeakerCounts()
+	if s.hasOwner() {
+		if _, ok := s.BoundChannels[s.OwnerUserID]; ok {
+			ready++
+		} else {
+			unbound++
+		}
+	}
 	if disabled == 0 && unbound == 0 {
 		return ""
 	}
@@ -81,7 +93,7 @@ func (s Status) speakerBreakdown(t func(string, ...any) string) string {
 		n   int
 	}{{"status.speakers_ready", ready}, {"status.speakers_disabled", disabled}, {"status.speakers_unbound_count", unbound}} {
 		if c.n > 0 {
-			parts = append(parts, t(c.key, "N", c.n))
+			parts = append(parts, t(c.key, "Count", c.n))
 		}
 	}
 	return " " + strings.Join(parts, " · ")
@@ -116,16 +128,21 @@ func (s Status) Render(loc Translator) string {
 		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.manager_role"), t("status.not_set"))
 	}
 
-	if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
-		fmt.Fprintf(&sb, "**%s:** <#%s>\n", t("status.owner_channel"), chID)
-	} else {
-		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.owner_channel"), t("status.not_set"))
+	speakers := s.GetSortedSpeakers()
+	botCount := len(speakers)
+	if s.hasOwner() {
+		botCount++
 	}
 
-	speakers := s.GetSortedSpeakers()
-
-	fmt.Fprintf(&sb, "\n**%s**%s\n", t("status.speakers_header", "Count", len(speakers)), s.speakerBreakdown(t))
+	fmt.Fprintf(&sb, "\n**%s**%s\n", t("status.bots_header", "Count", botCount), s.botBreakdown(t))
 	unbound := t("status.unbound")
+	if s.hasOwner() {
+		bound := unbound
+		if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
+			bound = fmt.Sprintf("<#%s>", chID)
+		}
+		fmt.Fprintf(&sb, "- 🎙️ <@%s> → %s\n", s.OwnerUserID, bound)
+	}
 	for _, sp := range speakers {
 		enabled := "🔊"
 		if !sp.Enabled {
@@ -171,7 +188,6 @@ func englishStatusFallback(key string, args ...any) string {
 	count := -1
 	host := ""
 	guests := ""
-	n := 0
 	for i := 0; i+1 < len(args); i += 2 {
 		name, _ := args[i].(string)
 		switch name {
@@ -183,8 +199,6 @@ func englishStatusFallback(key string, args ...any) string {
 			host, _ = args[i+1].(string)
 		case "Guests":
 			guests, _ = args[i+1].(string)
-		case "N":
-			n, _ = args[i+1].(int)
 		}
 	}
 	switch key {
@@ -194,8 +208,6 @@ func englishStatusFallback(key string, args ...any) string {
 		return "Capture Role"
 	case "status.manager_role":
 		return "Manager Role"
-	case "status.owner_channel":
-		return "Owner Bot Channel"
 	case "status.not_set":
 		return "not set"
 	case "status.capture_role_required":
@@ -203,19 +215,19 @@ func englishStatusFallback(key string, args ...any) string {
 	case "status.unbound":
 		return "unbound"
 	case "status.speakers_ready":
-		return fmt.Sprintf("✅ %d ready", n)
+		return fmt.Sprintf("✅ %d ready", count)
 	case "status.speakers_disabled":
-		return fmt.Sprintf("🔇 %d disabled", n)
+		return fmt.Sprintf("🔇 %d disabled", count)
 	case "status.speakers_unbound_count":
-		return fmt.Sprintf("⚠️ %d unbound", n)
+		return fmt.Sprintf("⚠️ %d unbound", count)
 	case "status.ally_code":
 		return "Ally Code"
 	case "status.raid":
 		return "Voice Raid"
 	case "status.raid_inactive":
 		return "⚫ inactive"
-	case "status.speakers_header":
-		return fmt.Sprintf("Speakers (%d):", count)
+	case "status.bots_header":
+		return fmt.Sprintf("Bots (%d):", count)
 	case "status.raid_active":
 		return fmt.Sprintf("🔴 active (%d speakers joined)", count)
 	case "status.raid_active_with_guests":

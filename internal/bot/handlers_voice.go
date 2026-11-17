@@ -130,7 +130,8 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			h.followUp(e, loc.T("raid.start_blocked_permissions")+formatAccessWarnings(loc, warnings))
 			return
 		}
-		skipped := formatSkippedSpeakers(loc, h.manager.SpeakersWithMissingChannel(guildID))
+		missing := h.manager.SpeakersWithMissingChannel(guildID)
+		skipped := formatSkippedSpeakers(loc, missing)
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
@@ -171,7 +172,7 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		if readiness := h.manager.CheckDeafenReadiness(guildID); !readiness.OK() {
 			msg += "\n\n" + loc.T("raid.deafen_unavailable")
 		}
-		msg += h.speakersJoinedLine(loc, guildID)
+		msg += h.speakersJoinedLine(loc, guildID, len(missing))
 		msg += skipped
 		slog.InfoContext(cmdCtx, "voice raid started")
 		h.followUpWithStatusButton(e, loc, msg)
@@ -180,15 +181,18 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 	return nil
 }
 
-// speakersJoinedLine reports how many of the speakers that were ready to run
-// are now in their channels, or nothing when the raid has already ended.
-func (h *CommandHandlers) speakersJoinedLine(loc *i18n.Localizer, guildID snowflake.ID) string {
+// speakersJoinedLine reports how many of the speakers the raid tried are now in
+// their channels, or nothing when the raid has already ended. Speakers whose
+// bound channel is gone are listed separately and not tried, so they are left
+// out of the total, which then matches the start log's candidate count.
+func (h *CommandHandlers) speakersJoinedLine(loc *i18n.Localizer, guildID snowflake.ID, missingChannel int) string {
 	status := h.manager.GetStatus(guildID)
 	if status.Session == nil {
 		return ""
 	}
 	ready, _, _ := status.SpeakerCounts()
-	return "\n" + loc.T("raid.speakers_joined", "Joined", len(status.Session.Speakers), "Total", ready)
+	tried := max(ready-missingChannel, 0)
+	return "\n" + loc.T("raid.speakers_joined", "Joined", len(status.Session.Speakers), "Count", tried)
 }
 
 // handleStopVoiceRaid stops the active voice raid.

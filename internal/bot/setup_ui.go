@@ -25,7 +25,7 @@ const localeAutoValue = "auto"
 // Layout:
 //   - Row 1: language select menu (per-guild locale pin)
 //   - Row 2: owner voice-channel select menu
-//   - Row 3: "Bind Roles" (red until a capture role is bound), "Bind Speakers" buttons; "Add Speaker" appended when an uninvited pool bot is available
+//   - Row 3: "Bind Roles" (red until a capture role is bound), "Bind Speakers" buttons; "Add Speaker" appended when an uninvited pool bot is available, then "Reset Ally Code"
 func (h *CommandHandlers) buildMainSetupMessage(guildID snowflake.ID, loc *i18n.Localizer) (string, []discord.LayoutComponent) {
 	status := h.manager.GetStatus(guildID)
 	ownerBotID := h.manager.OwnerBotID()

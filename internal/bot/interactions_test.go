@@ -68,7 +68,10 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 	followups := make(chan string, 4)
 	buttons := make(chan []string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read follow-up: %v", err)
+		}
 		var msg discord.MessageCreate
 		if err := json.Unmarshal(body, &msg); err != nil {
 			t.Errorf("decode follow-up: %v", err)
@@ -87,7 +90,10 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 				ids = append(ids, c.CustomID)
 			}
 		}
-		buttons <- ids
+		select {
+		case buttons <- ids:
+		default:
+		}
 		followups <- msg.Content
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":"1","channel_id":"1"}`)
@@ -381,28 +387,44 @@ func TestStatusButton(t *testing.T) {
 
 func TestStartReplyCountsJoinedSpeakers(t *testing.T) {
 	t.Parallel()
-	var started atomic.Bool
-	m := &fakeManager{
-		startFn: func(guild.RaidMode) (ally.Code, error) {
-			started.Store(true)
-			return "", nil
-		},
-		statusFn: func(g snowflake.ID) guild.Status {
-			st := statusWithSpeakers(3, true)(g)
-			for id := range st.Speakers {
-				st.BoundChannels[id] = boundChannel
-			}
-			if started.Load() {
-				st.Session = &guild.Session{Speakers: []guild.Speaker{{ID: speakerA}, {ID: speakerA + 1}}}
-			}
-			return st
-		},
+	tests := []struct {
+		name    string
+		missing []manager.ChannelAccessWarning
+		want    string
+	}{
+		{"every ready speaker tried", nil, en.T("raid.speakers_joined", "Joined", 2, "Count", 3)},
+		// A speaker whose bound channel is gone is listed as skipped and never
+		// tried, so it must not count towards the total.
+		{"missing channel left out of the total", []manager.ChannelAccessWarning{{BotID: speakerA + 2, ChannelID: boundChannel}},
+			en.T("raid.speakers_joined", "Joined", 2, "Count", 2)},
 	}
-	h := newInteractionHarness(t, m)
-	h.dispatch(slashPayload(memberJSON(permManage), "start"))
-	want := en.T("raid.speakers_joined", "Joined", 2, "Total", 3)
-	if got := h.followUp(); !strings.Contains(got, want) {
-		t.Errorf("start reply = %q, want it to contain %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var started atomic.Bool
+			m := &fakeManager{
+				missingFn: func() []manager.ChannelAccessWarning { return tt.missing },
+				startFn: func(guild.RaidMode) (ally.Code, error) {
+					started.Store(true)
+					return "", nil
+				},
+				statusFn: func(g snowflake.ID) guild.Status {
+					st := statusWithSpeakers(3, true)(g)
+					for id := range st.Speakers {
+						st.BoundChannels[id] = boundChannel
+					}
+					if started.Load() {
+						st.Session = &guild.Session{Speakers: []guild.Speaker{{ID: speakerA}, {ID: speakerA + 1}}}
+					}
+					return st
+				},
+			}
+			h := newInteractionHarness(t, m)
+			h.dispatch(slashPayload(memberJSON(permManage), "start"))
+			if got := h.followUp(); !strings.Contains(got, tt.want) {
+				t.Errorf("start reply = %q, want it to contain %q", got, tt.want)
+			}
+		})
 	}
 }
 

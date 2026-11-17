@@ -69,3 +69,25 @@ func TestDisplayNameCoversSupportedLocales(t *testing.T) {
 		t.Errorf("DisplayName(unknown) = %q, want the code itself", got)
 	}
 }
+
+func TestSpeakerCountsPickPluralForms(t *testing.T) {
+	b := MustBundle()
+	en := b.For("en", "")
+	ru := b.For("ru", "")
+
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"ru one", ru.T("status.speakers_ready", "Count", 1), "✅ 1 готов"},
+		{"ru few", ru.T("status.speakers_ready", "Count", 2), "✅ 2 готовы"},
+		{"en joined one", en.T("raid.speakers_joined", "Joined", 1, "Count", 1), "1 of 1 speaker joined its channel."},
+		{"en joined other", en.T("raid.speakers_joined", "Joined", 2, "Count", 3), "2 of 3 speakers joined their channels."},
+	}
+	for _, tt := range tests {
+		if tt.got != tt.want {
+			t.Errorf("%s: got %q, want %q", tt.name, tt.got, tt.want)
+		}
+	}
+}

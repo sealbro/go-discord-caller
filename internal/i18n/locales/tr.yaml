@@ -46,7 +46,9 @@ raid.stop_failed: "❌ Sesli baskın durdurulamadı"
 raid.joined: "🔴 `{{.Code}}` **aktarma oturumuna katılındı** ({{.Mode}}). Speaker'lar bağlı kanallarına bağlanıyor."
 raid.started: "🔴 **Sesli baskın başladı.** Speaker'lar bağlı kanallarına katıldı."
 raid.started_with_code: "🔴 **Sesli baskın başladı.** Speaker'lar bağlı kanallarına katıldı. Aktarma kodu: `{{.Code}}`"
-raid.speakers_joined: "{{.Total}} speaker'dan {{.Joined}} tanesi kanallarına katıldı."
+raid.speakers_joined:
+  one: "{{.Count}} speaker'dan {{.Joined}} tanesi kanalına katıldı."
+  other: "{{.Count}} speaker'dan {{.Joined}} tanesi kanallarına katıldı."
 raid.deafen_unavailable: "⚠️ İpucu: yükü azaltmak ve ses aksaklığı riskini düşürmek için Sunucu Ayarları → Roller bölümünde Owner botunun rolünü speaker botlarının rollerinin üstüne taşıyın."
 raid.stopped: "⚫ **Sesli baskın durduruldu.** Tüm speaker'lar kanallarından ayrıldı."
 
@@ -87,19 +89,24 @@ btn.disable: "Devre Dışı Bırak"
 status.guild: "Sunucu"
 status.capture_role: "Yakalama Rolü"
 status.manager_role: "Yetkili Rolü"
-status.owner_channel: "Owner Bot Kanalı"
 status.not_set: "ayarlanmadı"
 status.capture_role_required: "⚠️ ayarlanmadı — gerekli: sesli baskınlar başlatılamaz"
 status.unbound: "bağlı değil"
-status.speakers_ready: "✅ {{.N}} hazır"
-status.speakers_disabled: "🔇 {{.N}} devre dışı"
-status.speakers_unbound_count: "⚠️ {{.N}} bağlı değil"
+status.speakers_ready:
+  one: "✅ {{.Count}} hazır"
+  other: "✅ {{.Count}} hazır"
+status.speakers_disabled:
+  one: "🔇 {{.Count}} devre dışı"
+  other: "🔇 {{.Count}} devre dışı"
+status.speakers_unbound_count:
+  one: "⚠️ {{.Count}} bağlı değil"
+  other: "⚠️ {{.Count}} bağlı değil"
 status.ally_code: "Müttefik Kodu"
 status.raid: "Sesli Baskın"
 status.raid_inactive: "⚫ pasif"
-status.speakers_header:
-  one: "Speaker'lar ({{.Count}}):"
-  other: "Speaker'lar ({{.Count}}):"
+status.bots_header:
+  one: "Botlar ({{.Count}}):"
+  other: "Botlar ({{.Count}}):"
 status.raid_active:
   one: "🔴 aktif ({{.Count}} speaker katıldı)"
   other: "🔴 aktif ({{.Count}} speaker katıldı)"

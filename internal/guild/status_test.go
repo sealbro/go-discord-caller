@@ -62,8 +62,8 @@ func TestRenderEnglishFallback(t *testing.T) {
 			want: []string{
 				"**Capture Role:** ⚠️ not set — required: voice raids cannot start",
 				"**Manager Role:** not set",
-				"**Owner Bot Channel:** not set",
-				"**Speakers (0):**",
+				"**Bots (1):** ⚠️ 1 unbound",
+				"- 🎙️ <@2> → unbound",
 				"**Voice Raid:** ⚫ inactive",
 			},
 		},
@@ -74,8 +74,8 @@ func TestRenderEnglishFallback(t *testing.T) {
 				"**Guild:** Raid Guild",
 				"**Capture Role:** <@&1000>",
 				"**Manager Role:** <@&1000>",
-				"**Owner Bot Channel:** <#100>",
-				"**Speakers (2):** ✅ 1 ready · 🔇 1 disabled",
+				"**Bots (3):** ✅ 2 ready · 🔇 1 disabled",
+				"- 🎙️ <@2> → <#100>",
 				"- 🔊 <@10> → <#100>",
 				"- 🔇 <@20> → unbound",
 				"**Ally Code:** `ABCDEFGH`",
@@ -209,15 +209,16 @@ func TestSpeakerCountsSumToAllSpeakers(t *testing.T) {
 	}
 }
 
-func TestRenderOmitsBreakdownWhenEverySpeakerIsReady(t *testing.T) {
+func TestRenderOmitsBreakdownWhenEveryBotIsReady(t *testing.T) {
 	st := NewStatus(testGuild, testOwner)
 	st.Speakers[testSpeakA] = &Speaker{ID: testSpeakA, Username: "a", Enabled: true}
 	st.Speakers[testSpeakB] = &Speaker{ID: testSpeakB, Username: "b", Enabled: true}
+	st.BoundChannels[testOwner] = testChannel
 	st.BoundChannels[testSpeakA] = testChannel
 	st.BoundChannels[testSpeakB] = testChannel
 
 	got := st.Render(nil)
-	if !strings.Contains(got, "**Speakers (2):**\n") {
+	if !strings.Contains(got, "**Bots (3):**\n") {
 		t.Errorf("header should carry no breakdown when all speakers are ready:\n%s", got)
 	}
 	if strings.Contains(got, "ready") {
@@ -225,7 +226,7 @@ func TestRenderOmitsBreakdownWhenEverySpeakerIsReady(t *testing.T) {
 	}
 }
 
-func TestRenderKeepsConfigFieldsOnConsecutiveLines(t *testing.T) {
+func TestRenderKeepsConfigFieldsOnConsecutiveLinesAndListsOwner(t *testing.T) {
 	role := testRole
 	st := NewStatus(testGuild, testOwner)
 	st.GuildName = "Raid Guild"
@@ -235,8 +236,9 @@ func TestRenderKeepsConfigFieldsOnConsecutiveLines(t *testing.T) {
 
 	want := "**Guild:** Raid Guild\n" +
 		"**Capture Role:** <@&1000>\n" +
-		"**Manager Role:** <@&1000>\n" +
-		"**Owner Bot Channel:** <#100>\n"
+		"**Manager Role:** <@&1000>\n\n" +
+		"**Bots (1):**\n" +
+		"- 🎙️ <@2> → <#100>\n"
 	if got := st.Render(nil); !strings.HasPrefix(got, want) {
 		t.Errorf("config fields should sit on consecutive lines:\n%s", got)
 	}

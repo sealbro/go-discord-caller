@@ -264,7 +264,7 @@ func TestCommandPermissions(t *testing.T) {
 		{"start", permNone, "err.need_manager"},
 		{"start", permManage, ""},
 		{"stop", permNone, "err.need_manager"},
-		{"status", permNone, "err.need_manager"},
+		{"status", permNone, "err.need_status_access"},
 		{"status", permManage, ""},
 	}
 	for _, tt := range tests {
@@ -277,7 +277,7 @@ func TestCommandPermissions(t *testing.T) {
 				wantEphemeral(t, resp, en.T(tt.denied))
 				return
 			}
-			if got == en.T("err.need_admin") || got == en.T("err.need_manager") {
+			if got == en.T("err.need_admin") || got == en.T("err.need_manager") || got == en.T("err.need_status_access") {
 				t.Errorf("authorized member was denied: %q", got)
 			}
 			if resp.typ == discord.InteractionResponseTypeDeferredCreateMessage {
@@ -285,6 +285,35 @@ func TestCommandPermissions(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStatusForCaptureRole(t *testing.T) {
+	t.Parallel()
+	const allyCode = "WWS7KFDB"
+	statusFn := func(g snowflake.ID) guild.Status {
+		st := guild.NewStatus(g, 0)
+		st.AllyCode = allyCode
+		return *st
+	}
+	callerOnly := func(snowflake.ID, []snowflake.ID) bool { return true }
+
+	t.Run("capture role may run status but does not see the relay code", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{statusFn: statusFn, hasCallerRoleFn: callerOnly})
+		got := messageContent(t, h.dispatch(slashPayload(memberJSON(permNone), "status")))
+		if got == en.T("err.need_status_access") {
+			t.Fatalf("capture role member was denied: %q", got)
+		}
+		if strings.Contains(got, allyCode) {
+			t.Errorf("relay code must stay hidden from non-managers:\n%s", got)
+		}
+	})
+	t.Run("manager still sees the relay code", func(t *testing.T) {
+		h := newInteractionHarness(t, &fakeManager{statusFn: statusFn})
+		got := messageContent(t, h.dispatch(slashPayload(memberJSON(permManage), "status")))
+		if !strings.Contains(got, allyCode) {
+			t.Errorf("manager should see the relay code:\n%s", got)
+		}
+	})
 }
 
 func TestSetupCommand(t *testing.T) {

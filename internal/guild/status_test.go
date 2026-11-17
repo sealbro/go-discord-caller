@@ -75,7 +75,7 @@ func TestRenderEnglishFallback(t *testing.T) {
 				"**Capture Role:** <@&1000>",
 				"**Manager Role:** <@&1000>",
 				"**Owner Bot Channel:** <#100>",
-				"**Speakers (2):**",
+				"**Speakers (2):** ✅ 1 ready · 🔇 1 disabled",
 				"- 🔊 <@10> → <#100>",
 				"- 🔇 <@20> → unbound",
 				"**Ally Code:** `ABCDEFGH`",
@@ -182,5 +182,62 @@ func assertEscaped(t *testing.T, out, raw, escaped string) {
 	}
 	if !strings.Contains(out, escaped) {
 		t.Errorf("escaped name %q missing from:\n%s", escaped, out)
+	}
+}
+
+func TestSpeakerCountsSumToAllSpeakers(t *testing.T) {
+	const (
+		readyID         snowflake.ID = 11
+		unboundID       snowflake.ID = 12
+		disabledID      snowflake.ID = 13
+		disabledUnbound snowflake.ID = 14
+	)
+	st := NewStatus(testGuild, testOwner)
+	st.Speakers[readyID] = &Speaker{ID: readyID, Enabled: true}
+	st.Speakers[unboundID] = &Speaker{ID: unboundID, Enabled: true}
+	st.Speakers[disabledID] = &Speaker{ID: disabledID}
+	st.Speakers[disabledUnbound] = &Speaker{ID: disabledUnbound}
+	st.BoundChannels[readyID] = testChannel
+	st.BoundChannels[disabledID] = testChannel
+
+	ready, disabled, unbound := st.SpeakerCounts()
+	if ready != 1 || disabled != 2 || unbound != 1 {
+		t.Errorf("SpeakerCounts = ready %d, disabled %d, unbound %d; want 1, 2, 1", ready, disabled, unbound)
+	}
+	if got := ready + disabled + unbound; got != len(st.Speakers) {
+		t.Errorf("counts sum to %d, want %d speakers", got, len(st.Speakers))
+	}
+}
+
+func TestRenderOmitsBreakdownWhenEverySpeakerIsReady(t *testing.T) {
+	st := NewStatus(testGuild, testOwner)
+	st.Speakers[testSpeakA] = &Speaker{ID: testSpeakA, Username: "a", Enabled: true}
+	st.Speakers[testSpeakB] = &Speaker{ID: testSpeakB, Username: "b", Enabled: true}
+	st.BoundChannels[testSpeakA] = testChannel
+	st.BoundChannels[testSpeakB] = testChannel
+
+	got := st.Render(nil)
+	if !strings.Contains(got, "**Speakers (2):**\n") {
+		t.Errorf("header should carry no breakdown when all speakers are ready:\n%s", got)
+	}
+	if strings.Contains(got, "ready") {
+		t.Errorf("a status with every speaker ready should not repeat the count:\n%s", got)
+	}
+}
+
+func TestRenderKeepsConfigFieldsOnConsecutiveLines(t *testing.T) {
+	role := testRole
+	st := NewStatus(testGuild, testOwner)
+	st.GuildName = "Raid Guild"
+	st.CallerRoleID = &role
+	st.ManagerRoleID = &role
+	st.BoundChannels[testOwner] = testChannel
+
+	want := "**Guild:** Raid Guild\n" +
+		"**Capture Role:** <@&1000>\n" +
+		"**Manager Role:** <@&1000>\n" +
+		"**Owner Bot Channel:** <#100>\n"
+	if got := st.Render(nil); !strings.HasPrefix(got, want) {
+		t.Errorf("config fields should sit on consecutive lines:\n%s", got)
 	}
 }

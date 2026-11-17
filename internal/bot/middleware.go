@@ -62,6 +62,17 @@ func (h *CommandHandlers) withManager(fn guildCommandHandler) func(discord.Slash
 	})
 }
 
+// withManagerOrCaller wraps a handler to additionally let members holding the
+// capture role through, for commands that only read state.
+func (h *CommandHandlers) withManagerOrCaller(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
+	return h.withGuild(func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
+		if !h.isManagerAuthorized(guildID, e.Member()) && !h.isCallerAuthorized(guildID, e.Member()) {
+			return e.CreateMessage(ephemeral(loc.T("err.need_status_access")))
+		}
+		return fn(guildID, loc, data, e)
+	})
+}
+
 // withAdmin wraps a handler to require Administrator permission.
 func (h *CommandHandlers) withAdmin(fn guildCommandHandler) func(discord.SlashCommandInteractionData, *handler.CommandEvent) error {
 	return h.withGuild(func(guildID snowflake.ID, loc *i18n.Localizer, data discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
@@ -133,4 +144,12 @@ func (h *CommandHandlers) isManagerAuthorized(guildID snowflake.ID, member *disc
 		return true
 	}
 	return h.manager.HasManagerRole(guildID, member.Member.RoleIDs)
+}
+
+// isCallerAuthorized reports whether the member holds the guild's capture role.
+func (h *CommandHandlers) isCallerAuthorized(guildID snowflake.ID, member *discord.ResolvedMember) bool {
+	if member == nil {
+		return false
+	}
+	return h.manager.HasCallerRole(guildID, member.Member.RoleIDs)
 }

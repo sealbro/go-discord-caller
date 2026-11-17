@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Speaker counts at start and in `/status`**: `/start` now says how many of the ready speakers joined their channels, the start log records the same numbers, and `/status` shows how many speakers are ready, disabled or have no bound channel.
+- **`/status` for the capture role**: members with the capture role can now run it. The relay code stays visible to managers only.
+
 ### Fixed
 - **A speaker that was reconnecting at start sat out the whole raid**: `/start` now waits up to 3 s for it to come back. Speakers left out because they are disabled or have no bound channel are now logged.
 

@@ -73,6 +73,7 @@ type DeafSink interface {
 // GuestFor pipeline builders via Params/GuestParams.
 type Setup struct {
 	Joined         []SpeakerResult
+	Candidates     int
 	Speakers       []guild.Speaker
 	SpeakerCleanup func()
 	Outs           []chan<- []byte

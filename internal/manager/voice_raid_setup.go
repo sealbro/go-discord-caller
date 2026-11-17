@@ -69,8 +69,9 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	// voice — so the controller is closed first.
 	speakerCleanup := pipeline.BuildSpeakerCleanup(guildID, joined)
 	return &pipeline.Setup{
-		Joined:   joined,
-		Speakers: joinedSpeakers,
+		Joined:     joined,
+		Candidates: len(candidates),
+		Speakers:   joinedSpeakers,
 		SpeakerCleanup: func() {
 			closeCtx, cancel := context.WithTimeout(context.Background(), pipeline.VoiceLeaveTimeout)
 			deaf.Close(closeCtx)

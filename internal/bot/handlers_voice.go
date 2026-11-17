@@ -171,12 +171,24 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		if readiness := h.manager.CheckDeafenReadiness(guildID); !readiness.OK() {
 			msg += "\n\n" + loc.T("raid.deafen_unavailable")
 		}
+		msg += h.speakersJoinedLine(loc, guildID)
 		msg += skipped
 		slog.InfoContext(cmdCtx, "voice raid started")
 		h.followUp(e, msg)
 	}()
 
 	return nil
+}
+
+// speakersJoinedLine reports how many of the speakers that were ready to run
+// are now in their channels, or nothing when the raid has already ended.
+func (h *CommandHandlers) speakersJoinedLine(loc *i18n.Localizer, guildID snowflake.ID) string {
+	status := h.manager.GetStatus(guildID)
+	if status.Session == nil {
+		return ""
+	}
+	ready, _, _ := status.SpeakerCounts()
+	return "\n" + loc.T("raid.speakers_joined", "Joined", len(status.Session.Speakers), "Total", ready)
 }
 
 // handleStopVoiceRaid stops the active voice raid.
@@ -208,9 +220,13 @@ func (h *CommandHandlers) handleStopVoiceRaid(guildID snowflake.ID, loc *i18n.Lo
 }
 
 // handleStatus responds with an ephemeral snapshot of the guild's configuration and
-// session state. Authorization handled by withManager middleware.
+// session state. Authorization handled by withManagerOrCaller middleware; the
+// relay code lets another server join the raid, so only managers see it.
 func (h *CommandHandlers) handleStatus(guildID snowflake.ID, loc *i18n.Localizer, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
 	status := h.manager.GetStatus(guildID)
+	if !h.isManagerAuthorized(guildID, e.Member()) {
+		status.AllyCode = ""
+	}
 	return e.CreateMessage(discord.MessageCreate{
 		Content: status.Render(loc),
 		Flags:   discord.MessageFlagEphemeral,

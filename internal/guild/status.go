@@ -48,6 +48,45 @@ func (s Status) GetSortedSpeakers() []*Speaker {
 	}, func(a, b *Speaker) int { return strings.Compare(a.Username, b.Username) })
 }
 
+// SpeakerCounts splits the guild's speakers into those that would run in a
+// raid (enabled and bound to a channel), disabled ones, and enabled ones with
+// no channel. A disabled speaker counts as disabled whether or not it is bound,
+// so the three always sum to len(Speakers).
+func (s Status) SpeakerCounts() (ready, disabled, unbound int) {
+	for _, sp := range s.Speakers {
+		_, bound := s.BoundChannels[sp.ID]
+		switch {
+		case !sp.Enabled:
+			disabled++
+		case !bound:
+			unbound++
+		default:
+			ready++
+		}
+	}
+	return ready, disabled, unbound
+}
+
+// speakerBreakdown is the " ✅ 2 ready · 🔇 1 disabled" tail of the speakers
+// header. It is empty when every speaker is ready, since the header count then
+// says it all, and it leaves out categories with no speakers.
+func (s Status) speakerBreakdown(t func(string, ...any) string) string {
+	ready, disabled, unbound := s.SpeakerCounts()
+	if disabled == 0 && unbound == 0 {
+		return ""
+	}
+	var parts []string
+	for _, c := range []struct {
+		key string
+		n   int
+	}{{"status.speakers_ready", ready}, {"status.speakers_disabled", disabled}, {"status.speakers_unbound_count", unbound}} {
+		if c.n > 0 {
+			parts = append(parts, t(c.key, "N", c.n))
+		}
+	}
+	return " " + strings.Join(parts, " · ")
+}
+
 // Render returns a human-readable, localized summary of the status. Pass a
 // localizer obtained from internal/i18n. A nil loc uses English fallbacks
 // (useful for logs and tests).
@@ -62,30 +101,30 @@ func (s Status) Render(loc Translator) string {
 	var sb strings.Builder
 
 	if s.GuildName != "" {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.guild"), escapeMarkdown(s.GuildName))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.guild"), escapeMarkdown(s.GuildName))
 	}
 
 	if s.CallerRoleID != nil {
-		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.capture_role"), s.CallerRoleID)
+		fmt.Fprintf(&sb, "**%s:** <@&%s>\n", t("status.capture_role"), s.CallerRoleID)
 	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.capture_role"), t("status.capture_role_required"))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.capture_role"), t("status.capture_role_required"))
 	}
 
 	if s.ManagerRoleID != nil {
-		fmt.Fprintf(&sb, "\n**%s:** <@&%s>\n", t("status.manager_role"), s.ManagerRoleID)
+		fmt.Fprintf(&sb, "**%s:** <@&%s>\n", t("status.manager_role"), s.ManagerRoleID)
 	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.manager_role"), t("status.not_set"))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.manager_role"), t("status.not_set"))
 	}
 
 	if chID, ok := s.BoundChannels[s.OwnerUserID]; ok {
-		fmt.Fprintf(&sb, "\n**%s:** <#%s>\n", t("status.owner_channel"), chID)
+		fmt.Fprintf(&sb, "**%s:** <#%s>\n", t("status.owner_channel"), chID)
 	} else {
-		fmt.Fprintf(&sb, "\n**%s:** %s\n", t("status.owner_channel"), t("status.not_set"))
+		fmt.Fprintf(&sb, "**%s:** %s\n", t("status.owner_channel"), t("status.not_set"))
 	}
 
 	speakers := s.GetSortedSpeakers()
 
-	fmt.Fprintf(&sb, "\n**%s**\n", t("status.speakers_header", "Count", len(speakers)))
+	fmt.Fprintf(&sb, "\n**%s**%s\n", t("status.speakers_header", "Count", len(speakers)), s.speakerBreakdown(t))
 	unbound := t("status.unbound")
 	for _, sp := range speakers {
 		enabled := "🔊"
@@ -132,6 +171,7 @@ func englishStatusFallback(key string, args ...any) string {
 	count := -1
 	host := ""
 	guests := ""
+	n := 0
 	for i := 0; i+1 < len(args); i += 2 {
 		name, _ := args[i].(string)
 		switch name {
@@ -143,6 +183,8 @@ func englishStatusFallback(key string, args ...any) string {
 			host, _ = args[i+1].(string)
 		case "Guests":
 			guests, _ = args[i+1].(string)
+		case "N":
+			n, _ = args[i+1].(int)
 		}
 	}
 	switch key {
@@ -160,6 +202,12 @@ func englishStatusFallback(key string, args ...any) string {
 		return "⚠️ not set — required: voice raids cannot start"
 	case "status.unbound":
 		return "unbound"
+	case "status.speakers_ready":
+		return fmt.Sprintf("✅ %d ready", n)
+	case "status.speakers_disabled":
+		return fmt.Sprintf("🔇 %d disabled", n)
+	case "status.speakers_unbound_count":
+		return fmt.Sprintf("⚠️ %d unbound", n)
 	case "status.ally_code":
 		return "Ally Code"
 	case "status.raid":

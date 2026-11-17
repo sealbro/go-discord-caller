@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -54,6 +55,7 @@ type interactionHarness struct {
 	router    *handler.Mux
 	client    *bot.Client
 	followups chan string
+	buttons   chan []string
 }
 
 type interactionResponse struct {
@@ -64,11 +66,28 @@ type interactionResponse struct {
 func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 	t.Helper()
 	followups := make(chan string, 4)
+	buttons := make(chan []string, 4)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
 		var msg discord.MessageCreate
-		if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
+		if err := json.Unmarshal(body, &msg); err != nil {
 			t.Errorf("decode follow-up: %v", err)
 		}
+		var raw struct {
+			Components []struct {
+				Components []struct {
+					CustomID string `json:"custom_id"`
+				} `json:"components"`
+			} `json:"components"`
+		}
+		_ = json.Unmarshal(body, &raw)
+		var ids []string
+		for _, row := range raw.Components {
+			for _, c := range row.Components {
+				ids = append(ids, c.CustomID)
+			}
+		}
+		buttons <- ids
 		followups <- msg.Content
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":"1","channel_id":"1"}`)
@@ -87,6 +106,7 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 			Rest:   rest.New(rest.NewClient("", rest.WithURL(srv.URL))),
 		},
 		followups: followups,
+		buttons:   buttons,
 	}
 }
 
@@ -320,6 +340,70 @@ func TestStatusForCaptureRole(t *testing.T) {
 			t.Errorf("manager should see the relay code:\n%s", got)
 		}
 	})
+}
+
+func TestStatusButton(t *testing.T) {
+	t.Parallel()
+	const statusButtonID = "/status/show"
+	m := func(callerOnly bool) *fakeManager {
+		f := &fakeManager{statusFn: statusWithSpeakers(2, true)}
+		if callerOnly {
+			f.hasCallerRoleFn = func(snowflake.ID, []snowflake.ID) bool { return true }
+		}
+		return f
+	}
+
+	t.Run("manager gets the status as a message of its own", func(t *testing.T) {
+		f := m(false)
+		h := newInteractionHarness(t, f)
+		wantEphemeral(t, h.dispatch(componentPayload(memberJSON(permManage), statusButtonID, componentBtn, "")), f.GetStatus(testGuildID).Render(en))
+	})
+	t.Run("capture role may use it", func(t *testing.T) {
+		h := newInteractionHarness(t, m(true))
+		resp := h.dispatch(componentPayload(memberJSON(permNone), statusButtonID, componentBtn, ""))
+		if got := messageContent(t, resp); got == en.T("err.need_status_access") {
+			t.Errorf("capture role member was denied: %q", got)
+		}
+	})
+	t.Run("anyone else is turned away", func(t *testing.T) {
+		h := newInteractionHarness(t, m(false))
+		wantEphemeral(t, h.dispatch(componentPayload(memberJSON(permNone), statusButtonID, componentBtn, "")), en.T("err.need_status_access"))
+	})
+	t.Run("start reply carries the button", func(t *testing.T) {
+		h := newInteractionHarness(t, m(false))
+		h.dispatch(slashPayload(memberJSON(permManage), "start"))
+		h.followUp()
+		if got := <-h.buttons; len(got) != 1 || got[0] != statusButtonID {
+			t.Errorf("start reply buttons = %v, want [%s]", got, statusButtonID)
+		}
+	})
+}
+
+func TestStartReplyCountsJoinedSpeakers(t *testing.T) {
+	t.Parallel()
+	var started atomic.Bool
+	m := &fakeManager{
+		startFn: func(guild.RaidMode) (ally.Code, error) {
+			started.Store(true)
+			return "", nil
+		},
+		statusFn: func(g snowflake.ID) guild.Status {
+			st := statusWithSpeakers(3, true)(g)
+			for id := range st.Speakers {
+				st.BoundChannels[id] = boundChannel
+			}
+			if started.Load() {
+				st.Session = &guild.Session{Speakers: []guild.Speaker{{ID: speakerA}, {ID: speakerA + 1}}}
+			}
+			return st
+		},
+	}
+	h := newInteractionHarness(t, m)
+	h.dispatch(slashPayload(memberJSON(permManage), "start"))
+	want := en.T("raid.speakers_joined", "Joined", 2, "Total", 3)
+	if got := h.followUp(); !strings.Contains(got, want) {
+		t.Errorf("start reply = %q, want it to contain %q", got, want)
+	}
 }
 
 func TestSetupCommand(t *testing.T) {

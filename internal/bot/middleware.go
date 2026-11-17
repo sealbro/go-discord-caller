@@ -153,3 +153,19 @@ func (h *CommandHandlers) isCallerAuthorized(guildID snowflake.ID, member *disco
 	}
 	return h.manager.HasCallerRole(guildID, member.Member.RoleIDs)
 }
+
+// withStatusAccessButton wraps a button handler to require what /status
+// requires: Manage Server, the manager role or the capture role.
+func (h *CommandHandlers) withStatusAccessButton(fn guildButtonHandler) func(discord.ButtonInteractionData, *handler.ComponentEvent) error {
+	return func(data discord.ButtonInteractionData, e *handler.ComponentEvent) error {
+		guildID, errMsg := requireGuild(h.bundle.For("", e.Locale()), e.GuildID())
+		if errMsg != nil {
+			return e.CreateMessage(*errMsg)
+		}
+		loc := h.loc(guildID, e.Locale())
+		if !h.isManagerAuthorized(guildID, e.Member()) && !h.isCallerAuthorized(guildID, e.Member()) {
+			return e.CreateMessage(ephemeral(loc.T("err.need_status_access")))
+		}
+		return fn(guildID, loc, data, e)
+	}
+}

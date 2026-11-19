@@ -155,6 +155,8 @@ func TestJoinSpanShowsWhereAHungHandshakeStopped(t *testing.T) {
 	}}
 	gv := NewGuildVoice(&scriptedVoiceManager{conn: conn}, channelID).ForBot(botID)
 	gv.joinTimeout = 50 * time.Millisecond
+	gv.retryCleanupTimeout = 50 * time.Millisecond
+	gv.retryTimeout = 50 * time.Millisecond
 	gv.cleanupTimeout = 50 * time.Millisecond
 
 	evs, err := joinWithSpan(t, gv, guildID)
@@ -162,7 +164,7 @@ func TestJoinSpanShowsWhereAHungHandshakeStopped(t *testing.T) {
 		t.Fatal("Join succeeded on a handshake that never completed")
 	}
 
-	want := []string{"voice.state.update", "voice.server.update"}
+	want := []string{"voice.state.update", "voice.server.update", "voice.join.retry", "voice.state.update", "voice.server.update"}
 	if got := eventNames(evs); !slices.Equal(got, want) {
 		t.Fatalf("span events = %v, want %v", got, want)
 	}

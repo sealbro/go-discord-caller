@@ -92,6 +92,7 @@ the opus pipeline via `FrameDropper`.
 |-----------------|------|-------------------|------------|-------------|
 | `gdc.voice.sessions.active`         | UpDownCounter | `gdc_voice_sessions_active`         | `guild_id` | Currently active voice raid sessions. |
 | `gdc.voice.session.start.total`     | Counter       | `gdc_voice_session_start_total`     | `guild_id` | Voice raid starts. |
+| `gdc.voice.bot.join.duration` | Histogram (`s`) | `gdc_voice_bot_join_duration_seconds` (`_bucket`/`_sum`/`_count`) | `guild_id`, `bot_kind`, `outcome` | Time from the start of a raid (`/start`, or joining one by code) until each bot is in its voice channel — `outcome="joined"` — or until its join gave up (`"failed"`). `bot_kind` is `owner` or `speaker`. The owner joins after the speakers, so its time includes theirs. Buckets (s): 1, 3, 5, 10, 15. |
 | `gdc.voice.session.stop.total`      | Counter       | `gdc_voice_session_stop_total`      | `guild_id` | Voice raid stops. |
 | `gdc.session.speakers`              | Gauge         | `gdc_session_speakers`              | `guild_id` | Speakers (pool speaker bots plus the owner bot, if it joined) in the active raid; reset to `0` on stop. |
 | `gdc.session.mode`                  | Gauge         | `gdc_session_mode`                  | `guild_id`, `mode` | `1` while the guild's active raid runs in the labelled mode, `0` once it ends. `mode`: `one_caller` / `guild_caller` / `ally_listener` / `ally_caller` / `one_many_guild_caller` / `one_many_ally_caller`. |

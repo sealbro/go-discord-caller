@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/snowflake/v2"
@@ -45,7 +46,7 @@ func TestSetupSpeakers_SeedsGuildNotYetReachedByStartupSeeding(t *testing.T) {
 		reconnect:  newReconnectState(),
 	}
 
-	_, err := m.setupSpeakers(context.Background(), testGuildID, guild.RaidModeOneCaller, nil, telemetry.GuildMetrics{})
+	_, err := m.setupSpeakers(context.Background(), testGuildID, guild.RaidModeOneCaller, nil, telemetry.GuildMetrics{}, time.Now())
 
 	if errors.Is(err, ErrNoGuildStatus) {
 		t.Fatalf("unseeded guild must be seeded on demand, got %v", err)

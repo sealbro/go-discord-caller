@@ -3,6 +3,7 @@ package telemetry
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"go.opentelemetry.io/otel/attribute"
@@ -18,6 +19,7 @@ type SessionMetrics struct {
 	mode             metric.Int64Gauge
 	dropped          metric.Int64Counter
 	routeTransitions metric.Int64Counter
+	botJoin          metric.Float64Histogram
 
 	primed sync.Map // guild ID -> struct{}
 }
@@ -55,6 +57,13 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 	}
 	if s.routeTransitions, err = meter.Int64Counter("gdc.session.route_transitions.total",
 		metric.WithDescription("Auto-router source-mode transitions (off/copy/mix). Labels include the from/to mode names."),
+	); err != nil {
+		return
+	}
+	if s.botJoin, err = meter.Float64Histogram("gdc.voice.bot.join.duration",
+		metric.WithDescription("Time from the start of a raid until a bot is in its voice channel, or until its join gave up. Labels: guild_id, bot_kind (owner, speaker), outcome (joined, failed)."),
+		metric.WithUnit("s"),
+		metric.WithExplicitBucketBoundaries(1, 3, 5, 10, 15),
 	); err != nil {
 		return
 	}
@@ -99,6 +108,20 @@ func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.I
 	s.mode.Record(ctx, 0, metric.WithAttributes(
 		attribute.String("guild_id", guildID.String()),
 		attribute.String("mode", mode),
+	))
+}
+
+// BotJoined records how long a bot took, from the start of the raid, to get
+// into its voice channel; a non-nil err records the join as failed.
+func (s *SessionMetrics) BotJoined(guildID snowflake.ID, kind string, took time.Duration, err error) {
+	outcome := "joined"
+	if err != nil {
+		outcome = "failed"
+	}
+	s.botJoin.Record(context.Background(), took.Seconds(), metric.WithAttributes(
+		attribute.String("guild_id", guildID.String()),
+		attribute.String("bot_kind", kind),
+		attribute.String("outcome", outcome),
 	))
 }
 

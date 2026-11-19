@@ -28,7 +28,7 @@ import (
 // gm carries the session context for the metric recorders the speakers' audio
 // pipeline keeps; ctx is only the parent of the startup phase spans and is not
 // retained past this call.
-func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool, gm telemetry.GuildMetrics) (setup *pipeline.Setup, err error) {
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool, gm telemetry.GuildMetrics, raidStart time.Time) (setup *pipeline.Setup, err error) {
 	phaseCtx, endPhase := startPhase(ctx, "voice.speakers.setup",
 		attribute.Bool("capture", mode.WithCapture()))
 	defer func() { endPhase(err) }()
@@ -51,7 +51,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.candidates", len(candidates)))
 
 	deaf := newDeafController(m, guildID)
-	joined := m.joinSpeakers(phaseCtx, guildID, candidates, mode.WithCapture(), allowUser, deaf, gm)
+	joined := m.joinSpeakers(phaseCtx, guildID, candidates, mode.WithCapture(), allowUser, deaf, gm, raidStart)
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.joined", len(joined)))
 	if len(joined) == 0 {
 		// A /stop during the joins fails every one of them with this cancel,
@@ -176,7 +176,7 @@ func (m *Service) speakerVoiceWhenReconnected(ctx context.Context, guildID, botU
 // joinSpeakers joins the given candidate speakers in parallel; callers filter
 // with boundSpeakers first.
 // When withCapture is true each speaker also captures incoming frames, filtered by allowUser.
-func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool, deaf *deafController, gm telemetry.GuildMetrics) []pipeline.SpeakerResult {
+func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candidates []guild.Speaker, withCapture bool, allowUser func(snowflake.ID) bool, deaf *deafController, gm telemetry.GuildMetrics, raidStart time.Time) []pipeline.SpeakerResult {
 	resultCh := make(chan pipeline.SpeakerResult, len(candidates))
 	var wg sync.WaitGroup
 	wg.Add(len(candidates))
@@ -193,6 +193,7 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 			openCtx, endOpen := startPhase(attachCtx, "voice.conn.open", botAttr(sp.ID))
 			conn, err := gv.Join(openCtx, guildID)
 			endOpen(err)
+			gm.BotJoined("speaker", time.Since(raidStart), err)
 			if err != nil {
 				endAttach(err)
 				slog.WarnContext(ctx, "speaker failed to join channel", slog.String("speakerID", sp.ID.String()), slog.Any("err", err))

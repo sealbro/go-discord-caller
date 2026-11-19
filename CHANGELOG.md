@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Status button on the start message**: one click shows the current status.
 - **`/status` for the capture role**: members with the capture role can now run it. The relay code stays visible to managers only.
 - **Encryption stall diagnostics**: the warning logged when a bot's outbound voice encryption stalls now lists the encryption handshake steps that led up to it.
+- **Bot join time metric**: `gdc_voice_bot_join_duration_seconds` shows how long the owner and each speaker take to get into their channel after a raid starts.
 
 ### Changed
 - **libdave 1.3.0**: the voice encryption library moves from v1.2.2 to v1.3.0, with the godave binding taken from a fork of its unreleased master until the next godave release.

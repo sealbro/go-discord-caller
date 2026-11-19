@@ -209,7 +209,8 @@ verification — run them explicitly via the `make` targets:
 make test-stress-audio      # all 3 bots play audio, listen in Discord (default 50m)
 make test-stress-star       # OneManyGuildCaller star topology  (default 5m)
 make test-stress-mixminus   # GuildCaller mix-minus             (default 5m)
-make test-stress            # all three, sequentially
+make test-stress-start-cancel # /start, /stop mid-join, /start again (default 20 cycles, ~2m)
+make test-stress            # all four, sequentially
 ```
 
 `STRESS_DURATION` overrides the built-in duration with any Go duration string and
@@ -226,6 +227,9 @@ Equivalent raw invocation, if you prefer not to use `make`:
 ```bash
 STRESS_DURATION=2h go test --tags=stress -run TestStress_AllBotsPlayAudio -v -count=1 -timeout 2h10m ./integration/
 ```
+
+`STRESS_CYCLES` sets the cycle count of `test-stress-start-cancel`
+(`make test-stress-start-cancel STRESS_CYCLES=100`).
 
 Stop early with `Ctrl-C` — the deferred cleanups disconnect the bots.
 

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Resetting the relay code piled up messages**: the button now refreshes the setup menu in place, with the new code on the Ally Code line and a short notice below, instead of posting a new message on every click.
 - **A speaker that was reconnecting at start sat out the whole raid**: `/start` now waits up to 3 s for it to come back. Speakers left out because they are disabled or have no bound channel are now logged.
 - **`/stop` during a start was reported as a failed start**: `/start` now answers that the raid was stopped, and the log no longer blames the speaker channel setup. Joining a relay session by code was even reported as successful when the stop landed while the owner bot was joining.
+- **Some bots failed to join their voice channel**: a join that Discord never completes is now retried once, so a bot that hit it on the first try usually joins instead of being left out of the raid.
 
 ## [0.16.0] - 2026-11-16
 

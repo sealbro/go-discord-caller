@@ -262,11 +262,15 @@ func (m *Service) countVoiceCallers() map[voiceChannelKey]int64 {
 	caches := m.ownerClient.Caches
 	counts := make(map[voiceChannelKey]int64)
 	for g := range caches.Guilds() {
-		if !m.HasActiveSession(g.ID) {
+		captured := m.capturedChannels(g.ID)
+		if len(captured) == 0 {
 			continue
 		}
 		for vs := range caches.VoiceStates(g.ID) {
 			if vs.ChannelID == nil {
+				continue
+			}
+			if _, ok := captured[*vs.ChannelID]; !ok {
 				continue
 			}
 			member, ok := caches.Member(g.ID, vs.UserID)
@@ -277,6 +281,37 @@ func (m *Service) countVoiceCallers() map[voiceChannelKey]int64 {
 		}
 	}
 	return counts
+}
+
+// capturedChannels returns the voice channels whose audio the guild's active
+// raid relays: the owner's on a host raid or a guest raid that captures, and
+// the speakers' in the modes where speakers capture. Empty without a raid.
+func (m *Service) capturedChannels(guildID snowflake.ID) map[snowflake.ID]struct{} {
+	m.mu.RLock()
+	var session guild.Session
+	if st := m.statuses[guildID]; st != nil && st.HasActiveSession() {
+		session = *st.Session
+	}
+	m.mu.RUnlock()
+	if session.GuildID == 0 {
+		return nil
+	}
+
+	channels := make(map[snowflake.ID]struct{})
+	add := func(botID snowflake.ID) {
+		if ch, ok := m.store.GetBoundChannel(guildID, botID); ok {
+			channels[ch] = struct{}{}
+		}
+	}
+	if !session.IsGuest || session.Mode.WithCapture() {
+		add(m.ownerBotID)
+	}
+	if session.Mode.WithCapture() {
+		for _, sp := range session.Speakers {
+			add(sp.ID)
+		}
+	}
+	return channels
 }
 
 // observeBotOnline is an OTel observable callback that emits gdc_bot_online:

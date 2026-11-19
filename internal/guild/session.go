@@ -44,6 +44,7 @@ type Session struct {
 	Cleanup  func() // closes providers/receivers; safe to call multiple times (uses sync.Once internally)
 	AllyCode string // relay code for this session (always set on host; set to joined code on guest)
 	IsGuest  bool   // true when this guild joined another guild's session
+	Mode     RaidMode
 
 	// ChannelMixers maps voice channel ID → mixer for that channel.
 	// Used to pause/resume mixers when users join/leave channels.

@@ -187,6 +187,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if err != nil {
 		return guestMode, err
 	}
+	session.Mode = guestMode
 	if session.Cleanup != nil {
 		undo.audio = session.Cleanup
 	}
@@ -435,6 +436,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err != nil {
 		return "", err
 	}
+	session.Mode = mode
 	if session.Cleanup != nil {
 		undo.audio = session.Cleanup
 	}

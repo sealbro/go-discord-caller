@@ -411,7 +411,7 @@ func outcome(err error) string {
 // (libdave/errors.go): anything outside it lands in "other" rather than
 // becoming an unbounded label.
 //
-// UPSTREAM(libdave v0.3.0): the sentinel errors live in a CGO-only package, so
+// UPSTREAM(libdave c06abab): the sentinel errors live in a CGO-only package, so
 // they are matched by message instead.
 func reason(err error) string {
 	if err == nil {

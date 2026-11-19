@@ -75,7 +75,7 @@ func TestEncryptStallRejoinBacksOff(t *testing.T) {
 
 	conn := guildConn{guildID: testGuildID}
 	for range 10 {
-		m.OnEncryptStall(godave.UserID(testBotID.String()), conn)
+		m.OnEncryptStall(godave.UserID(testBotID.String()), conn, nil)
 	}
 
 	if rejoins != 1 {

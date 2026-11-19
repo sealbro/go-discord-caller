@@ -29,20 +29,25 @@ func (s *encryptingSession) Encrypt(_ uint32, _ []byte, _ []byte) (int, error) {
 
 func (s *encryptingSession) AddUser(godave.UserID) {}
 
+// Ready is false, as golibdave reports an encryptor with no key ratchet.
+func (s *encryptingSession) Ready() bool { return false }
+
 // fakeConn stands in for the voice.Conn disgo passes as the session callbacks.
 type fakeConn struct{ godave.Callbacks }
 
 type stallRecorder struct {
-	mu    sync.Mutex
-	calls []godave.UserID
-	conns []godave.Callbacks
+	mu     sync.Mutex
+	calls  []godave.UserID
+	conns  []godave.Callbacks
+	traces []Trace
 }
 
-func (r *stallRecorder) notify(selfUserID godave.UserID, conn godave.Callbacks) {
+func (r *stallRecorder) notify(selfUserID godave.UserID, conn godave.Callbacks, trace Trace) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, selfUserID)
 	r.conns = append(r.conns, conn)
+	r.traces = append(r.traces, trace)
 }
 
 // Production, 2026-10-10 and 2026-10-11: a member leaving the channel left one
@@ -126,11 +131,11 @@ func TestContinuingStallIsReportedAgain(t *testing.T) {
 
 func TestEncryptStallsForwardsToTheInstalledHandler(t *testing.T) {
 	stalls := NewEncryptStalls()
-	stalls.Notify("speaker-1", nil) // before a handler: dropped, must not panic
+	stalls.Notify("speaker-1", nil, nil) // before a handler: dropped, must not panic
 
 	rec := &stallRecorder{}
 	stalls.SetHandler(rec.notify)
-	stalls.Notify("speaker-1", nil)
+	stalls.Notify("speaker-1", nil, nil)
 
 	if len(rec.calls) != 1 {
 		t.Fatalf("handler calls = %d, want 1", len(rec.calls))

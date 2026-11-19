@@ -129,7 +129,7 @@ func startRatchetlessSpeaker(t *testing.T, frames chan []byte, company channelCo
 		voice.WithDaveSessionCreateFunc(dave.Instrument(
 			func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return ratchetlessSession{} },
 			dave.NewStats(),
-			dave.WithEncryptStall(stallFrames, func(godave.UserID, godave.Callbacks) { stalls.Add(1) }),
+			dave.WithEncryptStall(stallFrames, func(godave.UserID, godave.Callbacks, dave.Trace) { stalls.Add(1) }),
 		)),
 		SafeAudioSenderOpt(),
 		VoiceConnOpt(),

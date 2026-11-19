@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -41,6 +42,7 @@ func leaveWithoutCancel(ctx context.Context, gv pool.GuildVoice, guildID snowfla
 // Returns the effective RaidMode (which may differ from the requested mode).
 // The session ends automatically when the host ends or ctx is cancelled.
 func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, guestMode guild.RaidMode, code ally.Code) (effectiveMode guild.RaidMode, err error) {
+	raidStart := time.Now()
 	if !m.starting.tryBegin(guestGuildID, cancelFunc) {
 		return guestMode, ErrSessionExists
 	}
@@ -83,7 +85,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	defer m.trackStartupFilter(guestGuildID, allowUser)()
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
-	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm)
+	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm, raidStart)
 	if err != nil {
 		return guestMode, err
 	}
@@ -112,6 +114,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	openCtx, endOpen := startPhase(ownerCtx, "voice.conn.open", botAttr(m.ownerBotID))
 	conn, joinErr := ownerVoice.Join(openCtx, guestGuildID)
 	endOpen(joinErr)
+	if ownerVoice.ChannelID() != 0 {
+		guestGm.BotJoined("owner", time.Since(raidStart), joinErr)
+	}
 	if joinErr != nil {
 		endOwner(joinErr)
 		slog.WarnContext(ctx, "guest: failed to join owner channel", slog.Any("err", joinErr))
@@ -303,6 +308,7 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 // mode controls which channels capture audio; guests can always join via the relay code.
 // Returns the relay session code.
 func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode) (code ally.Code, err error) {
+	raidStart := time.Now()
 	if !m.starting.tryBegin(guildID, cancelFunc) {
 		return "", ErrSessionExists
 	}
@@ -341,7 +347,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	allowUser := m.buildAllowUserFilter(guildID)
 	defer m.trackStartupFilter(guildID, allowUser)()
 	undo.reconnect = func() { m.clearReconnectState(guildID) }
-	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm)
+	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm, raidStart)
 	if err != nil {
 		return "", err
 	}
@@ -354,6 +360,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	openCtx, endOpen := startPhase(ownerCtx, "voice.conn.open", botAttr(m.ownerBotID))
 	conn, err := ov.Join(openCtx, guildID)
 	endOpen(err)
+	gm.BotJoined("owner", time.Since(raidStart), err)
 	if err != nil {
 		endOwner(err)
 		return "", fmt.Errorf("start raid: join owner channel: %w", err)

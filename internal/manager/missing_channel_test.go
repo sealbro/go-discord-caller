@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
@@ -76,7 +77,7 @@ func speakerJoinAttempted(t *testing.T, boundChannel, existingChannel snowflake.
 	}
 
 	ctx := context.Background()
-	setup, _ := m.setupSpeakers(ctx, testGuildID, guild.RaidModeOneCaller, nil, metrics.ForGuild(ctx, testGuildID))
+	setup, _ := m.setupSpeakers(ctx, testGuildID, guild.RaidModeOneCaller, nil, metrics.ForGuild(ctx, testGuildID), time.Now())
 	if setup != nil {
 		setup.SpeakerCleanup()
 	}

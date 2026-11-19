@@ -2,6 +2,7 @@ package telemetry
 
 import (
 	"context"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 )
@@ -67,6 +68,15 @@ func (g GuildMetrics) DropFor(path DropPath, botID snowflake.ID) func() {
 // SessionStarted records a raid start using the bundled guild ID.
 func (g GuildMetrics) SessionStarted(speakerCount int, mode string) {
 	g.session.SessionStarted(g.ctx, g.guildID, speakerCount, mode)
+}
+
+// BotJoined records a bot's join time using the bundled guild ID; kind is
+// "owner" or "speaker".
+func (g GuildMetrics) BotJoined(kind string, took time.Duration, err error) {
+	if g.session == nil {
+		return
+	}
+	g.session.BotJoined(g.guildID, kind, took, err)
 }
 
 // SessionStopped records a raid stop using the bundled guild ID.

@@ -4,12 +4,18 @@ package integration
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/disgoorg/snowflake/v2"
+
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/manager"
+	"github.com/sealbro/go-discord-caller/internal/pool"
 )
 
 // stressDuration returns how long a stress test should run. STRESS_DURATION
@@ -299,4 +305,133 @@ func TestStress_GuildCallerMixMinusLong(t *testing.T) {
 
 	total := h.Listener.Receiver.FramesReceived(speakerIDs[0])
 	t.Logf("GuildCallerMixMinusLong passed: %d total frames over %s in GuildCallerMixMinus", total, runDuration)
+}
+
+// stressCycles returns how many cycles a cycling stress test should run;
+// STRESS_CYCLES overrides the test's default.
+func stressCycles(t *testing.T, def int) int {
+	t.Helper()
+
+	raw := os.Getenv("STRESS_CYCLES")
+	if raw == "" {
+		return def
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		t.Fatalf("STRESS_CYCLES=%q: must be a positive integer", raw)
+	}
+
+	return n
+}
+
+// TestStress_StartCancelStart repeats what a production guild did before every
+// join in it hung: /start, /stop while the bots were still joining, and /start
+// again straight away. Each cycle cancels at a different point of the voice
+// handshake, and the restart that follows must bring every bot in.
+//
+// Run explicitly:
+//
+//	make test-stress-start-cancel                    # default 20 cycles
+//	make test-stress-start-cancel STRESS_CYCLES=100
+func TestStress_StartCancelStart(t *testing.T) {
+	skipIfMissing(t, h.Cfg.Speaker2ChannelID != 0, "E2E_SPEAKER2_CHANNEL_ID not set")
+	speakerIDs := h.RequireSpeakers(t)
+
+	const (
+		mode        = guild.RaidModeOneManyGuildCaller
+		cancelStep  = 250 * time.Millisecond
+		cancelSteps = 8 // cancels sweep 0–1.75 s, across the whole handshake
+		cycleGap    = time.Second
+	)
+	cycles := stressCycles(t, 20)
+	guildID := h.Cfg.GuildID
+
+	channels := []snowflake.ID{h.Cfg.Speaker1ChannelID, h.Cfg.Speaker2ChannelID}
+	mgr, _ := h.NewManager(channels...)
+	t.Cleanup(func() { _ = mgr.StopVoiceRaid(context.Background(), guildID) })
+
+	wantInVoice := map[snowflake.ID]snowflake.ID{h.OwnerID: h.Cfg.OwnerChannelID}
+	for i, id := range speakerIDs[:min(len(speakerIDs), len(channels))] {
+		wantInVoice[id] = channels[i]
+	}
+	wantSpeakers := len(wantInVoice) - 1
+
+	stop := func(cycle int) {
+		t.Helper()
+		if err := mgr.StopVoiceRaid(t.Context(), guildID); err != nil && !errors.Is(err, manager.ErrNoActiveSession) {
+			t.Fatalf("cycle %d: StopVoiceRaid: %v", cycle, err)
+		}
+	}
+
+	for cycle := range cycles {
+		cancelAfter := time.Duration(cycle%cancelSteps) * cancelStep
+
+		firstCtx, firstCancel := context.WithCancel(t.Context())
+		firstDone := make(chan error, 1)
+		go func() {
+			_, err := mgr.StartVoiceRaid(firstCtx, guildID, firstCancel, mode)
+			firstDone <- err
+		}()
+		time.Sleep(cancelAfter)
+		stop(cycle)
+		var firstErr error
+		select {
+		case firstErr = <-firstDone:
+		case <-time.After(2 * pool.VoiceJoinCost):
+			t.Fatalf("cycle %d: start cancelled after %s never returned", cycle, cancelAfter)
+		}
+		firstCancel()
+		// A stop that lands before the start registers finds nothing to cancel,
+		// and that start commits; stopping again leaves the guild idle either way.
+		stop(cycle)
+
+		ctx, cancel := context.WithCancel(t.Context())
+		begin := time.Now()
+		_, err := mgr.StartVoiceRaid(ctx, guildID, cancel, mode)
+		took := time.Since(begin)
+		if err != nil {
+			cancel()
+			t.Fatalf("cycle %d: restart after a start cancelled at %s (first start: %v) failed after %s: %v",
+				cycle, cancelAfter, firstErr, took, err)
+		}
+
+		var joined int
+		if s := mgr.GetStatus(guildID).Session; s != nil {
+			joined = len(s.Speakers)
+		}
+		if joined != wantSpeakers {
+			t.Errorf("cycle %d: restart after a start cancelled at %s joined %d of %d speakers",
+				cycle, cancelAfter, joined, wantSpeakers)
+		}
+		for botID, channelID := range wantInVoice {
+			if !waitInVoice(guildID, botID, channelID, 5*time.Second) {
+				t.Errorf("cycle %d: bot %s not in its channel after the restart", cycle, botID)
+			}
+		}
+		t.Logf("cycle %2d/%d: cancel after %-6s first start: %-20v restart %s, %d/%d speakers",
+			cycle+1, cycles, cancelAfter, firstErr, took.Round(time.Millisecond), joined, wantSpeakers)
+
+		stop(cycle)
+		cancel()
+		if t.Failed() {
+			return
+		}
+		time.Sleep(cycleGap)
+	}
+}
+
+// waitInVoice reports whether the owner bot's cache shows botID in channelID
+// within timeout.
+func waitInVoice(guildID, botID, channelID snowflake.ID, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if vs, ok := h.Owner.Caches.VoiceState(guildID, botID); ok && vs.ChannelID != nil && *vs.ChannelID == channelID {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }

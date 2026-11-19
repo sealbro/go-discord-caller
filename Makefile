@@ -6,11 +6,13 @@ COVER_PKGS_CSV := $(shell echo $(COVER_PKGS) | tr ' ' ',')
 
 STRESS_DURATION ?=
 export STRESS_DURATION
+STRESS_CYCLES ?=
+export STRESS_CYCLES
 STRESS_TIMEOUT := $(if $(STRESS_DURATION),$(STRESS_DURATION)10m,60m)
 STRESS_FLAGS := --tags=stress -v -count=1 -timeout $(STRESS_TIMEOUT) ./integration/
 
 .PHONY: test test-unit test-integration coverage clean-cache \
-	test-stress test-stress-audio test-stress-star test-stress-mixminus \
+	test-stress test-stress-audio test-stress-star test-stress-mixminus test-stress-start-cancel \
 	sec release
 
 clean-cache:
@@ -59,6 +61,9 @@ test-stress-star:
 
 test-stress-mixminus:
 	go test $(STRESS_FLAGS) -run TestStress_GuildCallerMixMinusLong
+
+test-stress-start-cancel:
+	go test $(STRESS_FLAGS) -run TestStress_StartCancelStart
 
 test-stress:
 	go test $(STRESS_FLAGS)

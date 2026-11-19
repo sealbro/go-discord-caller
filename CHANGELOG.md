@@ -7,16 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-11-20
+
 ### Added
 - **Speaker counts at start and in `/status`**: `/start` now says how many of the ready speakers joined their channels, the start log records the same numbers, and `/status` lists the owner bot and the speakers together with their channels, with how many are ready, disabled or have no bound channel.
 - **Status button on the start message**: one click shows the current status.
 - **`/status` for the capture role**: members with the capture role can now run it. The relay code stays visible to managers only.
 - **Encryption stall diagnostics**: the warning logged when a bot's outbound voice encryption stalls now lists the encryption handshake steps that led up to it.
+- **Voice join diagnostics**: traces of a bot joining voice now show each step of the handshake it reached, so a join that times out shows where it stopped.
 - **Bot join time metric**: `gdc_voice_bot_join_duration_seconds` shows how long the owner and each speaker take to get into their channel after a raid starts.
 
 ### Changed
 - **libdave 1.3.0**: the voice encryption library moves from v1.2.2 to v1.3.0, with the godave binding taken from a fork of its unreleased master until the next godave release.
 - **Setup menu**: the "Speaker Setup" title line is gone from the main menu, since Discord already shows which command opened it.
+- **Dependencies**: Go dependencies updated to their latest versions.
 
 ### Fixed
 - **Memory grew with every user who joined voice**: the decryptor created for each user was never freed.

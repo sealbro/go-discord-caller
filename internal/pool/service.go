@@ -133,6 +133,7 @@ func newPoolClient(token string, voiceRegion *telemetry.VoiceRegionMetrics, dave
 
 	return disgo.New(token, append([]bot.ConfigOpt{
 		bot.WithEventListeners(VoiceRegionListeners(botUserID, voiceRegion)...),
+		bot.WithEventListeners(VoiceJoinTraceListeners(botUserID)...),
 		bot.WithEventListeners(bot.NewListenerFunc(func(*events.Ready) { freshGateway(botUserID) })),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),

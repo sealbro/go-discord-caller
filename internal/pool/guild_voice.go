@@ -7,6 +7,7 @@ import (
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // disgo's Open and Close both block on nothing but the caller's context, and
@@ -78,6 +79,7 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 	}
 	openCtx, cancel := context.WithTimeout(ctx, v.openTimeout())
 	defer cancel()
+	defer defaultJoinTraces.begin(v.botID, guildID, trace.SpanFromContext(ctx))()
 	conn := v.vm.CreateConn(guildID)
 	if err := conn.Open(openCtx, v.channelID, false, false); err != nil {
 		// A half-open conn stays registered, and CreateConn would hand the

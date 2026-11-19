@@ -403,3 +403,73 @@ func TestDeafController_CloseWaitsForChangeBeingStarted(t *testing.T) {
 		t.Errorf("%d deaf change(s) started after Close returned: Close did not wait for a change it had already admitted", n)
 	}
 }
+
+// joinGuestUntilStopped starts a guest join whose bot handshake on conn hangs,
+// /stops it once the handshake is reached, and returns what JoinSession said.
+func joinGuestUntilStopped(t *testing.T, f *callerRoleFixture, conn *fakeVoiceConn) error {
+	t.Helper()
+	f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)
+	joining := make(chan struct{})
+	conn.open = func(ctx context.Context) error {
+		close(joining)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	joined := make(chan error, 1)
+	go func() {
+		_, err := f.m.JoinSession(ctx, roleTestGuestGuildID, cancel, guild.RaidModeAllyListener, roleTestHostCode)
+		joined <- err
+	}()
+
+	select {
+	case <-joining:
+	case <-time.After(5 * time.Second):
+		t.Fatal("join never reached the bot handshake")
+	}
+	if err := f.m.StopVoiceRaid(context.Background(), roleTestGuestGuildID); err != nil {
+		t.Fatalf("StopVoiceRaid: %v", err)
+	}
+
+	select {
+	case err := <-joined:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("join never returned")
+		return nil
+	}
+}
+
+// The guest tolerates an owner that cannot join, so a /stop during the owner's
+// handshake used to fall through to the commit: the session came up only to
+// tear itself down, and /start reported the guest as joined.
+func TestJoinSession_StoppedDuringOwnerJoinFailsAndCommitsNothing(t *testing.T) {
+	f := withCallerRole(newCallerRoleFixture(t))
+
+	err := joinGuestUntilStopped(t, f, f.ownerConn)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("join stopped during the owner handshake returned %v, want it to wrap context.Canceled", err)
+	}
+	if f.m.HasActiveSession(roleTestGuestGuildID) {
+		t.Error("a stopped join was committed")
+	}
+	if _, attached := f.m.sessions.GetByGuild(roleTestGuestGuildID); attached {
+		t.Error("a stopped join stayed attached to the host's ally session")
+	}
+}
+
+func TestJoinSession_StoppedDuringSpeakerJoinsReportsCancellation(t *testing.T) {
+	f := withCallerRole(newCallerRoleFixture(t))
+
+	err := joinGuestUntilStopped(t, f, f.speakerConn)
+
+	if errors.Is(err, ErrNoSpeakers) {
+		t.Errorf("a join stopped during the speaker joins reported %q", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("join error = %v, want it to wrap context.Canceled", err)
+	}
+}

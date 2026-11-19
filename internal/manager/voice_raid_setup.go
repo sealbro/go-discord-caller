@@ -54,6 +54,11 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	joined := m.joinSpeakers(phaseCtx, guildID, candidates, mode.WithCapture(), allowUser, deaf, gm)
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.joined", len(joined)))
 	if len(joined) == 0 {
+		// A /stop during the joins fails every one of them with this cancel,
+		// and ErrNoSpeakers would send the reader to check a setup that is fine.
+		if err := phaseCtx.Err(); err != nil {
+			return nil, fmt.Errorf("join speakers: %w", err)
+		}
 		return nil, ErrNoSpeakers
 	}
 

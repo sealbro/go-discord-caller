@@ -153,6 +153,11 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			setup.Deaf.Register(m.ownerBotID, !ownerCaptures && ownerUndeafen != nil)
 		}
 	}
+	// A guest carries on without its owner, so an owner join failed by a /stop
+	// would otherwise commit a session that is already over and report success.
+	if err := ctx.Err(); err != nil {
+		return guestMode, fmt.Errorf("join session: %w", err)
+	}
 
 	params := pipeline.GuestParams{
 		GuestGuildID:   guestGuildID,

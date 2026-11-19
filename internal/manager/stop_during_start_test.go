@@ -119,3 +119,84 @@ func TestStopVoiceRaid_AbortsAStartStillInFlight(t *testing.T) {
 		t.Error("a stopped start must leave the speaker bot's voice channel")
 	}
 }
+
+// A /stop that lands while the speakers are still joining fails every join with
+// the start's own cancellation. Reporting that as "no speakers joined: verify
+// speaker channels are bound…" sends whoever reads it to check a setup that is
+// fine; the start was cancelled, and the error has to say so.
+func TestStopDuringSpeakerJoins_ReportsCancellationNotMissingSpeakers(t *testing.T) {
+	const (
+		ownerChannelID   = snowflake.ID(900)
+		speakerID        = snowflake.ID(500)
+		speakerChannelID = snowflake.ID(901)
+	)
+
+	st := store.NewInMemoryStore()
+	st.BindChannel(testGuildID, testBotID, ownerChannelID)
+	st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
+	st.BindChannel(testGuildID, speakerID, speakerChannelID)
+
+	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("stop_during_start_test"))
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+
+	// The speaker's handshake hangs, as disgo's Open does until its context ends.
+	joining := make(chan struct{})
+	speakerConn := &fakeVoiceConn{channelID: speakerChannelID, open: func(ctx context.Context) error {
+		close(joining)
+		<-ctx.Done()
+		return ctx.Err()
+	}}
+	ownerConn := &fakeVoiceConn{channelID: ownerChannelID}
+
+	m := &Service{
+		statuses: map[snowflake.ID]*guild.Status{
+			testGuildID: {
+				GuildID:     testGuildID,
+				OwnerUserID: testBotID,
+				Speakers: map[snowflake.ID]*guild.Speaker{
+					speakerID: {ID: speakerID, Enabled: true},
+				},
+			},
+		},
+		store:       st,
+		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: &fakeVoiceManager{conn: speakerConn}, Caches: cache.New(), Rest: stubRest{}}},
+		ownerClient: &bot.Client{VoiceManager: &fakeVoiceManager{conn: ownerConn}, Caches: cachesWithChannels(t, testGuildID, ownerChannelID, speakerChannelID), Rest: stubRest{}},
+		ownerBotID:  testBotID,
+		sessions:    ally.NewManager(),
+		metrics:     metrics,
+		reconnect:   newReconnectState(),
+	}
+	empty := map[snowflake.ID]guild.AutoRouter{}
+	m.activeRouters.Store(&empty)
+
+	startCtx, startCancel := context.WithCancel(context.Background())
+	defer startCancel()
+	started := make(chan error, 1)
+	go func() {
+		_, err := m.StartVoiceRaid(startCtx, testGuildID, startCancel, guild.RaidModeOneCaller)
+		started <- err
+	}()
+
+	select {
+	case <-joining:
+	case <-time.After(5 * time.Second):
+		t.Fatal("start never reached the speaker join")
+	}
+	if err := m.StopVoiceRaid(context.Background(), testGuildID); err != nil {
+		t.Fatalf("StopVoiceRaid: %v", err)
+	}
+
+	select {
+	case err := <-started:
+		if errors.Is(err, ErrNoSpeakers) {
+			t.Errorf("a start stopped during the speaker joins reported %q", err)
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("start error = %v, want it to wrap context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("start never returned")
+	}
+}

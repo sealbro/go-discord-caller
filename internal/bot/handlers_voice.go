@@ -79,6 +79,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 			effectiveMode, err := h.manager.JoinSession(ctx, guildID, cancelFunc, mode, code)
 			if err != nil {
 				cancelFunc()
+				if errors.Is(err, context.Canceled) {
+					slog.InfoContext(cmdCtx, "relay session join stopped while starting",
+						slog.String("guildID", guildID.String()))
+					h.followUp(e, loc.T("raid.stopped"))
+					return
+				}
 				slog.WarnContext(cmdCtx, "failed to join relay session",
 					slog.String("guildID", guildID.String()), slog.Any("err", err))
 				if errors.Is(err, manager.ErrNoBoundSpeakers) {
@@ -135,6 +141,12 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 		relayCode, err := h.manager.StartVoiceRaid(ctx, guildID, cancelFunc, mode)
 		if err != nil {
 			cancelFunc()
+			if errors.Is(err, context.Canceled) {
+				slog.InfoContext(cmdCtx, "voice raid stopped while starting",
+					slog.String("guildID", guildID.String()))
+				h.followUp(e, loc.T("raid.stopped"))
+				return
+			}
 			slog.WarnContext(cmdCtx, "failed to start voice raid",
 				slog.String("guildID", guildID.String()), slog.Any("err", err))
 			if errors.Is(err, manager.ErrNoBoundSpeakers) {

@@ -34,10 +34,16 @@ type fakeVoiceConn struct {
 	closeCtxErrs []error
 	speakingErr  error
 	openErr      error
+	open         func(context.Context) error // overrides openErr when set
 	onClose      func()
 }
 
-func (c *fakeVoiceConn) Open(context.Context, snowflake.ID, bool, bool) error { return c.openErr }
+func (c *fakeVoiceConn) Open(ctx context.Context, _ snowflake.ID, _ bool, _ bool) error {
+	if c.open != nil {
+		return c.open(ctx)
+	}
+	return c.openErr
+}
 
 func (c *fakeVoiceConn) Close(ctx context.Context) {
 	c.mu.Lock()

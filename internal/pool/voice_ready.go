@@ -66,6 +66,7 @@ func newConn(guildID, userID snowflake.ID, stateUpdate voice.StateUpdateFunc, re
 	}, append(slices.Clip(opts),
 		voice.WithConnEventHandlerFunc(func(gw voice.Gateway, op voice.Opcode, seq int, data voice.GatewayMessageData) {
 			defaultReadyWatchers.handle(gw, op, seq, data)
+			defaultJoinTraces.voiceOp(userID, guildID, op)
 			latency.observe(op, data)
 		}),
 		voice.WithConnAudioReceiverCreateFunc(newOwnedAudioReceiver),

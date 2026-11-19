@@ -340,6 +340,7 @@ func NewOwnerClient(token string, daveStats *dave.Stats, daveStalls *dave.Encryp
 	base := []bot.ConfigOpt{
 		bot.WithCacheConfigOpts(ownerCacheOpts(&caches)...),
 		bot.WithEventListeners(ownerCacheListeners()...),
+		bot.WithEventListeners(pool.VoiceJoinTraceListeners(botUserID)...),
 		ownerGatewayHandlers(),
 		pool.IdentifyBackoffOpt(botUserID),
 		bot.WithVoiceManagerConfigOpts(

@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	callerRoleID  = snowflake.ID(77)
-	callerChannel = snowflake.ID(1001)
-	otherChannel  = snowflake.ID(2002)
+	callerRoleID   = snowflake.ID(77)
+	callerChannel  = snowflake.ID(1001) // the owner bot's channel
+	otherChannel   = snowflake.ID(2002) // the speaker bot's channel
+	callersSpeaker = snowflake.ID(88)
 )
 
 // callersHarness feeds gateway events through disgo's own handlers into the
@@ -49,6 +50,8 @@ func newCallersHarness(t *testing.T) *callersHarness {
 
 	st := store.NewInMemoryStore()
 	st.BindRole(testGuildID, store.RoleTypeCaller, callerRoleID)
+	st.BindChannel(testGuildID, testBotID, callerChannel)
+	st.BindChannel(testGuildID, callersSpeaker, otherChannel)
 
 	m := &Service{
 		statuses:    make(map[snowflake.ID]*guild.Status),
@@ -65,10 +68,22 @@ func newCallersHarness(t *testing.T) *callersHarness {
 	return h
 }
 
+// setRaid runs a guild_caller host raid, which captures both the owner's
+// channel and the speaker's, or stops it.
 func (h *callersHarness) setRaid(active bool) {
-	st := guild.NewStatus(testGuildID, testBotID)
 	if active {
-		st.Session = &guild.Session{GuildID: testGuildID}
+		h.setRaidSession(&guild.Session{Mode: guild.RaidModeGuildCaller})
+		return
+	}
+	h.setRaidSession(nil)
+}
+
+func (h *callersHarness) setRaidSession(session *guild.Session) {
+	st := guild.NewStatus(testGuildID, testBotID)
+	if session != nil {
+		session.GuildID = testGuildID
+		session.Speakers = []guild.Speaker{{ID: callersSpeaker, Enabled: true}}
+		st.Session = session
 	}
 	h.svc.mu.Lock()
 	h.svc.statuses[testGuildID] = st
@@ -267,4 +282,53 @@ func TestVoiceCallers_EmptiedChannelReportsZero(t *testing.T) {
 
 	h.setRaid(false)
 	h.expectZeroed("raid stopped", otherChannel)
+}
+
+// TestVoiceCallers_OnlyChannelsTheRaidCaptures: a one_caller raid relays only
+// the owner's channel, yet every caller-role member in the speakers' channels
+// was counted too — 82 callers on 2026-11-19 for a raid that relayed one channel.
+func TestVoiceCallers_OnlyChannelsTheRaidCaptures(t *testing.T) {
+	t.Parallel()
+	h := newCallersHarness(t)
+	h.startup(nil, nil)
+	h.member(1, false, callerRoleID)
+	h.member(2, false, callerRoleID)
+	h.voiceState(1, ptr(callerChannel))
+	h.voiceState(2, ptr(otherChannel))
+
+	h.setRaidSession(&guild.Session{Mode: guild.RaidModeOneCaller})
+	h.expect("one_caller host", map[snowflake.ID]int64{callerChannel: 1})
+
+	h.setRaidSession(&guild.Session{Mode: guild.RaidModeOneManyGuildCaller})
+	h.expect("one_many_guild_caller host", map[snowflake.ID]int64{callerChannel: 1, otherChannel: 1})
+
+	h.setRaidSession(&guild.Session{Mode: guild.RaidModeAllyListener, IsGuest: true})
+	h.expect("listener guest", nil)
+
+	h.setRaidSession(&guild.Session{Mode: guild.RaidModeAllyCaller, IsGuest: true})
+	h.expect("caller guest", map[snowflake.ID]int64{callerChannel: 1, otherChannel: 1})
+}
+
+// The caller count reads the mode off the committed session, so both start
+// paths have to record it there.
+func TestRaidStartsRecordTheirModeOnTheSession(t *testing.T) {
+	f := withCallerRole(newCallerRoleFixture(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if _, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeGuildCaller); err != nil {
+		t.Fatalf("StartVoiceRaid: %v", err)
+	}
+	if got := f.m.GetStatus(testGuildID).Session.Mode; got != guild.RaidModeGuildCaller {
+		t.Errorf("host session mode = %q, want %q", got, guild.RaidModeGuildCaller)
+	}
+
+	f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)
+	guestCtx, guestCancel := context.WithCancel(context.Background())
+	defer guestCancel()
+	if _, err := f.m.JoinSession(guestCtx, roleTestGuestGuildID, guestCancel, guild.RaidModeAllyListener, roleTestHostCode); err != nil {
+		t.Fatalf("JoinSession: %v", err)
+	}
+	if got := f.m.GetStatus(roleTestGuestGuildID).Session.Mode; got != guild.RaidModeAllyListener {
+		t.Errorf("guest session mode = %q, want %q", got, guild.RaidModeAllyListener)
+	}
 }

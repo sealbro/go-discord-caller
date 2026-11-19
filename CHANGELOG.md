@@ -11,11 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Speaker counts at start and in `/status`**: `/start` now says how many of the ready speakers joined their channels, the start log records the same numbers, and `/status` lists the owner bot and the speakers together with their channels, with how many are ready, disabled or have no bound channel.
 - **Status button on the start message**: one click shows the current status.
 - **`/status` for the capture role**: members with the capture role can now run it. The relay code stays visible to managers only.
+- **Encryption stall diagnostics**: the warning logged when a bot's outbound voice encryption stalls now lists the encryption handshake steps that led up to it.
 
 ### Changed
+- **libdave 1.3.0**: the voice encryption library moves from v1.2.2 to v1.3.0, with the godave binding taken from a fork of its unreleased master until the next godave release.
 - **Setup menu**: the "Speaker Setup" title line is gone from the main menu, since Discord already shows which command opened it.
 
 ### Fixed
+- **Memory grew with every user who joined voice**: the decryptor created for each user was never freed.
 - **Resetting the relay code piled up messages**: the button now refreshes the setup menu in place, with the new code on the Ally Code line and a short notice below, instead of posting a new message on every click.
 - **A speaker that was reconnecting at start sat out the whole raid**: `/start` now waits up to 3 s for it to come back. Speakers left out because they are disabled or have no bound channel are now logged.
 

@@ -4,8 +4,8 @@ go 1.27.0
 
 require (
 	github.com/disgoorg/disgo v0.20.0
-	github.com/disgoorg/godave v0.3.0
-	github.com/disgoorg/godave/golibdave v0.3.0
+	github.com/disgoorg/godave v0.3.1-0.20261118215854-c06abab601e2
+	github.com/disgoorg/godave/golibdave v0.3.1-0.20261118215854-c06abab601e2
 	github.com/disgoorg/omit v1.0.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/gorilla/websocket v1.5.3
@@ -33,7 +33,7 @@ require (
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/disgoorg/godave/libdave v0.3.0 // indirect
+	github.com/disgoorg/godave/libdave v0.3.1-0.20261118215854-c06abab601e2 // indirect
 	github.com/disgoorg/json/v2 v2.0.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -49,7 +49,15 @@ require (
 	golang.org/x/crypto v0.59.0 // indirect
 	golang.org/x/net v0.63.0 // indirect
 	golang.org/x/sys v0.50.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20261116203732-fd2c7689a808 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20261116203732-fd2c7689a808 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20261118221215-c8830f628b3f // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20261118221215-c8830f628b3f // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+)
+
+// Fork of c06abab whose passthrough copies into the output's capacity; drop once
+// https://github.com/disgoorg/godave/pull/15 is released.
+replace (
+	github.com/disgoorg/godave => github.com/sealbro/godave v0.0.0-20261119162233-ebf7bfbf4a75
+	github.com/disgoorg/godave/golibdave => github.com/sealbro/godave/golibdave v0.0.0-20261119162233-ebf7bfbf4a75
+	github.com/disgoorg/godave/libdave => github.com/sealbro/godave/libdave v0.0.0-20261119162233-ebf7bfbf4a75
 )

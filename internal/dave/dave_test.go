@@ -15,12 +15,9 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
-// fakeSession stands in for the libdave backend. Only Decrypt is exercised, so
-// the rest of the interface is left nil.
-// fakeSession stands in for golibdave, reproducing the parts of v0.3.0 that
-// matter here: it keeps its own set of users with decryptors, and answers a
-// user outside that set on the passthrough branch whose copy arguments are
-// swapped (golibdave.go:104).
+// fakeSession stands in for golibdave, reproducing the parts of the pinned fork
+// that matter here: it keeps its own set of users with decryptors, and answers
+// a user outside that set by copying the frame into the output's capacity.
 type fakeSession struct {
 	godave.Session
 	err error
@@ -28,6 +25,10 @@ type fakeSession struct {
 	// ready mirrors golibdave's Ready: false while the session is in
 	// passthrough mode, true once an E2EE epoch is active.
 	ready bool
+	// disabled mirrors golibdave's own flag for the disabled protocol version,
+	// under which Ready also answers true although frames are plain Opus.
+	disabled bool
+	pending  map[uint16]bool
 	// onAddUser runs at the start of AddUser, before the decryptor exists, to
 	// stand in for a frame arriving during libdave's CGO setup work.
 	onAddUser func()
@@ -51,15 +52,54 @@ func (f *fakeSession) Close() error {
 func (f *fakeSession) Ready() bool {
 	f.mu.Lock()
 	f.readyCalls++
-	f.mu.Unlock()
-	return f.ready
+	defer f.mu.Unlock()
+	return f.ready || f.disabled
 }
 
-func (f *fakeSession) OnSelectProtocolAck(uint16)                      {}
-func (f *fakeSession) OnDavePrepareTransition(uint16, uint16)          {}
-func (f *fakeSession) OnDaveExecuteTransition(uint16)                  {}
-func (f *fakeSession) OnDaveMLSPrepareCommitTransition(uint16, []byte) {}
-func (f *fakeSession) OnDaveMLSWelcome(uint16, []byte)                 {}
+// The protocol handlers track the disabled version the way golibdave does: an
+// ack or the init transition takes effect at once, any other transition on
+// execute, and MLS commits and welcomes always prepare an enabled version.
+func (f *fakeSession) OnSelectProtocolAck(protocolVersion uint16) {
+	f.prepareTransition(0, protocolVersion == 0)
+}
+
+func (f *fakeSession) OnDavePrepareTransition(transitionID uint16, protocolVersion uint16) {
+	f.prepareTransition(transitionID, protocolVersion == 0)
+}
+
+func (f *fakeSession) OnDavePrepareEpoch(int, uint16)        {}
+func (f *fakeSession) OnDaveMLSExternalSenderPackage([]byte) {}
+func (f *fakeSession) OnDaveMLSProposals([]byte)             {}
+
+func (f *fakeSession) OnDaveExecuteTransition(transitionID uint16) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if disabled, ok := f.pending[transitionID]; ok {
+		f.disabled = disabled
+		delete(f.pending, transitionID)
+	}
+}
+
+func (f *fakeSession) OnDaveMLSPrepareCommitTransition(transitionID uint16, _ []byte) {
+	f.prepareTransition(transitionID, false)
+}
+
+func (f *fakeSession) OnDaveMLSWelcome(transitionID uint16, _ []byte) {
+	f.prepareTransition(transitionID, false)
+}
+
+func (f *fakeSession) prepareTransition(transitionID uint16, disabled bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if transitionID == 0 {
+		f.disabled = disabled
+		return
+	}
+	if f.pending == nil {
+		f.pending = make(map[uint16]bool)
+	}
+	f.pending[transitionID] = disabled
+}
 
 func (f *fakeSession) Decrypt(userID godave.UserID, frame []byte, out []byte) (int, error) {
 	f.mu.Lock()
@@ -68,7 +108,7 @@ func (f *fakeSession) Decrypt(userID godave.UserID, frame []byte, out []byte) (i
 	f.mu.Unlock()
 
 	if !known {
-		return copy(frame, out), nil // upstream's swapped arguments, verbatim
+		return copy(out[:cap(out)], frame), nil // upstream's passthrough, verbatim
 	}
 	if f.delay > 0 {
 		time.Sleep(f.delay)
@@ -361,31 +401,6 @@ func TestDecryptPassesBackendResultThrough(t *testing.T) {
 	}
 }
 
-// golibdave v0.3.0 answers an unknown user with a swapped-argument copy, which
-// writes nothing and leaves the caller reading a frame of silence. The wrapper
-// must do the copy itself rather than delegate.
-func TestUnknownUserFrameIsCopiedNotSilenced(t *testing.T) {
-	stats := NewStats()
-	session, backend := newTestSession(t, stats, "bot-1", nil)
-
-	frame := []byte("opus-audio")
-	out := make([]byte, 0, 512) // len 0, cap grown — exactly how disgo passes it
-
-	n, err := session.Decrypt("user-a", frame, out)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if n != len(frame) {
-		t.Fatalf("n = %d, want %d", n, len(frame))
-	}
-	if got := string(out[:cap(out)][:n]); got != string(frame) {
-		t.Errorf("output = %q, want the frame %q — passthrough silenced the audio", got, frame)
-	}
-	if backend.decryptCalls() != 0 {
-		t.Errorf("backend Decrypt was called %d times; the broken branch must not be reached", backend.decryptCalls())
-	}
-}
-
 // A voice channel sees an unbounded number of distinct speakers over the life
 // of the process; without eviction their counters accumulate in memory forever.
 // Eviction must not move the exported total, though: it is monotonic, and
@@ -516,7 +531,7 @@ func TestUnknownUserFrameIsDroppedWhileEncrypted(t *testing.T) {
 		t.Errorf("ciphertext was copied into the output buffer: %q", got)
 	}
 	if backend.decryptCalls() != 0 {
-		t.Errorf("backend Decrypt was called %d times; the broken branch must not be reached", backend.decryptCalls())
+		t.Errorf("backend Decrypt was called %d times; its passthrough would forward the ciphertext", backend.decryptCalls())
 	}
 
 	points := collect(t, stats)
@@ -530,10 +545,9 @@ func TestUnknownUserFrameIsDroppedWhileEncrypted(t *testing.T) {
 
 // A frame can arrive while AddUser is still installing the backend's decryptor
 // — libdave does CGO key-ratchet work there, and frames arrive 50/s per speaker
-// on disgo's UDP goroutine. Until the backend can decrypt, the wrapper must
-// keep handling the frame itself rather than delegate into golibdave's broken
-// passthrough branch.
-func TestFrameArrivingDuringAddUserDoesNotReachTheBackend(t *testing.T) {
+// on disgo's UDP goroutine. The backend cannot decrypt it yet, so it must not be
+// counted as a success.
+func TestFrameArrivingDuringAddUserIsNotCountedAsSuccess(t *testing.T) {
 	stats := NewStats()
 	session, backend := newTestSession(t, stats, "bot-1", nil)
 	backend.onAddUser = func() {
@@ -544,9 +558,6 @@ func TestFrameArrivingDuringAddUserDoesNotReachTheBackend(t *testing.T) {
 
 	session.AddUser("user-a")
 
-	if backend.decryptCalls() != 0 {
-		t.Errorf("backend Decrypt was called %d times during the AddUser window; it has no decryptor yet", backend.decryptCalls())
-	}
 	if got := find(t, collect(t, stats), outcomeSuccess); got != -1 {
 		t.Errorf("a frame the backend could not decrypt was counted as success (%d)", got)
 	}

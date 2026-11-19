@@ -13,6 +13,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"go.opentelemetry.io/otel/metric/noop"
 
+	"github.com/sealbro/go-discord-caller/internal/dave"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
@@ -112,7 +113,7 @@ func TestE23_LoneSpeakerIsNotReportedAsStalled(t *testing.T) {
 	requireEmptyChannel(t, guildID, gv.ChannelID())
 
 	var stalls atomic.Int64
-	h.SetEncryptStallHandler(func(selfUserID godave.UserID, _ godave.Callbacks) {
+	h.SetEncryptStallHandler(func(selfUserID godave.UserID, _ godave.Callbacks, _ dave.Trace) {
 		if string(selfUserID) == speakerID.String() {
 			stalls.Add(1)
 		}

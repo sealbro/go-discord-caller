@@ -12,8 +12,9 @@ import (
 
 // Instrument wraps a DAVE session factory so every frame decryption is counted
 // in stats, keyed by the sending user, every frame encryption is counted per
-// bot, and frames from users the backend has
-// no decryptor for are passed through correctly (see countingSession.Decrypt).
+// bot, frames from users the backend has no decryptor for are dropped while the
+// group is encrypted (see countingSession.Decrypt), and stall reports carry the
+// session's recent DAVE signalling.
 //
 // Every other method is the backend's own. Pass the result wherever the raw
 // backend factory would go — the choice of backend stays a one-line decision at
@@ -30,6 +31,7 @@ func Instrument(inner godave.SessionCreateFunc, stats *Stats, opts ...Option) go
 	return func(logger *slog.Logger, selfUserID godave.UserID, callbacks godave.Callbacks) godave.Session {
 		return &countingSession{
 			now:         now,
+			created:     now(),
 			Session:     inner(logger, selfUserID, callbacks),
 			stats:       stats,
 			botUserID:   string(selfUserID),
@@ -57,9 +59,10 @@ func withClock(now func() time.Time) Option {
 }
 
 // EncryptStallFunc is told which bot's session has stopped encrypting, and the
-// callbacks value disgo created that session with — the bot's voice.Conn. It
-// runs on disgo's audio send goroutine and must not block.
-type EncryptStallFunc func(selfUserID godave.UserID, conn godave.Callbacks)
+// callbacks value disgo created that session with — the bot's voice.Conn — and
+// the DAVE signalling that led up to the stall. It runs on disgo's audio send
+// goroutine and must not block.
+type EncryptStallFunc func(selfUserID godave.UserID, conn godave.Callbacks, trace Trace)
 
 // EncryptStallFrames is 10 s of outbound speech at 20 ms per frame.
 const EncryptStallFrames = 500
@@ -68,7 +71,7 @@ const EncryptStallFrames = 500
 // outbound frames have failed to encrypt, so a repair that did not take is
 // retried. A frame that encrypts resets the count.
 //
-// The failure this exists for: golibdave v0.3.0 copies the bot's own key
+// The failure this exists for: golibdave c06abab copies the bot's own key
 // ratchet from the MLS session when a transition executes, and if the group is
 // not established at that moment the encryptor is left with none. Every frame
 // then fails with "missing key ratchet" until the next membership change in
@@ -78,7 +81,7 @@ const EncryptStallFrames = 500
 // which a missing key ratchet does, so the frames it drops instead are counted
 // through RecordUnsentFrame.
 //
-// UPSTREAM(golibdave v0.3.0): executing a transition before the MLS group is
+// UPSTREAM(golibdave c06abab): executing a transition before the MLS group is
 // established leaves the encryptor with no key ratchet.
 // Fix proposed in https://github.com/disgoorg/godave/pull/5.
 func WithEncryptStall(frames int, notify EncryptStallFunc) Option {
@@ -100,9 +103,9 @@ func NewEncryptStalls() *EncryptStalls { return &EncryptStalls{} }
 func (s *EncryptStalls) SetHandler(f EncryptStallFunc) { s.handler.Store(&f) }
 
 // Notify is an EncryptStallFunc.
-func (s *EncryptStalls) Notify(selfUserID godave.UserID, conn godave.Callbacks) {
+func (s *EncryptStalls) Notify(selfUserID godave.UserID, conn godave.Callbacks, trace Trace) {
 	if f := s.handler.Load(); f != nil {
-		(*f)(selfUserID, conn)
+		(*f)(selfUserID, conn, trace)
 	}
 }
 
@@ -114,13 +117,13 @@ func (s *EncryptStalls) Option() Option {
 // countingSession counts decrypt outcomes and mirrors the backend's set of
 // known users.
 //
-// The mirror is exact for golibdave v0.3.0: its decryptors map is written only
+// The mirror is exact for golibdave c06abab: its decryptors map is written only
 // by AddUser and RemoveUser, both of which are interface methods that pass
 // through here. Re-verify that when the backend is upgraded — if the backend
 // gained a decryptor this wrapper does not know about, Decrypt would pass
 // encrypted audio through as plaintext.
 //
-// UPSTREAM(golibdave v0.3.0): the mirror assumes only AddUser and RemoveUser
+// UPSTREAM(golibdave c06abab): the mirror assumes only AddUser and RemoveUser
 // ever write the backend's decryptor map.
 type countingSession struct {
 	godave.Session
@@ -133,11 +136,23 @@ type countingSession struct {
 	onStall      EncryptStallFunc
 	encryptFails atomic.Int64
 	now          func() time.Time
+	created      time.Time
+
+	traceMu    sync.Mutex
+	trace      [traceLen]TraceEvent
+	traceNext  int
+	traceCount int
 
 	// readyUntil is the unix nanos up to which ready may be answered without
 	// asking the backend; 0 forces the question. See Ready.
 	readyUntil atomic.Int64
 	ready      atomic.Bool
+
+	// disabled mirrors whether the protocol version in effect for the bot's own
+	// encryptor is the disabled one; see Decrypt.
+	disabled      atomic.Bool
+	transitionsMu sync.Mutex
+	pending       map[uint16]bool // transition ID → whether it disables
 
 	mu    sync.RWMutex
 	known map[godave.UserID]*talkSpurt
@@ -186,40 +201,37 @@ func (t *talkSpurt) next(now time.Time) string {
 	}
 }
 
-// Decrypt counts the outcome and handles the no-decryptor case itself.
+// Decrypt counts the outcome and decides the no-decryptor case itself.
 //
-// golibdave v0.3.0 answers an unknown user with passthrough, but its copy has
-// its arguments swapped (golibdave.go:104, `copy(frame, decryptedFrame)`), so
-// it returns a plausible length having written nothing: the caller reads back
-// the untouched output buffer, i.e. a frame of silence, with no error. Handling
-// the case here never reaches that branch.
+// golibdave answers a user it has no decryptor for with passthrough, whether or
+// not the group is encrypted. While the session is in passthrough mode the
+// frame is plain Opus and that is correct. Once an epoch is active it is
+// ciphertext, and disgo hands us UnknownUserID for any SSRC it has no SPEAKING
+// op for yet — routine on join — so forwarding it would feed the mixer and
+// relay garbage audio. Dropping returns a zero-length frame rather than an
+// error, which disgo would turn into a log line per packet.
 //
-// What the right answer is depends on whether the group is encrypted. While the
-// session is in passthrough mode the frame is plain Opus and copying it through
-// is correct. Once an epoch is active it is ciphertext, and disgo hands us
-// UnknownUserID for any SSRC it has no SPEAKING op for yet — routine on join —
-// so forwarding it would feed the mixer and relay garbage audio. Dropping
-// returns a zero-length frame rather than an error, which disgo would turn into
-// a log line per packet.
+// Ready alone cannot tell the two apart: golibdave also reports a session on
+// the disabled protocol version as ready, so the wrapper tracks that version
+// itself.
 //
-// UPSTREAM(golibdave v0.3.0): the unknown-user passthrough copies its arguments
-// the wrong way round (golibdave.go:104), returning a frame of silence.
+// UPSTREAM(golibdave c06abab): the unknown-user passthrough forwards ciphertext
+// while an epoch is active.
 func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedFrame []byte) (int, error) {
 	spurt := s.sender(userID)
 	if spurt == nil {
-		if s.Session.Ready() {
+		if !s.disabled.Load() && s.Session.Ready() {
 			s.stats.RecordDropped(s.botUserID)
 			return 0, nil
 		}
 
-		// cap, not len: disgo sizes this buffer with slices.Grow, which raises
-		// capacity and leaves length at its original 512.
+		// golibdave would cut a frame that does not fit short, without an error.
 		if len(frame) > cap(decryptedFrame) {
 			s.stats.RecordOversized(s.botUserID)
 			return 0, ErrFrameTooLarge
 		}
 		s.stats.RecordPassthrough(s.botUserID)
-		return copy(decryptedFrame[:cap(decryptedFrame)], frame), nil
+		return s.Session.Decrypt(userID, frame, decryptedFrame)
 	}
 
 	position := spurt.next(s.now())
@@ -239,12 +251,12 @@ const readyTTL = 100 * time.Millisecond
 // ask on every 20 ms tick, and golibdave answers with two calls into libdave,
 // for something that changes a few times per session.
 //
-// The answer is forgotten by every handler through which golibdave v0.3.0
+// The answer is forgotten by every handler through which golibdave c06abab
 // reconfigures the encryptor, so a transition is seen on the next tick.
 // Decrypt's own check goes to the backend directly: there a stale answer would
 // pass ciphertext through.
 //
-// UPSTREAM(golibdave v0.3.0): the handlers below are assumed to be the only
+// UPSTREAM(golibdave c06abab): the handlers below are assumed to be the only
 // ones that reach setupKeyRatchetForUser for the bot itself.
 func (s *countingSession) Ready() bool {
 	now := s.now().UnixNano()
@@ -259,27 +271,70 @@ func (s *countingSession) Ready() bool {
 
 func (s *countingSession) OnSelectProtocolAck(protocolVersion uint16) {
 	s.Session.OnSelectProtocolAck(protocolVersion)
+	s.prepareTransition(initTransitionID, protocolVersion == disabledProtocolVersion)
 	s.readyUntil.Store(0)
+	s.record(TraceEvent{Event: "ack", Version: protocolVersion})
+}
+
+func (s *countingSession) OnDavePrepareEpoch(epoch int, protocolVersion uint16) {
+	s.Session.OnDavePrepareEpoch(epoch, protocolVersion)
+	s.record(TraceEvent{Event: "prepare_epoch", Epoch: epoch, Version: protocolVersion})
 }
 
 func (s *countingSession) OnDavePrepareTransition(transitionID uint16, protocolVersion uint16) {
 	s.Session.OnDavePrepareTransition(transitionID, protocolVersion)
+	s.prepareTransition(transitionID, protocolVersion == disabledProtocolVersion)
 	s.readyUntil.Store(0)
+	s.record(TraceEvent{Event: "prepare_transition", Transition: transitionID, Version: protocolVersion})
 }
 
 func (s *countingSession) OnDaveExecuteTransition(transitionID uint16) {
 	s.Session.OnDaveExecuteTransition(transitionID)
+	s.transitionsMu.Lock()
+	if disabled, ok := s.pending[transitionID]; ok {
+		s.disabled.Store(disabled)
+		delete(s.pending, transitionID)
+	}
+	s.transitionsMu.Unlock()
 	s.readyUntil.Store(0)
+	s.record(TraceEvent{Event: "execute_transition", Transition: transitionID})
 }
 
 func (s *countingSession) OnDaveMLSPrepareCommitTransition(transitionID uint16, commitMessage []byte) {
 	s.Session.OnDaveMLSPrepareCommitTransition(transitionID, commitMessage)
+	s.prepareTransition(transitionID, false)
 	s.readyUntil.Store(0)
+	s.record(TraceEvent{Event: "commit", Transition: transitionID})
 }
 
 func (s *countingSession) OnDaveMLSWelcome(transitionID uint16, welcomeMessage []byte) {
 	s.Session.OnDaveMLSWelcome(transitionID, welcomeMessage)
+	s.prepareTransition(transitionID, false)
 	s.readyUntil.Store(0)
+	s.record(TraceEvent{Event: "welcome", Transition: transitionID})
+}
+
+// Protocol version 0 means E2EE is off, and the init transition takes effect
+// without waiting for an execute, as in the DAVE protocol.
+const (
+	disabledProtocolVersion = 0
+	initTransitionID        = 0
+)
+
+// prepareTransition records the protocol change a transition carries: at once
+// for the init transition, otherwise when it executes. MLS commits and welcomes
+// only ever lead to an enabled version.
+func (s *countingSession) prepareTransition(transitionID uint16, disabled bool) {
+	if transitionID == initTransitionID {
+		s.disabled.Store(disabled)
+		return
+	}
+	s.transitionsMu.Lock()
+	defer s.transitionsMu.Unlock()
+	if s.pending == nil {
+		s.pending = make(map[uint16]bool)
+	}
+	s.pending[transitionID] = disabled
 }
 
 // Encrypt counts the outcome, and reports the session through onStall once
@@ -331,7 +386,7 @@ func (s *countingSession) RecordUnsentFrame() {
 
 func (s *countingSession) countEncryptFailure() {
 	if s.onStall != nil && s.stallFrames > 0 && s.encryptFails.Add(1)%s.stallFrames == 0 {
-		s.onStall(s.selfUserID, s.callbacks)
+		s.onStall(s.selfUserID, s.callbacks, s.traceSnapshot())
 	}
 }
 
@@ -339,16 +394,18 @@ func (s *countingSession) countEncryptFailure() {
 // backend: a user is in known only while the backend certainly has a decryptor
 // for them. AddUser therefore records the user after the backend call — libdave
 // sets up the key ratchet in there, and a frame arriving meanwhile must take
-// this wrapper's path rather than the backend's broken one — and RemoveUser
-// drops them before it. The cost either way is a frame handled here that the
-// backend could have decrypted; the alternative is a frame delegated to a
-// backend that cannot, counted as a success and silently replaced with silence.
+// this wrapper's path, which drops it while the group is encrypted — and
+// RemoveUser drops them before it. The cost either way is a frame handled here
+// that the backend could have decrypted; the alternative is a frame delegated
+// to a backend that cannot, whose passthrough forwards the ciphertext as audio
+// and is counted as a success.
 func (s *countingSession) AddUser(userID godave.UserID) {
 	s.Session.AddUser(userID)
 
 	if s.remember(userID) {
 		s.stats.Keep(s.botUserID, string(userID))
 	}
+	s.record(TraceEvent{Event: "add_user"})
 }
 
 func (s *countingSession) RemoveUser(userID godave.UserID) {
@@ -357,6 +414,7 @@ func (s *countingSession) RemoveUser(userID godave.UserID) {
 	}
 
 	s.Session.RemoveUser(userID)
+	s.record(TraceEvent{Event: "remove_user"})
 }
 
 // Close releases every sender still held. disgo closes the session when a conn
@@ -423,4 +481,32 @@ func (s *countingSession) forgetAll() []godave.UserID {
 	}
 	clear(s.known)
 	return users
+}
+
+// record appends a signalling step to the trace, with the backend's readiness
+// and channel size after it. It asks the backend directly rather than through
+// Ready's cache: signalling is rare, and the cache may not have caught up.
+func (s *countingSession) record(e TraceEvent) {
+	e.At = s.now().Sub(s.created)
+	e.Ready = s.Session.Ready()
+	s.mu.RLock()
+	e.Others = len(s.known)
+	s.mu.RUnlock()
+
+	s.traceMu.Lock()
+	defer s.traceMu.Unlock()
+	s.trace[s.traceNext] = e
+	s.traceNext = (s.traceNext + 1) % traceLen
+	s.traceCount = min(s.traceCount+1, traceLen)
+}
+
+func (s *countingSession) traceSnapshot() Trace {
+	s.traceMu.Lock()
+	defer s.traceMu.Unlock()
+	trace := make(Trace, 0, s.traceCount)
+	start := (s.traceNext - s.traceCount + traceLen) % traceLen
+	for i := range s.traceCount {
+		trace = append(trace, s.trace[(start+i)%traceLen])
+	}
+	return trace
 }

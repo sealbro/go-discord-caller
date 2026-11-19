@@ -86,7 +86,7 @@ func TestReadyFollowsATransitionAtOnce(t *testing.T) {
 	}
 }
 
-// The handlers above are the only places golibdave v0.3.0 touches the
+// The handlers above are the only places golibdave c06abab touches the
 // encryptor. Should that stop being true, the answer may be stale, but not for
 // longer than readyTTL.
 func TestReadyIsAskedAgainAfterTheInterval(t *testing.T) {

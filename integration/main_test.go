@@ -24,6 +24,8 @@ func TestMain(m *testing.M) {
 		slog.SetDefault(slog.New(slog.DiscardHandler))
 	}
 
+	test.InstallJoinTracer(os.Stderr)
+
 	cfg, err := test.LoadConfig()
 	if err != nil {
 		log.Fatalf("integration config: %v", err)

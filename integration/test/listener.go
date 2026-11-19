@@ -18,6 +18,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
@@ -99,7 +100,9 @@ type Listener struct {
 }
 
 func newTestListener(ctx context.Context, token string) (*Listener, error) {
+	botID, _ := guild.BotUserID(token)
 	client, err := disgo.New(token,
+		bot.WithEventListeners(pool.VoiceJoinTraceListeners(botID)...),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
@@ -132,7 +135,7 @@ func (l *Listener) StartListening(ctx context.Context, guildID, channelID snowfl
 	l.Receiver = NewCountingReceiver()
 
 	gv := pool.NewGuildVoice(l.client.VoiceManager, channelID)
-	conn, err := gv.Join(ctx, guildID)
+	conn, err := joinTraced(ctx, gv, guildID, l.id, "harness-listener")
 	if err != nil {
 		return nil, fmt.Errorf("listener bot join channel: %w", err)
 	}
@@ -179,7 +182,7 @@ func (l *Listener) StartPlaying(ctx context.Context, guildID, channelID snowflak
 	gv.Leave(leaveCtx, guildID)
 	leaveCancel()
 
-	conn, err := gv.Join(ctx, guildID)
+	conn, err := joinTraced(ctx, gv, guildID, l.id, "harness-listener")
 	if err != nil {
 		provider.Close()
 		return nil, fmt.Errorf("listener bot join channel: %w", err)

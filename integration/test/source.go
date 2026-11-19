@@ -15,6 +15,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave/golibdave"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
 )
@@ -27,7 +28,9 @@ type Speaker struct {
 }
 
 func newTestSpeaker(ctx context.Context, token string) (*Speaker, error) {
+	botID, _ := guild.BotUserID(token)
 	client, err := disgo.New(token,
+		bot.WithEventListeners(pool.VoiceJoinTraceListeners(botID)...),
 		bot.WithGatewayConfigOpts(
 			gateway.WithIntents(gateway.IntentGuildVoiceStates),
 		),
@@ -78,7 +81,7 @@ func (s *Speaker) StartPlayingMutable(ctx context.Context, guildID, channelID sn
 	gv.Leave(leaveCtx, guildID)
 	leaveCancel()
 
-	conn, err := gv.Join(ctx, guildID)
+	conn, err := joinTraced(ctx, gv, guildID, s.id, "harness-source")
 	if err != nil {
 		provider.Close()
 		return nil, nil, fmt.Errorf("source bot join channel: %w", err)

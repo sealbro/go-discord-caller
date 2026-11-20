@@ -40,6 +40,7 @@ type SessionManager interface {
 	StopVoiceRaid(ctx context.Context, guildID snowflake.ID) error
 	JoinSession(ctx context.Context, guestGuildID snowflake.ID, cancelFunc context.CancelFunc, mode guild.RaidMode, code ally.Code) (guild.RaidMode, error)
 	HasActiveSession(guildID snowflake.ID) bool
+	SetupLocked(guildID snowflake.ID) bool
 	AutoRoute(guildID, channelID snowflake.ID)
 	CheckGuildChannelAccess(guildID snowflake.ID) []manager.ChannelAccessWarning
 	SpeakersWithMissingChannel(guildID snowflake.ID) []manager.ChannelAccessWarning

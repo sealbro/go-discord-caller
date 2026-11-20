@@ -365,6 +365,13 @@ func (m *Service) enrichRelayInfo(snap *guild.Status, guildID snowflake.ID) {
 	}
 }
 
+// SetupLocked reports whether the guild's raid settings must not change now:
+// while a raid is active, and also while one is starting or being torn down,
+// since neither of those is an active session yet both act on the bindings.
+func (m *Service) SetupLocked(guildID snowflake.ID) bool {
+	return m.HasActiveSession(guildID) || m.starting.busy(guildID)
+}
+
 // HasActiveSession reports whether there is a running voice raid for the guild.
 func (m *Service) HasActiveSession(guildID snowflake.ID) bool {
 	m.mu.RLock()

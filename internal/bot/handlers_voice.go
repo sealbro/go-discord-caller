@@ -16,9 +16,9 @@ import (
 )
 
 // handleSetup opens the interactive setup panel as an ephemeral message.
-// Blocked while a voice raid is active. Authorization handled by withAdmin middleware.
+// Blocked while a voice raid is active or starting. Authorization handled by withAdmin middleware.
 func (h *CommandHandlers) handleSetup(guildID snowflake.ID, loc *i18n.Localizer, _ discord.SlashCommandInteractionData, e *handler.CommandEvent) error {
-	if h.manager.HasActiveSession(guildID) {
+	if h.manager.SetupLocked(guildID) {
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 

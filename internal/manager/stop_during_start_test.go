@@ -200,3 +200,54 @@ func TestStopDuringSpeakerJoins_ReportsCancellationNotMissingSpeakers(t *testing
 		t.Fatal("start never returned")
 	}
 }
+
+// A raid only becomes active once every bot is in, and for the seconds before
+// that /setup let the caller role, the channels and the relay code change under
+// the start: a speaker that later reconnected went to the newly bound channel,
+// not the one the raid was wired for. The settings stay locked from the moment
+// a start begins until its teardown is over.
+func TestSetupLocked_WhileARaidIsStillStarting(t *testing.T) {
+	f := withCallerRole(newCallerRoleFixture(t))
+	reached := make(chan struct{})
+	release := make(chan struct{})
+	f.ownerVM.onOpen = func() {
+		close(reached)
+		<-release
+	}
+
+	if f.m.SetupLocked(testGuildID) {
+		t.Fatal("settings locked before any raid")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	started := make(chan error, 1)
+	go func() {
+		_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
+		started <- err
+	}()
+
+	select {
+	case <-reached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("start never reached the owner join")
+	}
+	locked := f.m.SetupLocked(testGuildID)
+	close(release)
+	if err := <-started; err != nil {
+		t.Fatalf("StartVoiceRaid: %v", err)
+	}
+	if !locked {
+		t.Error("settings were unlocked while the raid was still starting")
+	}
+
+	if !f.m.SetupLocked(testGuildID) {
+		t.Error("settings unlocked while the raid is active")
+	}
+	if err := f.m.StopVoiceRaid(context.Background(), testGuildID); err != nil {
+		t.Fatalf("StopVoiceRaid: %v", err)
+	}
+	if f.m.SetupLocked(testGuildID) {
+		t.Error("settings still locked after the raid stopped")
+	}
+}

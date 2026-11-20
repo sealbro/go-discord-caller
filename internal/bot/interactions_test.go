@@ -1158,3 +1158,31 @@ func TestCommandSpansCarryNoUserIdentifier(t *testing.T) {
 		t.Fatal("no discord.command span recorded")
 	}
 }
+
+// A raid is not active until every bot is in, so /setup checked only for an
+// active raid and let every change through while one was still starting.
+func TestSetupRefusedWhileARaidIsStarting(t *testing.T) {
+	t.Parallel()
+	who := memberJSON(permAdmin)
+	routes := map[string]string{
+		"open setup":      slashPayload(who, "setup"),
+		"speaker channel": componentPayload(who, fmt.Sprintf("/speakers/bind-channel/%s/0", speakerA), componentChan, channelSelectData(boundChannel)),
+		"owner channel":   componentPayload(who, "/owner/bind-channel", componentChan, channelSelectData(boundChannel)),
+		"caller role":     componentPayload(who, "/setup/bind-role", componentRole, roleSelectData(selectedRole)),
+		"reset ally code": componentPayload(who, "/setup/reset-ally-code", componentBtn, ""),
+	}
+	for name, payload := range routes {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			m := &fakeManager{
+				statusFn:   statusWithSpeakers(1, true),
+				startingFn: func(snowflake.ID) bool { return true },
+			}
+			h := newInteractionHarness(t, m)
+			wantEphemeral(t, h.dispatch(payload), en.T("setup.blocked_active_raid"))
+			if len(m.bindings) != 0 {
+				t.Errorf("bindings = %v, want none", m.bindings)
+			}
+		})
+	}
+}

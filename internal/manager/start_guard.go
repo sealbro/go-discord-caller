@@ -103,6 +103,14 @@ func (g *startGuard) held(guildID snowflake.ID) bool {
 	return g.holds[guildID] != nil
 }
 
+// busy reports whether a start or a teardown is under way for guildID.
+func (g *startGuard) busy(guildID snowflake.ID) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, starting := g.inFlight[guildID]
+	return starting || g.holds[guildID] != nil
+}
+
 func (g *startGuard) release(guildID snowflake.ID) {
 	g.mu.Lock()
 	defer g.mu.Unlock()

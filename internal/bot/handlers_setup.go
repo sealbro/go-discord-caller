@@ -38,7 +38,7 @@ func (h *CommandHandlers) handleRolesMenu(guildID snowflake.ID, loc *i18n.Locali
 // handleResetAllyCode replaces the guild's relay code. Rejected while a raid is
 // active because guests are attached to the current code.
 func (h *CommandHandlers) handleResetAllyCode(guildID snowflake.ID, loc *i18n.Localizer, _ discord.ButtonInteractionData, e *handler.ComponentEvent) error {
-	if h.manager.HasActiveSession(guildID) {
+	if h.manager.SetupLocked(guildID) {
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 	h.manager.ResetAllyCode(guildID)
@@ -62,7 +62,7 @@ func (h *CommandHandlers) handleMainMenu(guildID snowflake.ID, loc *i18n.Localiz
 // role at session start and a mid-session change would leave the cached roleID
 // stale (plan §3.8). The user must /stop the raid before rebinding.
 func (h *CommandHandlers) handleBindRoleMenu(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	if h.manager.HasActiveSession(guildID) {
+	if h.manager.SetupLocked(guildID) {
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 	return h.applyRoleMenuBinding(guildID, loc, store.RoleTypeCaller, data, e)
@@ -183,7 +183,7 @@ func (h *CommandHandlers) handleAddSpeakerButton(guildID snowflake.ID, loc *i18n
 
 // handleBindChannel updates the voice channel bound to a speaker and refreshes the speaker page.
 func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	if h.manager.HasActiveSession(guildID) {
+	if h.manager.SetupLocked(guildID) {
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 	speakerID, err := snowflake.Parse(e.Vars["speakerID"])
@@ -223,7 +223,7 @@ func (h *CommandHandlers) handleBindChannel(guildID snowflake.ID, loc *i18n.Loca
 
 // handleBindOwnerChannel updates the owner bot's voice channel and refreshes the main setup message.
 func (h *CommandHandlers) handleBindOwnerChannel(guildID snowflake.ID, loc *i18n.Localizer, data discord.SelectMenuInteractionData, e *handler.ComponentEvent) error {
-	if h.manager.HasActiveSession(guildID) {
+	if h.manager.SetupLocked(guildID) {
 		return e.CreateMessage(ephemeral(loc.T("setup.blocked_active_raid")))
 	}
 	channelData, ok := data.(discord.ChannelSelectMenuInteractionData)

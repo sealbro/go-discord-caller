@@ -9,7 +9,6 @@ import (
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/store"
 )
 
@@ -75,59 +74,6 @@ func TestE5_InterGuildRelay(t *testing.T) {
 	t.Logf("E5 passed: %d frames relayed to guest guild", h.Listener.Receiver.FramesReceived(speakerIDs[0]))
 }
 
-// TestE5b_AllyCaller verifies bidirectional cross-guild audio: the guest guild
-// captures audio and contributes it to the host relay mixer (AllyCaller mode),
-// and the host's speaker channel receives frames from the guest source.
-// Requires: GuestGuildID, SourceToken2, and the host running GuildCaller.
-func TestE5b_AllyCaller(t *testing.T) {
-	guestCapturePrereqs(t)
-	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
-
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
-	defer cancel()
-
-	speakerIDs := h.RequireSpeakers(t)
-
-	mgr, st := h.NewManager(h.Cfg.Speaker1ChannelID)
-
-	st.BindChannel(h.Cfg.GuestGuildID, h.OwnerID, h.Cfg.GuestOwnerChannelID)
-	st.BindChannel(h.Cfg.GuestGuildID, speakerIDs[0], h.Cfg.GuestSpeakerChannelID)
-	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.GuestCallerRoleID)
-	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
-
-	// Host runs GuildCaller so guest capture is permitted (AllowGuestCapture = true).
-	raidCode, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, guild.RaidModeGuildCaller)
-	if err != nil {
-		t.Fatalf("StartVoiceRaid (host): %v", err)
-	}
-	t.Logf("E5b: host relay code = %s", raidCode)
-
-	// Guest joins as AllyCaller — it will capture and contribute audio.
-	if _, err = mgr.JoinSession(ctx, h.Cfg.GuestGuildID, cancel, guild.RaidModeAllyCaller, raidCode); err != nil {
-		t.Fatalf("JoinSession (guest AllyCaller): %v", err)
-	}
-
-	// Guest source speaks in the guest owner channel; host listener watches speaker1.
-	// MustStartPlaying uses GuildID so we call StartPlaying directly with GuestGuildID.
-	stopSource, err := h.Speaker2.StartPlaying(ctx, h.Cfg.GuestGuildID, h.Cfg.GuestOwnerChannelID, h.Cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker2.StartPlaying in guest guild: %v", err)
-	}
-	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
-
-	t.Cleanup(func() {
-		stopSource()
-		stopListener()
-		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuildID)
-		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuestGuildID)
-	})
-
-	// The guest source's audio travels: guest capture → relay mixer → host speaker channel.
-	AssertFramesReceived(t, h.Listener, speakerIDs[0], 100, 15*time.Second)
-	t.Logf("E5b passed: %d frames from guest AllyCaller reached host speaker channel",
-		h.Listener.Receiver.FramesReceived(speakerIDs[0]))
-}
-
 // TestE5d_RelayResumesAfterIdleHost is the regression test for issue #51 on
 // the host side.
 //
@@ -140,12 +86,16 @@ func TestE5b_AllyCaller(t *testing.T) {
 // dropped from then on.
 //
 // Sequence: guest talks (host mixers active) → both guilds quiet past the drain
-// timeout → guest talks again. The second burst must reach the host.
+// timeout → guest talks again. The second burst must reach the host. The guest
+// caller stays connected and is muted for the lull, as in E16.
+//
+// The first burst is also E5b: a guest in AllyCaller mode captures its own
+// caller and contributes it through the relay mixer to the host's speakers.
 func TestE5d_RelayResumesAfterIdleHost(t *testing.T) {
 	guestCapturePrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	speakerIDs := h.RequireSpeakers(t)
@@ -168,7 +118,9 @@ func TestE5d_RelayResumesAfterIdleHost(t *testing.T) {
 	}
 
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
+	stopSource, mute := startMutableCaller(t, ctx, h.Speaker2, h.Cfg.GuestGuildID, h.Cfg.GuestOwnerChannelID)
 	t.Cleanup(func() {
+		stopSource()
 		stopListener()
 		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuildID)
 		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuestGuildID)
@@ -176,18 +128,18 @@ func TestE5d_RelayResumesAfterIdleHost(t *testing.T) {
 
 	// First burst: proves the relay path works and leaves the host's channel
 	// mixers with a non-zero activity timestamp.
-	stopSource := mustPlayInGuest(t, ctx, h.Cfg.GuestOwnerChannelID)
-	AssertFramesReceived(t, h.Listener, speakerIDs[0], 100, 15*time.Second)
-	stopSource()
+	phase(t, "E5b guest caller reaches host speaker channel", func(t *testing.T) {
+		AssertFramesReceived(t, h.Listener, speakerIDs[0], 100, 15*time.Second)
+	})
 
-	// Lull past DrainIdleTimeout: DrainWatcher pauses the now-idle mixers.
-	time.Sleep(2 * opus.DrainIdleTimeout)
-
-	// Second burst must still arrive.
-	stopSource2 := mustPlayInGuest(t, ctx, h.Cfg.GuestOwnerChannelID)
-	t.Cleanup(stopSource2)
-	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 100, 20*time.Second)
-	t.Logf("E5d passed: relay resumed after a %s idle window", 2*opus.DrainIdleTimeout)
+	phase(t, "E5d relay resumes after a lull", func(t *testing.T) {
+		// Lull past DrainIdleTimeout: DrainWatcher pauses the now-idle mixers.
+		mute(true)
+		time.Sleep(lullDuration)
+		mute(false)
+		AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 100, 20*time.Second)
+		t.Logf("E5d: relay resumed after a %s idle window", lullDuration)
+	})
 }
 
 // TestE5e_RelayResumesAfterIdleGuest is the guest-side half of E5d: the guest
@@ -197,7 +149,7 @@ func TestE5d_RelayResumesAfterIdleHost(t *testing.T) {
 func TestE5e_RelayResumesAfterIdleGuest(t *testing.T) {
 	guestPrereqs(t)
 
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	speakerIDs := h.RequireSpeakers(t)
@@ -220,22 +172,22 @@ func TestE5e_RelayResumesAfterIdleGuest(t *testing.T) {
 	}
 
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuestGuildID, h.Cfg.GuestSpeakerChannelID)
+	stopSource, mute := startMutableCaller(t, ctx, h.Speaker, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
 	t.Cleanup(func() {
+		stopSource()
 		stopListener()
 		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuildID)
 		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuestGuildID)
 	})
 
-	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 	AssertFramesReceived(t, h.Listener, speakerIDs[0], 100, 15*time.Second)
-	stopSource()
 
-	time.Sleep(2 * opus.DrainIdleTimeout)
+	mute(true)
+	time.Sleep(lullDuration)
+	mute(false)
 
-	stopSource2 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	t.Cleanup(stopSource2)
 	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 100, 20*time.Second)
-	t.Logf("E5e passed: relay resumed after a %s idle window", 2*opus.DrainIdleTimeout)
+	t.Logf("E5e passed: relay resumed after a %s idle window", lullDuration)
 }
 
 // TestE5f_StarRelayResumesAfterIdleHost covers the direction E5c leaves
@@ -252,7 +204,7 @@ func TestE5f_StarRelayResumesAfterIdleHost(t *testing.T) {
 	guestCapturePrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set")
 
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	speakerIDs := h.RequireSpeakers(t)
@@ -276,33 +228,22 @@ func TestE5f_StarRelayResumesAfterIdleHost(t *testing.T) {
 
 	// The hub mix is played by the owner bot into the host's owner channel.
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
+	stopSource, mute := startMutableCaller(t, ctx, h.Speaker2, h.Cfg.GuestGuildID, h.Cfg.GuestOwnerChannelID)
 	t.Cleanup(func() {
+		stopSource()
 		stopListener()
 		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuildID)
 		_ = mgr.StopVoiceRaid(t.Context(), h.Cfg.GuestGuildID)
 	})
 
-	stopSource := mustPlayInGuest(t, ctx, h.Cfg.GuestOwnerChannelID)
 	AssertFramesReceived(t, h.Listener, h.OwnerID, 100, 15*time.Second)
-	stopSource()
 
-	time.Sleep(2 * opus.DrainIdleTimeout)
+	mute(true)
+	time.Sleep(lullDuration)
+	mute(false)
 
-	stopSource2 := mustPlayInGuest(t, ctx, h.Cfg.GuestOwnerChannelID)
-	t.Cleanup(stopSource2)
 	AssertFramesIncreasedBy(t, h.Listener, h.OwnerID, 100, 20*time.Second)
-	t.Logf("E5f passed: star hub relay resumed after a %s idle window", 2*opus.DrainIdleTimeout)
-}
-
-// mustPlayInGuest starts source bot 2 in the guest guild and fatals on error.
-// MustStartPlaying is host-guild only, hence the direct StartPlaying call.
-func mustPlayInGuest(t *testing.T, ctx context.Context, channelID snowflake.ID) func() {
-	t.Helper()
-	stop, err := h.Speaker2.StartPlaying(ctx, h.Cfg.GuestGuildID, channelID, h.Cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("speaker2.StartPlaying in guest guild: %v", err)
-	}
-	return stop
+	t.Logf("E5f passed: star hub relay resumed after a %s idle window", lullDuration)
 }
 
 // TestE5c_OneManyAllyCaller verifies that in star-topology guest mode the relay

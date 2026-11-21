@@ -32,41 +32,30 @@ const daveReadyTimeout = 20 * time.Second
 // but a bot alone in its channel never becomes ready, and becomes ready as
 // soon as anyone joins. Discord completes the handshake only once there is a
 // group to share keys with, so a lone bot's silence is harmless — there is
-// nobody to hear it.
+// nobody to hear it. The lone-bot cases are TestE22_E23_LoneSpeaker.
 func TestE22_SpeakerDaveReadiness(t *testing.T) {
 	cases := []struct {
 		name string
-		// withListener puts another member in the channel before the speaker joins.
-		withListener bool
-		// listenerJoinsLater brings the listener in after the speaker joined alone.
-		listenerJoinsLater bool
 		// deafen server-deafens the speaker right after it joins.
 		deafen bool
 		// rejoin leaves and joins again after deafening, as the stall rejoin does.
-		rejoin    bool
-		wantReady bool
+		rejoin bool
 	}{
-		{name: "with listener", withListener: true, wantReady: true},
-		{name: "alone in the channel", wantReady: false},
-		{name: "joined alone, then a listener arrives", listenerJoinsLater: true, wantReady: true},
-		{name: "deafened after joining", withListener: true, deafen: true, wantReady: true},
-		{name: "rejoined while deafened", withListener: true, deafen: true, rejoin: true, wantReady: true},
+		{name: "with listener"},
+		{name: "deafened after joining", deafen: true},
+		{name: "rejoined while deafened", deafen: true, rejoin: true},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 			defer cancel()
 
 			guildID := h.Cfg.GuildID
 			speakerID, gv := speakerVoice(t)
 
-			if tc.withListener {
-				stopListener := h.MustStartListening(t, ctx, guildID, gv.ChannelID())
-				t.Cleanup(stopListener)
-			} else {
-				requireEmptyChannel(t, guildID, gv.ChannelID())
-			}
+			stopListener := h.MustStartListening(t, ctx, guildID, gv.ChannelID())
+			t.Cleanup(stopListener)
 			if tc.deafen {
 				t.Cleanup(func() { _ = h.Listener.SetServerDeaf(guildID, speakerID, false) })
 			}
@@ -78,11 +67,6 @@ func TestE22_SpeakerDaveReadiness(t *testing.T) {
 					t.Fatalf("server-deafen speaker %s: %v", speakerID, err)
 				}
 			}
-			if tc.listenerJoinsLater {
-				time.Sleep(5 * time.Second)
-				stopListener := h.MustStartListening(t, ctx, guildID, gv.ChannelID())
-				t.Cleanup(stopListener)
-			}
 			if tc.rejoin {
 				if !waitDaveReady(conn, daveReadyTimeout) {
 					t.Fatalf("first join: DAVE session not ready after %v", daveReadyTimeout)
@@ -91,21 +75,26 @@ func TestE22_SpeakerDaveReadiness(t *testing.T) {
 				conn = mustJoin(t, ctx, gv)
 			}
 
-			if got := waitDaveReady(conn, daveReadyTimeout); got != tc.wantReady {
-				t.Fatalf("DAVE ready within %v = %v, want %v", daveReadyTimeout, got, tc.wantReady)
+			if !waitDaveReady(conn, daveReadyTimeout) {
+				t.Fatalf("DAVE session not ready within %v", daveReadyTimeout)
 			}
 		})
 	}
 }
 
-// TestE23_LoneSpeakerIsNotReportedAsStalled is the cost of E22's lone-bot
-// case. A speaker alone in its channel with speech queued is not ready, so
-// every frame it skips counts toward an encrypt stall, and the stall rejoins
-// it — into the same empty channel, where it is just as unready. Production,
-// 2026-10-26: 1,927 such rejoins in a day, every one of them futile, for bots
-// nobody could hear.
-func TestE23_LoneSpeakerIsNotReportedAsStalled(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+// TestE22_E23_LoneSpeaker joins a speaker alone into its channel, with speech
+// queued as a raid's fanout would, then brings a listener in.
+//
+//   - E22 "alone in the channel": the speaker never becomes DAVE-ready while
+//     nobody else is there.
+//   - E23 is the cost of that case. Every frame a not-ready speaker skips counts
+//     toward an encrypt stall, and the stall rejoins it — into the same empty
+//     channel, where it is just as unready. Production, 2026-10-26: 1,927 such
+//     rejoins in a day, every one of them futile, for bots nobody could hear.
+//   - E22 "joined alone, then a listener arrives": the speaker becomes ready
+//     as soon as someone joins.
+func TestE22_E23_LoneSpeaker(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	guildID := h.Cfg.GuildID
@@ -125,16 +114,29 @@ func TestE23_LoneSpeakerIsNotReportedAsStalled(t *testing.T) {
 	stopSpeech := feedSpeech(speech)
 	t.Cleanup(stopSpeech)
 
-	// Long enough for the stall detector to have fired at least once.
-	const window = 15 * time.Second
-	time.Sleep(window)
+	// The wait is also long enough for the stall detector (one report per
+	// ~10 s of skipped speech) to have fired at least once.
+	phase(t, "E22 alone in the channel", func(t *testing.T) {
+		if waitDaveReady(conn, daveReadyTimeout) {
+			t.Fatalf("lone speaker became DAVE-ready within %v; Discord no longer behaves as recorded, "+
+				"and E23 below no longer tests anything", daveReadyTimeout)
+		}
+	})
 
-	if conn.DAVE().Ready() {
-		t.Skip("lone speaker became DAVE-ready; Discord no longer behaves as E22 records, so there is nothing to test")
-	}
-	if n := stalls.Load(); n != 0 {
-		t.Fatalf("lone speaker reported as encrypt-stalled %d times in %v: it would be rejoined into the same empty channel", n, window)
-	}
+	phase(t, "E23 lone speaker not reported as stalled", func(t *testing.T) {
+		if n := stalls.Load(); n != 0 {
+			t.Fatalf("lone speaker reported as encrypt-stalled %d times in %v: it would be rejoined into the same empty channel",
+				n, daveReadyTimeout)
+		}
+	})
+
+	phase(t, "E22 joined alone, then a listener arrives", func(t *testing.T) {
+		stopListener := h.MustStartListening(t, ctx, guildID, gv.ChannelID())
+		t.Cleanup(stopListener)
+		if !waitDaveReady(conn, daveReadyTimeout) {
+			t.Fatalf("DAVE session not ready within %v of a listener joining", daveReadyTimeout)
+		}
+	})
 }
 
 // speakerVoice returns the first pool speaker and its voice handle bound to
@@ -224,13 +226,4 @@ func requireEmptyChannel(t *testing.T, guildID, channelID snowflake.ID) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-}
-
-func channelOccupant(guildID, channelID snowflake.ID) (snowflake.ID, bool) {
-	for vs := range h.Owner.Caches.VoiceStates(guildID) {
-		if vs.ChannelID != nil && *vs.ChannelID == channelID {
-			return vs.UserID, true
-		}
-	}
-	return 0, false
 }

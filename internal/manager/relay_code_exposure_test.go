@@ -1,6 +1,4 @@
-//go:build integration
-
-package integration
+package manager
 
 import (
 	"bytes"
@@ -9,11 +7,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 )
 
@@ -34,12 +29,10 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// TestE5g_RelayCodeNotInLogsOrSpans checks that the relay code, the only
-// credential for joining a host's raid, stays out of telemetry: it is the
-// value a guild needs to attach to someone else's session.
-func TestE5g_RelayCodeNotInLogsOrSpans(t *testing.T) {
-	guestPrereqs(t)
-
+// The relay code is the only credential for attaching to someone else's raid,
+// so it must stay out of telemetry across a host start, a guest join and both
+// stops.
+func TestRelayCodeNotInLogsOrSpans(t *testing.T) {
 	logs := &lockedBuffer{}
 	prevLogger := slog.Default()
 	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
@@ -47,29 +40,25 @@ func TestE5g_RelayCodeNotInLogsOrSpans(t *testing.T) {
 
 	ended := spantest.Record()
 
-	ctx, cancel := context.WithTimeout(t.Context(), 45*time.Second)
+	f := withCallerRole(newCallerRoleFixture(t))
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	speakerIDs := h.RequireSpeakers(t)
-	mgr, st := h.NewManager(h.Cfg.Speaker1ChannelID)
-	st.BindChannel(h.Cfg.GuestGuildID, h.OwnerID, h.Cfg.GuestOwnerChannelID)
-	st.BindChannel(h.Cfg.GuestGuildID, speakerIDs[0], h.Cfg.GuestSpeakerChannelID)
-	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)
-	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
-
-	code, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, guild.RaidModeOneCaller)
+	code, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
 	if err != nil {
 		t.Fatalf("StartVoiceRaid (host): %v", err)
 	}
-	if _, err = mgr.JoinSession(ctx, h.Cfg.GuestGuildID, cancel, guild.RaidModeAllyListener, code); err != nil {
+	if code == "" {
+		t.Fatal("host raid returned an empty relay code")
+	}
+	if _, err := f.m.JoinSession(ctx, roleTestGuestGuildID, cancel, guild.RaidModeAllyListener, code); err != nil {
 		t.Fatalf("JoinSession (guest): %v", err)
 	}
 
-	// Spans end and the last log lines are written only when the raids stop.
-	if err := mgr.StopVoiceRaid(t.Context(), h.Cfg.GuestGuildID); err != nil {
+	if err := f.m.StopVoiceRaid(context.Background(), roleTestGuestGuildID); err != nil {
 		t.Fatalf("StopVoiceRaid (guest): %v", err)
 	}
-	if err := mgr.StopVoiceRaid(t.Context(), h.Cfg.GuildID); err != nil {
+	if err := f.m.StopVoiceRaid(context.Background(), testGuildID); err != nil {
 		t.Fatalf("StopVoiceRaid (host): %v", err)
 	}
 
@@ -77,7 +66,7 @@ func TestE5g_RelayCodeNotInLogsOrSpans(t *testing.T) {
 	if !strings.Contains(out, "guest joined relay session") || !strings.Contains(out, "voice raid started") {
 		t.Fatalf("expected the host start and guest join log lines, got:\n%s", out)
 	}
-	if strings.Contains(out, code) {
+	if strings.Contains(out, string(code)) {
 		t.Error("a log line carries the relay code")
 	}
 	recorded := ended()
@@ -86,7 +75,7 @@ func TestE5g_RelayCodeNotInLogsOrSpans(t *testing.T) {
 	}
 	for _, span := range recorded {
 		for _, attr := range span.Attributes() {
-			if strings.Contains(attr.Value.Emit(), code) {
+			if strings.Contains(attr.Value.String(), string(code)) {
 				t.Errorf("span %q carries the relay code in attribute %q", span.Name(), attr.Key)
 			}
 		}

@@ -10,27 +10,40 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
-// TestE13_AutoRouteCopyToMixTransition verifies the auto-router promotes a
-// source from copy to mix when a second caller joins, without a catastrophic
-// audio gap. Budget: 250 ms debounce + atomic install swap → ≤ 1 s gap (≤ 50
-// frames at the nominal 50 fps).
-func TestE13_AutoRouteCopyToMixTransition(t *testing.T) {
-	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need second speaker to trigger copy→mix")
+// routeSwitchWait covers the router's 250 ms debounce plus the Discord event
+// that triggers it.
+const routeSwitchWait = 5 * time.Second
 
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+// TestE13_E15_E14_AutoRouteCopyMixCopy walks the auto-router through both
+// transitions on one raid, asserting each on the router's own transition
+// counter as well as on delivery:
+//
+//   - E13: one caller opens in copy mode; a second caller joining promotes the
+//     source to mix without a catastrophic gap (250 ms debounce + atomic
+//     install swap → well under a second).
+//   - E15: two users in one source channel get distinct SourceBuffers, so the
+//     cap-3 ring does not silently evict one. Spectrogram analysis is out of
+//     scope, so it asserts the stronger invariant — sustained mixer throughput
+//     under two-caller load.
+//   - E14: revoking the second caller's role demotes mix back to copy. A bot
+//     leaving would not do it: onVoiceLeave returns before AutoRoute for bots,
+//     and every caller here is a bot, so the demotion is driven through
+//     onGuildMemberUpdate → NotifyMemberUpdate instead.
+func TestE13_E15_E14_AutoRouteCopyMixCopy(t *testing.T) {
+	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need a second caller for mix mode")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	// Single caller at raid start so the router opens in copy mode.
-	stopSpeaker1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
+	stopSpeaker1 := startCaller(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 
 	_, sessionCancel := context.WithCancel(ctx)
-	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
+	mgr, reader := h.MustStartRaidRecording(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
 
-	speakerIDs := h.RequireSpeakers(t)
+	speakerID := h.RequireSpeakers(t)[0]
 
-	var stopSpeaker2 func() = func() {}
+	stopSpeaker2 := func() {}
 	t.Cleanup(func() {
 		stopSpeaker1()
 		stopSpeaker2()
@@ -38,87 +51,30 @@ func TestE13_AutoRouteCopyToMixTransition(t *testing.T) {
 		_ = mgr.StopVoiceRaid(context.Background(), h.Cfg.GuildID)
 	})
 
-	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
-	t.Log("E13: copy-mode steady state established, joining second caller...")
-
-	stop2, err := h.Speaker2.StartPlaying(ctx, h.Cfg.GuildID, h.Cfg.OwnerChannelID, h.Cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("Speaker2.StartPlaying: %v", err)
-	}
-	stopSpeaker2 = stop2
-
-	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
-	t.Log("E13 passed: copy→mix transition kept audio flowing")
-}
-
-// TestE14_AutoRouteMixToCopyTransition is the reverse of E13: starts with
-// two callers (mix mode), drops one, verifies the router demotes back to
-// copy without losing delivery. Exercises the install-teardown +
-// mixer-pause path on the demotion.
-func TestE14_AutoRouteMixToCopyTransition(t *testing.T) {
-	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need second speaker to start in mix mode")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
-	defer cancel()
-
-	stopSpeaker1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	stopSpeaker2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
-
-	_, sessionCancel := context.WithCancel(ctx)
-	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
-	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
-
-	speakerIDs := h.RequireSpeakers(t)
-	t.Cleanup(func() {
-		stopSpeaker1()
-		stopSpeaker2() // idempotent; safe after the in-test stop below
-		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.Cfg.GuildID)
+	phase(t, "E13 single caller in copy mode", func(t *testing.T) {
+		awaitRouteTransition(t, reader, "off", "copy", 0, routeSwitchWait)
+		AssertFramesReceived(t, h.Listener, speakerID, 50, 8*time.Second)
 	})
 
-	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
-	t.Log("E14: mix-mode steady state established, dropping second caller...")
-
-	stopSpeaker2()
-	stopSpeaker2 = func() {}
-
-	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 50, 5*time.Second)
-	t.Log("E14 passed: mix→copy transition kept audio flowing")
-}
-
-// TestE15_TwoCallersSameChannelNoEviction exercises the §4.3 per-user keying
-// fix: two users in one source channel must get distinct SourceBuffers so the
-// cap-3 ring does not silently evict one. Spectrogram analysis is out of
-// scope, so we assert the stronger invariant — sustained mixer throughput
-// under two-caller load with no panic.
-func TestE15_TwoCallersSameChannelNoEviction(t *testing.T) {
-	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need both speakers in the same channel")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	stopSpeaker1 := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	stopSpeaker2 := h.MustStartPlaying(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
-
-	_, sessionCancel := context.WithCancel(ctx)
-	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
-	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
-
-	speakerIDs := h.RequireSpeakers(t)
-	t.Cleanup(func() {
-		stopSpeaker1()
-		stopSpeaker2()
-		stopListener()
-		_ = mgr.StopVoiceRaid(context.Background(), h.Cfg.GuildID)
+	phase(t, "E13 second caller promotes copy to mix", func(t *testing.T) {
+		base := routeTransitions(t, reader, "copy", "mix")
+		stopSpeaker2 = startCaller(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
+		awaitRouteTransition(t, reader, "copy", "mix", base, routeSwitchWait)
+		AssertFramesIncreasedBy(t, h.Listener, speakerID, 50, 5*time.Second)
 	})
 
-	AssertFramesReceived(t, h.Listener, speakerIDs[0], 50, 8*time.Second)
-	t.Log("E15: mix-mode steady state established with both callers; verifying sustained throughput...")
+	phase(t, "E15 two callers sustain mix throughput", func(t *testing.T) {
+		// 400 frames / 10 s ≈ 80 % of nominal 50 fps. The pre-fix shared ring
+		// would lose about half of that under continuous two-caller load.
+		AssertFramesIncreasedBy(t, h.Listener, speakerID, 400, 10*time.Second)
+	})
 
-	// 400 frames / 10 s ≈ 80 % of nominal 50 fps. The pre-fix shared-ring
-	// would lose ~half of that under continuous stereo load.
-	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 400, 10*time.Second)
-	t.Log("E15 passed: two-callers-in-one-channel mix kept throughput at expected rate")
+	scenario := t
+	phase(t, "E14 role revoke demotes mix to copy", func(t *testing.T) {
+		requireRoleManagement(t)
+		base := routeTransitions(t, reader, "mix", "copy")
+		revokeCallerRole(scenario, h.Speaker2.ID())
+		awaitRouteTransition(t, reader, "mix", "copy", base, routeSwitchWait)
+		AssertFramesIncreasedBy(t, h.Listener, speakerID, 50, 5*time.Second)
+	})
 }

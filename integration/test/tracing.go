@@ -32,7 +32,7 @@ import (
 //
 // The printer joins spantest's provider rather than installing its own: only
 // the first provider installed reaches telemetry.Tracer, and tests that read
-// spans through spantest (E5g) would otherwise record nothing.
+// spans through spantest would otherwise record nothing.
 func InstallJoinTracer(w io.Writer) {
 	spantest.Record()
 	tp, ok := otel.GetTracerProvider().(*trace.TracerProvider)

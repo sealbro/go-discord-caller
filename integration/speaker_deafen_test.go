@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"slices"
+	"syscall"
 	"testing"
 	"time"
 
@@ -12,9 +13,15 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
-// deafSettleDelay gives Discord time to apply a member voice-state PATCH and
-// propagate it before the test reads the member back over REST.
-const deafSettleDelay = 2 * time.Second
+// deafWait bounds how long a server-deaf change may take to show up over REST.
+// Undeafening is immediate and deafening waits the controller's 5 s delay, so
+// this leaves a few seconds for Discord on top of the slower of the two.
+const deafWait = 10 * time.Second
+
+// idleCPUBudget is the share of one core an idle raid may use. A healthy idle
+// raid sits in the low single-digit percent; a busy-looping voice goroutine
+// takes a whole core on its own.
+const idleCPUBudget = 0.5
 
 // requireDeafenPower skips the test when the owner bot cannot server-deafen the
 // given speaker in this guild — missing DEAFEN_MEMBERS, or a role that does not
@@ -47,11 +54,7 @@ func requireListenerCaller(t *testing.T) {
 	if slices.Contains(member.RoleIDs, roleID) {
 		return
 	}
-	canManage, why, err := h.Listener.CanManageRole(guildID, roleID)
-	if err != nil {
-		t.Fatalf("check caller-role management: %v", err)
-	}
-	skipIfMissing(t, canManage, "listener cannot take the caller role: %s", why)
+	requireRoleManagement(t)
 
 	if err := h.Listener.AddMemberRole(guildID, listenerID, roleID); err != nil {
 		t.Fatalf("grant the caller role to the listener: %v", err)
@@ -59,69 +62,9 @@ func requireListenerCaller(t *testing.T) {
 	t.Cleanup(func() { _ = h.Listener.RemoveMemberRole(guildID, listenerID, roleID) })
 }
 
-// TestE19_NonCaptureSpeakersAreServerDeafened covers the whole server-deafen
-// path in a non-capture mode (RaidModeOneCaller): the speaker is deafened for
-// the life of the raid, keeps relaying audio while deafened, and is undeafened
-// on teardown.
-//
-// The middle assertion is the load-bearing one. Server deafen is the only lever
-// that stops Discord forwarding RTP — self_deaf is ignored by the voice server
-// (measured 2026-09-09; see internal/manager/speaker_deafen.go) — and the whole
-// optimisation rests on it being receive-only. If Discord ever made server
-// deafen suppress outbound too, every non-capture raid would go silent. This is
-// the test that catches that.
-func TestE19_NonCaptureSpeakersAreServerDeafened(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
-	defer cancel()
-
-	guildID := h.Cfg.GuildID
-
-	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
-
-	// Child cancel so StopVoiceRaid does not cancel the test's own ctx.
-	_, sessionCancel := context.WithCancel(ctx)
-	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeOneCaller, h.Cfg.Speaker1ChannelID)
-	stopListener := h.MustStartListening(t, ctx, guildID, h.Cfg.Speaker1ChannelID)
-
-	// Only speakers bound to a channel join the raid, and this raid binds one —
-	// RequireSpeakers reports the whole connected pool, so assert on the joiner.
-	speakerIDs := h.RequireSpeakers(t)
-	speakerID := speakerIDs[0]
-	h.RegisterCleanup(t, mgr, stopSource, stopListener)
-	requireDeafenPower(t, speakerID)
-
-	time.Sleep(deafSettleDelay)
-
-	deaf, err := h.Listener.MemberServerDeaf(guildID, speakerID)
-	if err != nil {
-		t.Fatalf("read speaker %s member: %v", speakerID, err)
-	}
-	if !deaf {
-		t.Fatalf("speaker %s is not server-deafened during a non-capture raid", speakerID)
-	}
-	t.Log("E19: speaker server-deafened; checking audio still flows")
-
-	// Deafened speakers must still relay. This is the receive-only property.
-	AssertFramesReceived(t, h.Listener, speakerID, 100, 20*time.Second)
-	t.Logf("E19: %d frames relayed while deafened", h.Listener.Receiver.FramesReceived(speakerID))
-
-	if err := mgr.StopVoiceRaid(ctx, guildID); err != nil {
-		t.Fatalf("StopVoiceRaid: %v", err)
-	}
-	time.Sleep(deafSettleDelay)
-
-	deaf, err = h.Listener.MemberServerDeaf(guildID, speakerID)
-	if err != nil {
-		t.Fatalf("read speaker %s member after stop: %v", speakerID, err)
-	}
-	if deaf {
-		t.Fatalf("speaker %s left server-deafened after raid teardown", speakerID)
-	}
-	t.Log("E19 passed: deafened during raid, relaying throughout, undeafened after")
-}
-
-// TestE20_CaptureRaidRepairsStrandedDeaf is the reconcile half.
+// TestE20_CaptureRaidRepairsStrandedDeaf is the reconcile half of the
+// server-deafen path (E19, in TestE1_OneCallerLifecycle, is the non-capture
+// half).
 //
 // A server-deaf flag persists on the guild member across voice sessions, and a
 // deafened bot receives no RTP at all — so a flag stranded by a crash mid
@@ -137,22 +80,20 @@ func TestE19_NonCaptureSpeakersAreServerDeafened(t *testing.T) {
 // The speaker's channel needs a caller throughout. Without one the bot deafens
 // the speaker itself and undoes that on stop, erasing the stranded flag.
 func TestE20_CaptureRaidRepairsStrandedDeaf(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
 
 	guildID := h.Cfg.GuildID
 	requireListenerCaller(t)
 
-	stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
+	stopSource := startCaller(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
 
 	_, firstCancel := context.WithCancel(ctx)
 	mgr := h.MustStartRaid(t, ctx, firstCancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID)
 	stopListener := h.MustStartListening(t, ctx, guildID, h.Cfg.Speaker1ChannelID)
 
-	// Only the bound speaker joins; see E17.
-	speakerIDs := h.RequireSpeakers(t)
-	speakerID := speakerIDs[0]
+	// Only the bound speaker joins the raid.
+	speakerID := h.RequireSpeakers(t)[0]
 	h.RegisterCleanup(t, mgr, stopSource, stopListener)
 	requireDeafenPower(t, speakerID)
 
@@ -162,7 +103,9 @@ func TestE20_CaptureRaidRepairsStrandedDeaf(t *testing.T) {
 		_ = h.Listener.SetServerDeaf(guildID, speakerID, false)
 	})
 
-	time.Sleep(deafSettleDelay)
+	// The capture join must have left the speaker hearing before the strand,
+	// or a late reconcile could erase it.
+	waitForDeaf(t, guildID, speakerID, false, deafWait, "capture-mode speaker should hear")
 
 	// Strand the flag while the speaker is connected (Discord rejects the PATCH
 	// otherwise). Capture-mode teardown has no undeafen step, so this survives
@@ -170,15 +113,14 @@ func TestE20_CaptureRaidRepairsStrandedDeaf(t *testing.T) {
 	if err := h.Listener.SetServerDeaf(guildID, speakerID, true); err != nil {
 		t.Fatalf("strand deaf flag on speaker %s: %v", speakerID, err)
 	}
-	time.Sleep(deafSettleDelay)
+	waitForDeaf(t, guildID, speakerID, true, deafWait, "stranded deaf flag should apply")
 
 	if err := mgr.StopVoiceRaid(ctx, guildID); err != nil {
 		t.Fatalf("StopVoiceRaid: %v", err)
 	}
-	time.Sleep(deafSettleDelay)
 
-	// Confirm the strand actually took, so a pass below means the reconcile ran
-	// rather than that there was nothing to repair.
+	// Confirm the strand survived teardown, so a pass below means the reconcile
+	// ran rather than that there was nothing to repair.
 	deaf, err := h.Listener.MemberServerDeaf(guildID, speakerID)
 	if err != nil {
 		t.Fatalf("read speaker %s member: %v", speakerID, err)
@@ -192,32 +134,33 @@ func TestE20_CaptureRaidRepairsStrandedDeaf(t *testing.T) {
 	if _, err := mgr.StartVoiceRaid(ctx, guildID, secondCancel, guild.RaidModeGuildCaller); err != nil {
 		t.Fatalf("StartVoiceRaid (restart): %v", err)
 	}
-	time.Sleep(deafSettleDelay)
-
-	deaf, err = h.Listener.MemberServerDeaf(guildID, speakerID)
-	if err != nil {
-		t.Fatalf("read speaker %s member after restart: %v", speakerID, err)
-	}
-	if deaf {
-		t.Fatalf("capture raid did not repair stranded deaf flag on speaker %s — capture is silent", speakerID)
-	}
+	waitForDeaf(t, guildID, speakerID, false, deafWait,
+		"capture raid did not repair the stranded deaf flag — capture is silent")
 	t.Log("E20 passed: capture-mode join cleared the stranded deaf flag")
 }
 
-// TestE21_DeafFollowsCallerPresence is the dynamic path end-to-end: a capture
-// bot whose channel holds nobody worth capturing gets deafened, and hearing is
-// restored the moment a caller arrives.
+// TestE21_IdleRaidAndDeafFollowsCallerPresence runs a capture raid that starts
+// with nobody to capture and checks two things on it.
 //
-// Direction matters here for a harness reason. onVoiceLeave (internal/bot/
-// handlers.go) returns early for bots before reaching AutoRoute, and every
-// "caller" in the test guild is a bot standing in for a human — so a caller
-// *leaving* never triggers a recompute in this environment, though it does in
-// production where callers are people. Joins and session start both recompute
-// for bots, so the test drives those: start with an empty channel (case 2),
-// then have a caller arrive (case 6). The leave direction is covered by
-// TestCaptureObserverFollowsCallerPresence at the router level.
-func TestE21_DeafFollowsCallerPresence(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 180*time.Second)
+// The dynamic deafen path end-to-end: a capture bot whose channel holds nobody
+// worth capturing gets deafened, and hearing is restored the moment a caller
+// arrives. Direction matters here for a harness reason. onVoiceLeave
+// (internal/bot/handlers.go) returns early for bots before reaching AutoRoute,
+// and every "caller" in the test guild is a bot standing in for a human — so a
+// caller *leaving* never triggers a recompute in this environment, though it
+// does in production where callers are people. Joins and session start both
+// recompute for bots, so the test drives those: start with an empty channel
+// (case 2), then have a caller arrive (case 6). The leave direction is covered
+// by TestCaptureObserverFollowsCallerPresence at the router level.
+//
+// The idle CPU cost, measured before the caller arrives. Production,
+// 2026-10-25: a raid pinned the host's only core for hours, and every bot's
+// gateway heartbeat slowed from ~110 ms to ~545 ms behind it. The spin was
+// silent — no allocations, no logs — so no assertion on audio or state can see
+// it; only CPU time does. Every bot in this harness runs in the test process,
+// so its CPU time covers all of them.
+func TestE21_IdleRaidAndDeafFollowsCallerPresence(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 
 	guildID := h.Cfg.GuildID
@@ -225,31 +168,49 @@ func TestE21_DeafFollowsCallerPresence(t *testing.T) {
 	// No caller in the owner channel: the owner bot captures nothing.
 	_, sessionCancel := context.WithCancel(ctx)
 	mgr := h.MustStartRaid(t, ctx, sessionCancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID)
+	raidStarted := time.Now()
 	stopListener := h.MustStartListening(t, ctx, guildID, h.Cfg.Speaker1ChannelID)
 
-	speakerIDs := h.RequireSpeakers(t)
+	speakerID := h.RequireSpeakers(t)[0]
 	h.RegisterCleanup(t, mgr, stopListener)
-	requireDeafenPower(t, speakerIDs[0])
-
 	t.Cleanup(func() { _ = h.Listener.SetServerDeaf(guildID, h.OwnerID, false) })
 
-	// Case 2: capture bot in a channel with nobody holding the role.
-	waitForDeaf(t, guildID, h.OwnerID, true, 60*time.Second,
-		"owner should be deafened while its channel has no callers")
-	t.Log("E21: owner deafened with an empty channel")
+	phase(t, "E21 owner deafened with an empty channel", func(t *testing.T) {
+		requireDeafenPower(t, speakerID)
+		waitForDeaf(t, guildID, h.OwnerID, true, deafWait,
+			"owner should be deafened while its channel has no callers")
+	})
 
-	// Case 6: a role-bearing member joins. Undeafening must not wait out the
-	// deafen delay, so the window here is deliberately tight.
-	joinedAt := time.Now()
-	stopSource, err := h.Speaker.StartPlaying(ctx, guildID, h.Cfg.OwnerChannelID, h.Cfg.SamplesDir)
-	if err != nil {
-		t.Fatalf("caller join: %v", err)
-	}
-	t.Cleanup(stopSource)
+	phase(t, "idle raid does not spin CPU", func(t *testing.T) {
+		// Let joins and DAVE handshakes finish, so the window measures the raid
+		// at rest rather than its start-up.
+		const settle = 10 * time.Second
+		time.Sleep(settle - time.Since(raidStarted))
 
-	waitForDeaf(t, guildID, h.OwnerID, false, 20*time.Second,
-		"owner should hear as soon as a caller joins")
-	t.Logf("E21 passed: undeafened %v after the caller joined", time.Since(joinedAt).Round(time.Second))
+		const window = 10 * time.Second
+		before := processCPUTime(t)
+		time.Sleep(window)
+		used := processCPUTime(t) - before
+
+		share := used.Seconds() / window.Seconds()
+		if share > idleCPUBudget {
+			t.Fatalf("idle raid used %v of CPU in %v (%.0f%% of one core, budget %.0f%%): "+
+				"a voice goroutine is busy-looping", used.Round(time.Millisecond), window, share*100, idleCPUBudget*100)
+		}
+		t.Logf("idle raid used %v of CPU in %v (%.1f%% of one core)", used.Round(time.Millisecond), window, share*100)
+	})
+
+	phase(t, "E21 owner undeafened when a caller joins", func(t *testing.T) {
+		requireDeafenPower(t, speakerID)
+		// Undeafening must not wait out the deafen delay, so the window here
+		// is deliberately tight.
+		joinedAt := time.Now()
+		stopSource := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
+		t.Cleanup(stopSource)
+		waitForDeaf(t, guildID, h.OwnerID, false, deafWait,
+			"owner should hear as soon as a caller joins")
+		t.Logf("E21: undeafened %v after the caller joined", time.Since(joinedAt).Round(time.Second))
+	})
 }
 
 // waitForDeaf polls a member's server-deaf flag until it reaches want.
@@ -266,7 +227,17 @@ func waitForDeaf(t *testing.T, guildID, userID snowflake.ID, want bool, timeout 
 		if got == want {
 			return
 		}
-		time.Sleep(time.Second)
+		time.Sleep(250 * time.Millisecond)
 	}
 	t.Fatalf("%s: deaf = %v after %v, want %v", msg, last, timeout, want)
+}
+
+// processCPUTime is the user plus system CPU time this process has used.
+func processCPUTime(t *testing.T) time.Duration {
+	t.Helper()
+	var ru syscall.Rusage
+	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
+		t.Fatalf("getrusage: %v", err)
+	}
+	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
 }

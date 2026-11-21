@@ -28,6 +28,11 @@ import (
 // mixer's pause state is irrelevant. The mixer only carries audio in RouteMix,
 // which needs two or more callers.
 
+// lullDuration outlasts DrainIdleTimeout by one DrainWatcher check (it runs
+// every DrainIdleTimeout/2) plus a margin for frames still in flight, so the
+// watcher has certainly paused the idle mixers before the callers speak again.
+const lullDuration = opus.DrainIdleTimeout + opus.DrainIdleTimeout/2 + 500*time.Millisecond
+
 // TestE16_HostMixResumesAfterCallerLull is the host-guild (no relay) case.
 //
 // Two callers share the owner's channel, so the destination is fed by its
@@ -43,14 +48,13 @@ import (
 func TestE16_HostMixResumesAfterCallerLull(t *testing.T) {
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need two callers for RouteMix")
 
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
 	defer cancel()
 
 	// Both callers in-channel before raid start so prefetchChannelMembers
 	// resolves them with full RoleIDs (see E1).
-	stop1, mute1 := h.MustStartPlayingMutable(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	stop2, mute2 := h.MustStartPlayingMutable(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
+	stop1, mute1 := startMutableCaller(t, ctx, h.Speaker, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
+	stop2, mute2 := startMutableCaller(t, ctx, h.Speaker2, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
 
 	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID)
 	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
@@ -68,28 +72,29 @@ func TestE16_HostMixResumesAfterCallerLull(t *testing.T) {
 	// The lull. Callers stay connected — no voice event, nothing recomputes.
 	mute1(true)
 	mute2(true)
-	time.Sleep(2 * opus.DrainIdleTimeout)
+	time.Sleep(lullDuration)
 
 	mute1(false)
 	mute2(false)
 	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 100, 25*time.Second)
-	t.Logf("E16 passed: host mix resumed after a %s caller lull", 2*opus.DrainIdleTimeout)
+	t.Logf("E16 passed: host mix resumed after a %s caller lull", lullDuration)
 }
 
 // TestE17_RelayResumesAfterHostCallerLull is the ally case, and the one that
 // matches the field report "the guest stopped hearing the host".
 //
-// It differs from E5d/E5e in what falls silent. Those drive audio from a guild
-// that keeps capturing, so the host's relay-fed destinations stay protected by
-// DrainWatcher.WithKeepAlive(relayFeed). Here the *host's own callers* go quiet
-// while the guest is attached as a listener, so HasCapturingPeers is false on
-// the host side and keepAlive does not hold its mixers open — they are eligible
-// for exactly the auto-pause that never reverses.
+// Unlike E16, no mixer on this path can be auto-paused: the host's relay mixer
+// has no DrainWatcher, and a listener guest's own mix is held open while it is
+// attached. E17 is the end-to-end check that host → guest audio survives a host
+// lull through that mix. Holding it open is what saves the host's first words
+// after the lull; TestListenerGuestHearsHostRightAfterALull pins that, since the
+// watcher would otherwise lift its pause within a few seconds and this test
+// could not tell the difference.
 func TestE17_RelayResumesAfterHostCallerLull(t *testing.T) {
 	guestPrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need two callers for RouteMix")
 
-	ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
+	ctx, cancel := context.WithTimeout(t.Context(), 75*time.Second)
 	defer cancel()
 
 	speakerIDs := h.RequireSpeakers(t)
@@ -100,9 +105,8 @@ func TestE17_RelayResumesAfterHostCallerLull(t *testing.T) {
 	st.BindRole(h.Cfg.GuestGuildID, store.RoleTypeCaller, h.Cfg.CallerRoleID)
 	mgr.SeedExistingSpeakers([]snowflake.ID{h.Cfg.GuestGuildID})
 
-	stop1, mute1 := h.MustStartPlayingMutable(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-	stop2, mute2 := h.MustStartPlayingMutable(t, ctx, h.Speaker2, h.Cfg.OwnerChannelID)
-	time.Sleep(500 * time.Millisecond)
+	stop1, mute1 := startMutableCaller(t, ctx, h.Speaker, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
+	stop2, mute2 := startMutableCaller(t, ctx, h.Speaker2, h.Cfg.GuildID, h.Cfg.OwnerChannelID)
 
 	raidCode, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, guild.RaidModeGuildCaller)
 	if err != nil {
@@ -110,8 +114,6 @@ func TestE17_RelayResumesAfterHostCallerLull(t *testing.T) {
 	}
 	t.Logf("E17: host relay code = %s", raidCode)
 
-	// Guest attaches as a listener: it never captures, so the host's relay
-	// keepAlive predicate stays false throughout.
 	if _, err = mgr.JoinSession(ctx, h.Cfg.GuestGuildID, cancel, guild.RaidModeAllyListener, raidCode); err != nil {
 		t.Fatalf("JoinSession (ally listener): %v", err)
 	}
@@ -130,10 +132,10 @@ func TestE17_RelayResumesAfterHostCallerLull(t *testing.T) {
 
 	mute1(true)
 	mute2(true)
-	time.Sleep(2 * opus.DrainIdleTimeout)
+	time.Sleep(lullDuration)
 
 	mute1(false)
 	mute2(false)
 	AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 100, 30*time.Second)
-	t.Logf("E17 passed: relay to guest resumed after a %s host lull", 2*opus.DrainIdleTimeout)
+	t.Logf("E17 passed: relay to guest resumed after a %s host lull", lullDuration)
 }

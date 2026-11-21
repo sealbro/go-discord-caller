@@ -83,12 +83,13 @@ func TestE16_HostMixResumesAfterCallerLull(t *testing.T) {
 // TestE17_RelayResumesAfterHostCallerLull is the ally case, and the one that
 // matches the field report "the guest stopped hearing the host".
 //
-// It differs from E5d/E5e in what falls silent. Those drive audio from a guild
-// that keeps capturing, so the host's relay-fed destinations stay protected by
-// DrainWatcher.WithKeepAlive(relayFeed). Here the *host's own callers* go quiet
-// while the guest is attached as a listener, so HasCapturingPeers is false on
-// the host side and keepAlive does not hold its mixers open — they are eligible
-// for exactly the auto-pause that never reverses.
+// Unlike E16, no mixer on this path can be auto-paused: the host's relay mixer
+// has no DrainWatcher, and a listener guest's own mix is held open while it is
+// attached. E17 is the end-to-end check that host → guest audio survives a host
+// lull through that mix. Holding it open is what saves the host's first words
+// after the lull; TestListenerGuestHearsHostRightAfterALull pins that, since the
+// watcher would otherwise lift its pause within a few seconds and this test
+// could not tell the difference.
 func TestE17_RelayResumesAfterHostCallerLull(t *testing.T) {
 	guestPrereqs(t)
 	skipIfMissing(t, h.Speaker2 != nil, "E2E_SOURCE_BOT_TOKEN_2 not set — need two callers for RouteMix")
@@ -113,8 +114,6 @@ func TestE17_RelayResumesAfterHostCallerLull(t *testing.T) {
 	}
 	t.Logf("E17: host relay code = %s", raidCode)
 
-	// Guest attaches as a listener: it never captures, so the host's relay
-	// keepAlive predicate stays false throughout.
 	if _, err = mgr.JoinSession(ctx, h.Cfg.GuestGuildID, cancel, guild.RaidModeAllyListener, raidCode); err != nil {
 		t.Fatalf("JoinSession (ally listener): %v", err)
 	}

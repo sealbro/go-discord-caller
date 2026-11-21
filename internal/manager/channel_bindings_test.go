@@ -157,7 +157,7 @@ func TestReconnectBotChannel_GivesUpWhenOwnerChannelIsGone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMetrics: %v", err)
 	}
-	m := bindingsService(st, &bot.Client{VoiceManager: &recordingVoiceManager{}, Caches: cachesWithChannels(t, testGuildID, keptChannel)})
+	m := bindingsService(st, &bot.Client{VoiceManager: &fakeVoiceManager{}, Caches: cachesWithChannels(t, testGuildID, keptChannel)})
 	m.metrics = metrics
 	m.statuses[testGuildID] = &guild.Status{GuildID: testGuildID, Session: &guild.Session{GuildID: testGuildID}}
 	m.storeApplier(testGuildID, testBotID, m.buildApplier(testGuildID, testBotID, nil, nil, nil))

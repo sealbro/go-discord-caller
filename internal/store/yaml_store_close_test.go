@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -43,11 +44,19 @@ func TestYAMLStore_DuplicateRelayCodesOnLoadAreMadeUnique(t *testing.T) {
 }
 
 func TestYAMLStore_CloseIsSafeFromSeveralGoroutines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "store.yaml")
 	for range 200 {
-		s, err := NewYAMLStore(filepath.Join(t.TempDir(), "store.yaml"))
+		s, err := NewYAMLStore(path)
 		if err != nil {
 			t.Fatalf("NewYAMLStore: %v", err)
 		}
+		var writes atomic.Int32
+		s.mu.Lock()
+		s.writeFile = func(string, []byte) error {
+			writes.Add(1)
+			return nil
+		}
+		s.mu.Unlock()
 		start := make(chan struct{})
 		var wg sync.WaitGroup
 		for range 8 {
@@ -58,5 +67,8 @@ func TestYAMLStore_CloseIsSafeFromSeveralGoroutines(t *testing.T) {
 		}
 		close(start)
 		wg.Wait()
+		if n := writes.Load(); n != 1 {
+			t.Fatalf("concurrent Closes flushed %d times, want once", n)
+		}
 	}
 }

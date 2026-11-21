@@ -10,11 +10,6 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
-const (
-	testGuildID = snowflake.ID(1430511050704289835)
-	testBotID   = snowflake.ID(1484911601210495038)
-)
-
 // newTestService builds a Service with only the fields reapplyAfterVoiceReady
 // touches. It deliberately skips metrics/store/pool: the re-identify repair path
 // reads m.statuses and m.reconnect and nothing else.

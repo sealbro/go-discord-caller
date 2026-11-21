@@ -74,6 +74,10 @@ func TestStaleRecomputeDoesNotOverwriteNewerOne(t *testing.T) {
 	probe.set(chanID, userA)
 	second := recomputeAsync(r)
 
+	// Recomputes are serialised, so the second one waits on a mutex here and
+	// this times out; without that it gets the chance to finish first, which is
+	// the interleaving that publishes the stale result. A mutex wait is not
+	// something synctest can wait out, hence the real timer.
 	select {
 	case <-second:
 	case <-time.After(100 * time.Millisecond):

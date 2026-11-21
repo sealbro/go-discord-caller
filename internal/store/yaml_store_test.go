@@ -3,7 +3,9 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -377,39 +379,56 @@ func TestYAMLStore_AtomicWrite(t *testing.T) {
 // TestYAMLStore_DebounceFlush verifies the debounce timer flushes to disk
 // without an explicit Close.
 func TestYAMLStore_DebounceFlush(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "debounce.yaml")
-	s, err := NewYAMLStore(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer s.Close()
+	synctest.Test(t, func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "debounce.yaml")
+		s, err := NewYAMLStore(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		var writes atomic.Int32
+		s.mu.Lock()
+		s.writeFile = func(path string, data []byte) error {
+			writes.Add(1)
+			return writeFileAtomic(path, data)
+		}
+		s.mu.Unlock()
 
-	s.BindChannel(guild1, user1, chan1)
+		s.BindChannel(guild1, user1, chan1)
+		time.Sleep(saveDebounce / 2)
+		s.BindChannel(guild1, user2, chan1)
 
-	// Poll the file directly — opening a second YAMLStore would start its own
-	// flushLoop whose Close() final-flush could overwrite the file with empty
-	// content and race against s's debounced save.
-	deadline := time.Now().Add(saveDebounce + 1500*time.Millisecond)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path)
-		if err == nil && len(data) > 0 {
-			probe := &YAMLStore{
-				path:       path,
-				channels:   make(map[botKey]snowflake.ID),
-				roles:      make(map[roleKey]snowflake.ID),
-				relayCodes: make(map[snowflake.ID]string),
-				locales:    make(map[snowflake.ID]string),
-				disabled:   make(map[botKey]struct{}),
-			}
-			if probe.load() == nil {
-				if _, ok := probe.GetBoundChannel(guild1, user1); ok {
-					return
-				}
+		time.Sleep(saveDebounce - time.Nanosecond)
+		synctest.Wait()
+		if n := writes.Load(); n != 0 {
+			t.Fatalf("flushed %d time(s) before the store was quiet for %v", n, saveDebounce)
+		}
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if n := writes.Load(); n != 1 {
+			t.Fatalf("flushed %d time(s) once quiet for %v, want both changes in one write", n, saveDebounce)
+		}
+
+		// Read the file directly: a second YAMLStore would start its own
+		// flush loop and write the file on Close.
+		probe := &YAMLStore{
+			path:       path,
+			channels:   make(map[botKey]snowflake.ID),
+			roles:      make(map[roleKey]snowflake.ID),
+			relayCodes: make(map[snowflake.ID]string),
+			locales:    make(map[snowflake.ID]string),
+			disabled:   make(map[botKey]struct{}),
+		}
+		if err := probe.load(); err != nil {
+			t.Fatalf("load flushed file: %v", err)
+		}
+		for _, userID := range []snowflake.ID{user1, user2} {
+			if _, ok := probe.GetBoundChannel(guild1, userID); !ok {
+				t.Errorf("binding of %d missing from the debounced flush", userID)
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Error("file was not flushed within debounce window")
+	})
 }
 
 // unmarshalYAML validates data by loading it through a temporary YAMLStore.

@@ -19,8 +19,8 @@ import (
 // listener decodes two interleaved streams.
 func TestMixerIsPausedBeforeCopyInstall(t *testing.T) {
 	const (
-		guildID  = snowflake.ID(1430511050704289835)
-		roleID   = snowflake.ID(1529403555667251310)
+		guildID  = snowflake.ID(8001)
+		roleID   = snowflake.ID(8201)
 		sourceCh = snowflake.ID(2001)
 		destCh   = snowflake.ID(2002)
 	)

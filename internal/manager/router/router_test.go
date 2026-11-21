@@ -3,6 +3,7 @@ package router
 import (
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -199,18 +200,23 @@ func TestRouter_DebounceCoalescesBursts(t *testing.T) {
 	dst := &DestSlot{ChannelID: chID(2), Sources: []*SourceSlot{src}}
 	src.Feeds = []*DestSlot{dst}
 
-	r := New(chID(999), chID(7), counter, []*SourceSlot{src}, []*DestSlot{dst})
-	r.debounceWindow = 30 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		r := New(chID(999), chID(7), counter, []*SourceSlot{src}, []*DestSlot{dst})
+		defer r.Close()
 
-	for range 5 {
-		r.Debounce(chID(1))
-		time.Sleep(2 * time.Millisecond)
-	}
-	time.Sleep(100 * time.Millisecond)
+		for range 5 {
+			r.Debounce(chID(1))
+			settle(defaultRouteDebounce / 2)
+		}
+		if got := counter.calls.Load(); got != 0 {
+			t.Fatalf("recomputed %d time(s) while events kept arriving inside the window", got)
+		}
 
-	if got := counter.calls.Load(); got != 1 {
-		t.Errorf("debounce should coalesce 5 rapid events into 1 Recompute; got %d calls", got)
-	}
+		settle(defaultRouteDebounce / 2)
+		if got := counter.calls.Load(); got != 1 {
+			t.Errorf("debounce should coalesce 5 rapid events into 1 Recompute; got %d calls", got)
+		}
+	})
 }
 
 func TestRouter_DebounceSeparateChannelsDoNotCoalesce(t *testing.T) {
@@ -221,16 +227,18 @@ func TestRouter_DebounceSeparateChannelsDoNotCoalesce(t *testing.T) {
 	s1.Feeds = []*DestSlot{d}
 	s2.Feeds = []*DestSlot{d}
 
-	r := New(chID(1), chID(7), counter, []*SourceSlot{s1, s2}, []*DestSlot{d})
-	r.debounceWindow = 30 * time.Millisecond
+	synctest.Test(t, func(t *testing.T) {
+		r := New(chID(1), chID(7), counter, []*SourceSlot{s1, s2}, []*DestSlot{d})
+		defer r.Close()
 
-	r.Debounce(chID(1))
-	r.Debounce(chID(2))
-	time.Sleep(100 * time.Millisecond)
+		r.Debounce(chID(1))
+		r.Debounce(chID(2))
+		settle(defaultRouteDebounce)
 
-	if got := counter.calls.Load(); got != 4 {
-		t.Errorf("separate channels should fire independently; want 4 counter calls, got %d", got)
-	}
+		if got := counter.calls.Load(); got != 4 {
+			t.Errorf("separate channels should fire independently; want 4 counter calls, got %d", got)
+		}
+	})
 }
 
 func TestRouter_RecomputeIdempotent(t *testing.T) {
@@ -375,14 +383,61 @@ func TestRouter_CloseStopsPendingTimers(t *testing.T) {
 	dst := &DestSlot{ChannelID: chID(2), Sources: []*SourceSlot{src}}
 	src.Feeds = []*DestSlot{dst}
 
-	r := New(chID(1), chID(7), counter, []*SourceSlot{src}, []*DestSlot{dst})
-	r.debounceWindow = 200 * time.Millisecond
-	r.Debounce(chID(1))
-	r.Close()
-	time.Sleep(300 * time.Millisecond)
-	if got := counter.calls.Load(); got != 0 {
-		t.Errorf("Close should cancel pending timers; got %d Recompute(s)", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		r := New(chID(1), chID(7), counter, []*SourceSlot{src}, []*DestSlot{dst})
+		r.Debounce(chID(1))
+		r.ScheduleRecompute(time.Second)
+		r.Close()
+		settle(2 * time.Second)
+		if got := counter.calls.Load(); got != 0 {
+			t.Errorf("Close should cancel pending timers; got %d Recompute(s)", got)
+		}
+	})
+}
+
+// A follow-up recompute fires once after its delay; scheduling the same delay
+// again before it fires pushes it back rather than adding a second one.
+func TestRouter_ScheduleRecomputeFiresOnceAfterDelay(t *testing.T) {
+	counter := &callerCount{counts: map[snowflake.ID]int{chID(1): 1}}
+	src := &SourceSlot{ID: chID(1), ChannelID: chID(1)}
+	dst := &DestSlot{ChannelID: chID(2), Sources: []*SourceSlot{src}}
+	src.Feeds = []*DestSlot{dst}
+
+	synctest.Test(t, func(t *testing.T) {
+		const delay = 2 * time.Second
+		r := New(chID(1), chID(7), counter, []*SourceSlot{src}, []*DestSlot{dst})
+		defer r.Close()
+
+		r.ScheduleRecompute(delay)
+		settle(delay / 2)
+		r.ScheduleRecompute(delay)
+		settle(delay - time.Nanosecond)
+		if got := counter.calls.Load(); got != 0 {
+			t.Fatalf("recomputed %d time(s) before the rescheduled delay ran out", got)
+		}
+		settle(time.Nanosecond)
+		if got := counter.calls.Load(); got != 1 {
+			t.Fatalf("recomputes = %d, want exactly 1", got)
+		}
+		settle(10 * delay)
+		if got := counter.calls.Load(); got != 1 {
+			t.Errorf("recomputes = %d long after the delay, want it to fire only once", got)
+		}
+
+		r.Close()
+		r.ScheduleRecompute(delay)
+		settle(2 * delay)
+		if got := counter.calls.Load(); got != 1 {
+			t.Error("a recompute scheduled after Close ran")
+		}
+	})
+}
+
+// settle advances the bubble's clock by d and lets every timer callback that
+// fired run to completion.
+func settle(d time.Duration) {
+	time.Sleep(d)
+	synctest.Wait()
 }
 
 // A relay-fed destination must be marked mix even when no local source is

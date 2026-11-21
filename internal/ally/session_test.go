@@ -1,7 +1,9 @@
 package ally
 
 import (
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -83,24 +85,24 @@ func TestSession_RouteObserversFireOnMembershipChange(t *testing.T) {
 // router is never called again.
 func TestSession_RemoveGuildDropsItsObserver(t *testing.T) {
 	t.Parallel()
-	s := newTestSession(t)
+	synctest.Test(t, func(t *testing.T) {
+		s := newTestSession(t)
 
-	var guestCalls int
-	done := make(chan struct{})
-	s.SetRouteObserver(guestID, func() { guestCalls++; close(done) })
+		var guestCalls atomic.Int32
+		s.SetRouteObserver(guestID, func() { guestCalls.Add(1) })
 
-	s.RemoveGuild(guestID)
-	select {
-	case <-done:
-		t.Error("removed guild's observer must not be notified")
-	case <-time.After(100 * time.Millisecond):
-	}
+		s.RemoveGuild(guestID)
+		synctest.Wait()
+		if n := guestCalls.Load(); n != 0 {
+			t.Errorf("removed guild's observer was notified of its own removal %d time(s)", n)
+		}
 
-	s.AddListener(snowflake.ID(3), nil)
-	time.Sleep(100 * time.Millisecond)
-	if guestCalls != 0 {
-		t.Errorf("removed observer fired %d time(s) on a later membership change", guestCalls)
-	}
+		s.AddListener(snowflake.ID(3), nil)
+		synctest.Wait()
+		if n := guestCalls.Load(); n != 0 {
+			t.Errorf("removed observer fired %d time(s) in all", n)
+		}
+	})
 }
 
 func TestSession_BroadcastReachesEveryOtherGuildAndDropsOnFullChannel(t *testing.T) {

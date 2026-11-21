@@ -158,9 +158,9 @@ func TestSourceDepthRecordsFramesAlreadyBuffered(t *testing.T) {
 	}
 
 	bounds, counts := histogramCounts(t, reader, "gdc.opus.source.depth")
-	want := []uint64{1, 1, 1, 1, 0}
+	want := []uint64{1, 1, 1, 1, 0, 0, 0}
 	if len(counts) != len(want) {
-		t.Fatalf("depth bounds = %v, want 0, 1, 2, 3", bounds)
+		t.Fatalf("depth bounds = %v, want 0, 1, 2, 3, 4, 5", bounds)
 	}
 	for i := range want {
 		if counts[i] != want[i] {

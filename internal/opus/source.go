@@ -2,12 +2,19 @@ package opus
 
 import "sync"
 
-// audioSourceCap is the ring-buffer capacity per mixer input.
-// 3 frames × 20 ms = 60 ms max age before the oldest frame is overwritten on
-// overflow. Compared to the previous 5-frame buffered channel with a 3-frame
-// drain threshold (~100 ms worst-case queue depth), this cuts worst-case mixer
-// input latency to 40 ms while absorbing typical 1–2 frame jitter.
-const audioSourceCap = 3
+// audioSourceCap is the starting ring-buffer capacity per mixer input:
+// 3 frames × 20 ms = 60 ms, enough for the 1–2 frame jitter of a nearby voice
+// server. An input whose bursts overflow it grows one frame per eviction, up
+// to maxAudioSourceCap, and shrinks back one frame per sourceShrinkWindow fed
+// frames that never filled it. A caller on a distant voice server delivers
+// 4-frame bursts all session long; at a fixed 3 frames each burst evicted one,
+// losing ~10% of the audio, while a fixed larger ring would add delay to
+// every input that does not need it.
+const (
+	audioSourceCap     = 3
+	maxAudioSourceCap  = 6
+	sourceShrinkWindow = 500 // ~10 s of speech
+)
 
 // AudioSource is the pull interface consumed by the Mixer tick.
 // Producers (fanout dispatch, relay bridge) call Feed on the concrete
@@ -25,7 +32,7 @@ type AudioSource interface {
 	Len() int
 }
 
-// SourceBuffer is a fixed-capacity lock-protected ring buffer that implements
+// SourceBuffer is a bounded lock-protected ring buffer that implements
 // AudioSource. Both fanout dispatch (fed inline by VoiceReceiver) and the relay
 // bridge goroutine (fed by the relay decoder) use this type.
 //
@@ -34,10 +41,15 @@ type AudioSource interface {
 // always near the live edge — the same goal the previous drain-threshold logic
 // achieved gradually, but applied instantly at the producer.
 type SourceBuffer struct {
-	mu   sync.Mutex
-	buf  [audioSourceCap]Frame
-	head int // index of oldest entry
-	n    int // number of valid entries
+	mu       sync.Mutex
+	buf      [maxAudioSourceCap]Frame
+	head     int // index of oldest entry
+	n        int // number of valid entries
+	capacity int // current, audioSourceCap..maxAudioSourceCap
+	// peak is the highest occupancy since the last shrink check, fed counts
+	// the frames fed since then.
+	peak int
+	fed  int
 	drop func()
 	// mixer is the mixer this buffer feeds, set by Mixer.AddInput. While that
 	// mixer is paused Feed discards instead of buffering, so the mixer does
@@ -48,11 +60,11 @@ type SourceBuffer struct {
 // NewSourceBuffer creates a SourceBuffer. drop is called each time overflow
 // forces the oldest frame out. Pass nil to silence the counter.
 func NewSourceBuffer(drop func()) *SourceBuffer {
-	return &SourceBuffer{drop: drop}
+	return &SourceBuffer{capacity: audioSourceCap, drop: drop}
 }
 
 // Feed inserts f into the ring and returns how many frames were already
-// buffered ahead of it, audioSourceCap meaning one was evicted to make room.
+// buffered ahead of it and whether one was evicted to make room.
 // If the ring is full the oldest frame is evicted
 // (its pool buffers returned) and drop is invoked AFTER releasing the mutex
 // so a slow drop callback doesn't widen the buffer's critical section.
@@ -61,7 +73,7 @@ func NewSourceBuffer(drop func()) *SourceBuffer {
 // A frame fed while the buffer's mixer is paused is discarded and counted as
 // a paused drop rather than buffered; that is not an overflow, so drop is not
 // invoked for it.
-func (s *SourceBuffer) Feed(f Frame) (ahead int) {
+func (s *SourceBuffer) Feed(f Frame) (ahead int, evicted bool) {
 	s.mu.Lock()
 	if m := s.mixer; m != nil && m.paused.Load() {
 		s.mu.Unlock()
@@ -72,11 +84,10 @@ func (s *SourceBuffer) Feed(f Frame) (ahead int) {
 			PutEncodedFrame(f.Opus)
 		}
 		m.discardPaused()
-		return 0
+		return 0, false
 	}
 	ahead = s.n
-	dropped := false
-	if s.n == audioSourceCap {
+	if s.n == s.capacity {
 		old := s.buf[s.head]
 		if old.PCM != nil {
 			PutPCM(old.PCM)
@@ -84,18 +95,36 @@ func (s *SourceBuffer) Feed(f Frame) (ahead int) {
 		if old.Opus != nil {
 			PutEncodedFrame(old.Opus)
 		}
-		s.head = (s.head + 1) % audioSourceCap
+		s.head = (s.head + 1) % maxAudioSourceCap
 		s.n--
-		dropped = true
+		evicted = true
 	}
-	s.buf[(s.head+s.n)%audioSourceCap] = f
+	s.buf[(s.head+s.n)%maxAudioSourceCap] = f
 	s.n++
+	s.adaptCapLocked(evicted)
 	drop := s.drop
 	s.mu.Unlock()
-	if dropped && drop != nil {
+	if evicted && drop != nil {
 		drop()
 	}
-	return ahead
+	return ahead, evicted
+}
+
+func (s *SourceBuffer) adaptCapLocked(evicted bool) {
+	if evicted {
+		s.capacity = min(s.capacity+1, maxAudioSourceCap)
+		s.peak, s.fed = 0, 0
+		return
+	}
+	s.peak = max(s.peak, s.n)
+	s.fed++
+	if s.fed < sourceShrinkWindow {
+		return
+	}
+	if s.peak < s.capacity {
+		s.capacity = max(s.capacity-1, audioSourceCap)
+	}
+	s.peak, s.fed = 0, 0
 }
 
 func (s *SourceBuffer) bind(m *Mixer) {
@@ -122,7 +151,7 @@ func (s *SourceBuffer) Pull() (Frame, bool) {
 		return Frame{}, false
 	}
 	f := s.buf[s.head]
-	s.head = (s.head + 1) % audioSourceCap
+	s.head = (s.head + 1) % maxAudioSourceCap
 	s.n--
 	s.mu.Unlock()
 	return f, true
@@ -133,7 +162,7 @@ func (s *SourceBuffer) Drain() {
 	s.mu.Lock()
 	for s.n > 0 {
 		f := s.buf[s.head]
-		s.head = (s.head + 1) % audioSourceCap
+		s.head = (s.head + 1) % maxAudioSourceCap
 		s.n--
 		if f.PCM != nil {
 			PutPCM(f.PCM)

@@ -6632,10 +6632,10 @@
                       "kind": "DataQuery",
                       "version": "v0",
                       "spec": {
-                        "expr": "1 - sum(rate(gdc_opus_source_depth_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\", le=\"2\"}[$__rate_interval])) / sum(rate(gdc_opus_source_depth_count{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_opus_source_frames_lost_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval])) / sum(rate(gdc_opus_receive_interval_milliseconds_count{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "range": true,
-                        "legendFormat": "full, frame evicted"
+                        "legendFormat": "frame evicted"
                       }
                     }
                   }

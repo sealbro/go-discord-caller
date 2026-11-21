@@ -12,7 +12,7 @@ User mic
 [VoiceReceiver]  decode + fanout inline (on disgo's UDP goroutine)
   │  +0.2ms allowUser lookup, Opus decode, dispatch to SourceBuffer.Feed (gdc_opus_receive_duration ~0.2ms avg)
   ▼
-[SourceBuffer ring]  cap 3 frames; gdc.mixer.pipeline.latency (Prom: gdc_mixer_pipeline_latency_milliseconds)
+[SourceBuffer ring]  cap 3 frames, grows to 6 under sustained jitter; gdc.mixer.pipeline.latency (Prom: gdc_mixer_pipeline_latency_milliseconds)
   │  +22ms  Pull on next 20ms tick; overflow drops oldest at producer (measured: p50 22ms, p95 47ms, p99 57ms)
   ▼
 [Mixer.tick()]  mix-minus, encode (0ms passthrough if single source)
@@ -38,7 +38,7 @@ Total: client legs + voice RTT + ~25ms pipeline — roughly 80–140ms in Europe
 | User mic → Discord voice server           | 20–50ms    | 20ms fixed frame accumulation + network                                                                  |
 | Discord voice server → `VoiceReceiver`    | ½ voice RTT | Voice UDP leg to the host running the bot; `gdc_voice_server_latency_milliseconds` is the full round trip (~15ms in `c-ams`) |
 | `allowUser` + Opus decode + fanout `Feed` | ~0.2ms     | Inline on disgo UDP goroutine, no channel hop; measured `gdc_opus_receive_duration` ~0.2ms avg          |
-| `SourceBuffer` ring → `Mixer.tick`        | **22ms (p95 47ms)** | `gdc.mixer.pipeline.latency` (Prom: `gdc_mixer_pipeline_latency_milliseconds`); ceiling = `audioSourceCap`×20ms = 60ms; measured over 30 days: p50 22ms / p95 47ms / p99 57ms, mean 24ms; producer-side overflow keeps near live edge |
+| `SourceBuffer` ring → `Mixer.tick`        | **22ms (p95 47ms)** | `gdc.mixer.pipeline.latency` (Prom: `gdc_mixer_pipeline_latency_milliseconds`); ceiling = `audioSourceCap`×20ms = 60ms (120ms for an input grown under jitter); measured over 30 days: p50 22ms / p95 47ms / p99 57ms, mean 24ms; producer-side overflow keeps near live edge |
 | Mixer tick processing + encode            | <1ms       | `gdc_mixer_tick_duration` p95 ~0.7ms, p99 ~1.5ms; 0ms on single-source passthrough                       |
 | `VoiceProvider` channel queue             | ~0ms       | `gdc_opus_provide_duration` ≈0 (passthrough); drain threshold 3 frames = 60ms cap                       |
 | `VoiceProvider` → Discord voice server    | ½ voice RTT | Same leg, outbound |
@@ -63,11 +63,11 @@ The `FanoutHandle` is wired by `routerInstallBuilder` (`internal/manager/pipelin
 `Mixer.Run` parks on a 20ms timer (`mixerFrameDur` in `internal/opus/mixer.go`). A frame arriving just after a tick must wait up to 20ms for the next one. This is irreducible without changing Discord's frame cadence. A tick that fires late adds to it; how late each tick fires is recorded in `gdc.mixer.tick.lateness` (Prom: `gdc_mixer_tick_lateness_milliseconds`).
 
 ### Producer-side overflow (no burst drains)
-`SourceBuffer.Feed` drops the **oldest** frame on overflow (`internal/opus/source.go:51`). The previous pull-from-channel design needed an explicit drain-threshold step inside `Mixer.tick` that could discard several frames in one go (audible burst gap). Now the consumer always sees a buffer ≤ 60ms; latency cannot accumulate past that ceiling.
+`SourceBuffer.Feed` drops the **oldest** frame on overflow (`internal/opus/source.go:51`). The previous pull-from-channel design needed an explicit drain-threshold step inside `Mixer.tick` that could discard several frames in one go (audible burst gap). Now the consumer sees a buffer ≤ 60ms; latency cannot accumulate past that ceiling. The one exception is an input whose bursts keep overflowing it — a caller on a distant voice server, whose network holds frames back and delivers them together. It grows one frame per eviction, up to 6 (120ms), and shrinks back one frame per ~10s of speech that never fills it, so only a jittery input pays the extra delay.
 
 | Drain point                          | Mechanism                                | Max tolerated backlog |
 |--------------------------------------|------------------------------------------|-----------------------|
-| `SourceBuffer.Feed` (producer)       | drop oldest on full ring                 | 60ms (3 frames)       |
+| `SourceBuffer.Feed` (producer)       | drop oldest on full ring, then grow      | 60ms (3 frames), 120ms under jitter |
 | `VoiceProvider.ProvideOpusFrame`     | `providerDrainThreshold` = 3 frames      | 60ms                  |
 
 ### Mixer auto-pause via `DrainWatcher`

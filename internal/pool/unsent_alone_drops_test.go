@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
@@ -41,9 +42,11 @@ func (s *speakerSession) Ready() bool        { return s.ready }
 func (s *speakerSession) RecordUnsentFrame() { s.unsent.Add(1) }
 
 // dropsFor runs a real disgo audio sender against a speaker queue fed at 50
-// frames per second on average, in back-to-back groups of three as the network
-// hands them over, and returns how many frames the producer found the queue full
-// for and how many the sender discarded unsent.
+// frames per second on average, in back-to-back groups of three that the
+// network hands over 40 and 80 ms apart in turn, and returns how many frames the
+// producer found the queue full for and how many the sender discarded unsent.
+// The groups land half a frame out of phase with the sender's ticks, so the
+// outcome never depends on which of two goroutines runs first at one instant.
 func dropsFor(t *testing.T, ready bool) (dropped, unsent int64) {
 	t.Helper()
 
@@ -56,28 +59,30 @@ func dropsFor(t *testing.T, ready bool) (dropped, unsent int64) {
 	conn := &speakerConn{session: session, udp: discardUDP{}}
 	sender := registry.CreateFunc()(slog.New(slog.NewTextHandler(io.Discard, nil)), provider, conn)
 	sender.Open()
-	defer sender.Close()
+	defer stopInBubble(sender)
 
 	const (
 		burst  = 3
 		frames = 750
 	)
-	frame := make([]byte, 80)
-	var full atomic.Int64
+	payload := make([]byte, 80)
 
-	produce := time.NewTicker(burst * 20 * time.Millisecond)
-	defer produce.Stop()
+	time.Sleep(frameTime / 2)
 	for sent := 0; sent < frames; sent += burst {
-		<-produce.C
 		for range burst {
 			select {
-			case queue <- frame:
+			case queue <- payload:
 			default:
-				full.Add(1)
+				dropped++
 			}
 		}
+		if sent/burst%2 == 0 {
+			time.Sleep(2 * frameTime)
+		} else {
+			time.Sleep(4 * frameTime)
+		}
 	}
-	return full.Load(), session.unsent.Load()
+	return dropped, session.unsent.Load()
 }
 
 // TestAloneSpeakerQueueAbsorbsBursts is the regression test for the direct-path
@@ -92,14 +97,16 @@ func dropsFor(t *testing.T, ready bool) (dropped, unsent int64) {
 // so the overflow is pure alarm noise, and it must not exceed what a listened bot
 // shows for the same traffic.
 func TestAloneSpeakerQueueAbsorbsBursts(t *testing.T) {
-	listenedDrops, _ := dropsFor(t, true)
-	aloneDrops, aloneUnsent := dropsFor(t, false)
+	synctest.Test(t, func(t *testing.T) {
+		listenedDrops, _ := dropsFor(t, true)
+		aloneDrops, aloneUnsent := dropsFor(t, false)
 
-	if listenedDrops != 0 {
-		t.Fatalf("control is wrong: a speaker with a listener dropped %d frames", listenedDrops)
-	}
-	if aloneDrops != 0 {
-		t.Errorf("a speaker alone in its channel dropped %d frames of the same traffic (and discarded %d as unsent); a speaker with a listener dropped none",
-			aloneDrops, aloneUnsent)
-	}
+		if listenedDrops != 0 {
+			t.Fatalf("control is wrong: a speaker with a listener dropped %d frames", listenedDrops)
+		}
+		if aloneDrops != 0 {
+			t.Errorf("a speaker alone in its channel dropped %d frames of the same traffic (and discarded %d as unsent); a speaker with a listener dropped none",
+				aloneDrops, aloneUnsent)
+		}
+	})
 }

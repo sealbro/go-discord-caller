@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -95,37 +96,47 @@ func TestReconnectClosesTheClientWhenItsGatewayFailsToOpen(t *testing.T) {
 
 func TestConcurrentReconnectsOpenOneGateway(t *testing.T) {
 	t.Parallel()
-	const id snowflake.ID = 732
-	s, _ := newMetricsService(t)
-	f := &clientFactory{release: make(chan struct{})}
-	s.newClient = f.build
-	old, _ := clientWithGateway(gateway.StatusDisconnected, 0)
-	old.Token = botToken(id)
-	s.poolClients[id] = old
+	synctest.Test(t, func(t *testing.T) {
+		const id snowflake.ID = 732
+		s, _ := newMetricsService(t)
+		f := &clientFactory{release: make(chan struct{})}
+		s.newClient = f.build
+		old, _ := clientWithGateway(gateway.StatusDisconnected, 0)
+		old.Token = botToken(id)
+		s.poolClients[id] = old
+		release := sync.OnceFunc(func() { close(f.release) })
+		t.Cleanup(release)
 
-	results := make(chan bool, 2)
-	for range 2 {
-		go func() { results <- s.Reconnect(context.Background(), id) }()
-	}
-	time.Sleep(200 * time.Millisecond)
-	close(f.release)
+		results := make(chan bool, 2)
+		for range 2 {
+			go func() { results <- s.Reconnect(context.Background(), id) }()
+		}
+		synctest.Wait()
+		if len(results) != 0 {
+			t.Fatal("precondition failed: a Reconnect returned while the gateway open was still blocked")
+		}
+		if got := f.builtCount(); got != 1 {
+			t.Fatalf("built %d clients while two reconnects were in flight together, want 1 (second IDENTIFY)", got)
+		}
+		release()
 
-	for range 2 {
-		if !<-results {
-			t.Error("a concurrent Reconnect returned false")
+		for range 2 {
+			if !<-results {
+				t.Error("a concurrent Reconnect returned false")
+			}
 		}
-	}
-	if got := f.builtCount(); got != 1 {
-		t.Errorf("built %d clients for two concurrent reconnects, want 1 (second IDENTIFY)", got)
-	}
-	for i, gw := range f.built {
-		if gw.opens.Load() != 1 {
-			t.Errorf("client %d opened %d times, want 1", i, gw.opens.Load())
+		if got := f.builtCount(); got != 1 {
+			t.Errorf("built %d clients for two concurrent reconnects, want 1 (second IDENTIFY)", got)
 		}
-		if gw.closes.Load() != 0 {
-			t.Errorf("client %d was closed although it is the live one", i)
+		for i, gw := range f.built {
+			if gw.opens.Load() != 1 {
+				t.Errorf("client %d opened %d times, want 1", i, gw.opens.Load())
+			}
+			if gw.closes.Load() != 0 {
+				t.Errorf("client %d was closed although it is the live one", i)
+			}
 		}
-	}
+	})
 }
 
 func TestConnectPoolSkipsDuplicateTokens(t *testing.T) {
@@ -147,29 +158,31 @@ func TestConnectPoolSkipsDuplicateTokens(t *testing.T) {
 
 func TestWatchdogReplacesAClientThatStaysDisconnectedPastTheGrace(t *testing.T) {
 	t.Parallel()
-	const id snowflake.ID = 734
-	s, reader := newMetricsService(t)
-	f := &clientFactory{}
-	s.newClient = f.build
-	s.downGrace = 50 * time.Millisecond
-	s.retryInterval = time.Hour
-	dead, _ := clientWithGateway(gateway.StatusDisconnected, 0)
-	dead.Token = botToken(id)
-	s.poolClients[id] = dead
+	synctest.Test(t, func(t *testing.T) {
+		const id snowflake.ID = 734
+		s, reader := newMetricsService(t)
+		f := &clientFactory{}
+		s.newClient = f.build
+		dead, _ := clientWithGateway(gateway.StatusDisconnected, 0)
+		dead.Token = botToken(id)
+		s.poolClients[id] = dead
 
-	s.watchdogCheck(context.Background())
-	if got := counterByBot(t, reader, attemptsMetric)[id.String()]; got != 0 {
-		t.Fatalf("reconnected inside the grace period (%d attempts)", got)
-	}
+		s.watchdogCheck(context.Background())
+		time.Sleep(s.downGrace - time.Nanosecond)
+		s.watchdogCheck(context.Background())
+		if got := counterByBot(t, reader, attemptsMetric)[id.String()]; got != 0 {
+			t.Fatalf("reconnected inside the %v grace period (%d attempts)", s.downGrace, got)
+		}
 
-	time.Sleep(80 * time.Millisecond)
-	s.watchdogCheck(context.Background())
-	if got := counterByBot(t, reader, attemptsMetric)[id.String()]; got != 1 {
-		t.Fatalf("bot stuck disconnected past the grace: %d reconnect attempts, want 1", got)
-	}
-	if _, ok := s.GetClientByID(id); !ok {
-		t.Error("bot is still not connected after the watchdog reconnected it")
-	}
+		time.Sleep(time.Nanosecond)
+		s.watchdogCheck(context.Background())
+		if got := counterByBot(t, reader, attemptsMetric)[id.String()]; got != 1 {
+			t.Fatalf("bot stuck disconnected for the %v grace: %d reconnect attempts, want 1", s.downGrace, got)
+		}
+		if _, ok := s.GetClientByID(id); !ok {
+			t.Error("bot is still not connected after the watchdog reconnected it")
+		}
+	})
 }
 
 func TestWatchdogDoesNotRetryEveryTick(t *testing.T) {

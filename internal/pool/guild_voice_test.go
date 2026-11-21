@@ -62,8 +62,8 @@ func TestGuildVoiceJoinBoundsTheHandshake(t *testing.T) {
 	t.Parallel()
 
 	const (
-		guildID   = snowflake.ID(1430511050704289835)
-		channelID = snowflake.ID(1529403555667251310)
+		guildID   = snowflake.ID(851)
+		channelID = snowflake.ID(852)
 	)
 
 	conn := newHangingConn()
@@ -110,8 +110,8 @@ func TestGuildVoiceJoinReleasesConnAfterParentCancelled(t *testing.T) {
 	t.Parallel()
 
 	const (
-		guildID   = snowflake.ID(1430511050704289835)
-		channelID = snowflake.ID(1529403555667251310)
+		guildID   = snowflake.ID(851)
+		channelID = snowflake.ID(852)
 	)
 
 	conn := newHangingConn()

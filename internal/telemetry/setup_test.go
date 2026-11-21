@@ -32,12 +32,12 @@ func captureVoiceLogger(t *testing.T, botUserID snowflake.ID, level slog.Level) 
 // owner bot and all speaker bots, which made a "missing key ratchet" burst
 // impossible to attribute to a connection.
 func TestVoiceLoggerTagsBotUserID(t *testing.T) {
-	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038), slog.LevelWarn)
+	logger, buf := captureVoiceLogger(t, snowflake.ID(701), slog.LevelWarn)
 
 	logger.Warn("failed to send audio")
 
 	out := buf.String()
-	if !strings.Contains(out, "botUserID=1484911601210495038") {
+	if !strings.Contains(out, "botUserID=701") {
 		t.Errorf("voice log line is missing botUserID, cannot be attributed to a bot: %q", out)
 	}
 	if !strings.Contains(out, "component=voice") {
@@ -61,7 +61,7 @@ func TestVoiceLoggerOmitsUnknownBotUserID(t *testing.T) {
 
 // Below warn, disgo logs a line per VoiceStateUpdate.
 func TestVoiceLoggerDropsBelowWarn(t *testing.T) {
-	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038), slog.LevelWarn)
+	logger, buf := captureVoiceLogger(t, snowflake.ID(701), slog.LevelWarn)
 
 	logger.Info("voice state update")
 
@@ -74,7 +74,7 @@ func TestVoiceLoggerDropsBelowWarn(t *testing.T) {
 // puts tens of thousands of identical lines an hour on the OTLP pipeline.
 // Nothing should reach it unless VOICE_LOG_LEVEL was set.
 func TestVoiceLoggerSilentByDefault(t *testing.T) {
-	logger, buf := captureVoiceLogger(t, snowflake.ID(1484911601210495038), LevelVoiceOff)
+	logger, buf := captureVoiceLogger(t, snowflake.ID(701), LevelVoiceOff)
 
 	logger.Error("error while reading packet")
 	logger.Warn("failed to send audio")

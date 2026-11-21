@@ -6,6 +6,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -249,16 +250,20 @@ func TestWatchdogReconnectsOnlyBotsWithoutAGateway(t *testing.T) {
 
 func TestWatchdogStopsWithItsContext(t *testing.T) {
 	t.Parallel()
-	const noGateway snowflake.ID = 714
-	s, reader := newMetricsService(t)
-	s.poolClients[noGateway] = &bot.Client{Caches: cache.New(), Token: botToken(noGateway)}
+	// A watchdog goroutine still ticking when the bubble ends fails the test too.
+	synctest.Test(t, func(t *testing.T) {
+		const noGateway snowflake.ID = 714
+		s, reader := newMetricsService(t)
+		s.poolClients[noGateway] = &bot.Client{Caches: cache.New(), Token: botToken(noGateway)}
 
-	s.StartWatchdog(cancelledCtx(), time.Millisecond)
-	time.Sleep(50 * time.Millisecond)
+		s.StartWatchdog(cancelledCtx(), time.Millisecond)
+		time.Sleep(time.Second)
+		synctest.Wait()
 
-	if got := counterByBot(t, reader, attemptsMetric)[noGateway.String()]; got != 0 {
-		t.Errorf("a watchdog with a cancelled context made %d reconnect attempts", got)
-	}
+		if got := counterByBot(t, reader, attemptsMetric)[noGateway.String()]; got != 0 {
+			t.Errorf("a watchdog with a cancelled context made %d reconnect attempts", got)
+		}
+	})
 }
 
 func TestPoolMetricsReportConnectionState(t *testing.T) {

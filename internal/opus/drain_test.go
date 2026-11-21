@@ -1,23 +1,28 @@
 package opus
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 // A mixer that has consumed frames and then gone idle is auto-paused.
 func TestDrainWatcher_PausesIdleMixer(t *testing.T) {
 	t.Parallel()
-	m, _ := newTestMixer(t)
-	m.lastActivityAt.Store(time.Now().Add(-time.Hour).UnixNano())
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := newTestMixer(t)
+		m.lastActivityAt.Store(time.Now().Add(-time.Hour).UnixNano())
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go NewDrainWatcher(m, 40*time.Millisecond).Run(ctx)
+		const idle = 40 * time.Millisecond
+		go NewDrainWatcher(m, idle).Run(t.Context())
 
-	waitFor(t, 2*time.Second, m.Paused, "idle mixer should be auto-paused")
+		time.Sleep(idle / 2)
+		synctest.Wait()
+		if !m.Paused() {
+			t.Fatal("idle mixer should be auto-paused at the watcher's first check")
+		}
+	})
 }
 
 // A relay-fed mixer must never be auto-paused: it is fed by another guild, and
@@ -25,23 +30,29 @@ func TestDrainWatcher_PausesIdleMixer(t *testing.T) {
 // never unpause itself (issue #51).
 func TestDrainWatcher_KeepAliveBlocksAutoPause(t *testing.T) {
 	t.Parallel()
-	m, _ := newTestMixer(t)
-	m.lastActivityAt.Store(time.Now().Add(-time.Hour).UnixNano())
+	synctest.Test(t, func(t *testing.T) {
+		m, _ := newTestMixer(t)
+		m.lastActivityAt.Store(time.Now().Add(-time.Hour).UnixNano())
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	var live atomic.Bool
-	live.Store(true)
-	go NewDrainWatcher(m, 40*time.Millisecond).WithKeepAlive(live.Load).Run(ctx)
+		const idle = 40 * time.Millisecond
+		var live atomic.Bool
+		live.Store(true)
+		go NewDrainWatcher(m, idle).WithKeepAlive(live.Load).Run(t.Context())
 
-	time.Sleep(300 * time.Millisecond)
-	if m.Paused() {
-		t.Fatal("relay-fed mixer must not be auto-paused while its feed is live")
-	}
+		time.Sleep(10 * idle)
+		synctest.Wait()
+		if m.Paused() {
+			t.Fatal("relay-fed mixer must not be auto-paused while its feed is live")
+		}
 
-	// Once the peer guild detaches the watcher resumes ownership.
-	live.Store(false)
-	waitFor(t, 2*time.Second, m.Paused, "mixer should be auto-paused once the relay feed is gone")
+		// Once the peer guild detaches the watcher resumes ownership.
+		live.Store(false)
+		time.Sleep(idle / 2)
+		synctest.Wait()
+		if !m.Paused() {
+			t.Fatal("mixer should be auto-paused at the first check after the relay feed is gone")
+		}
+	})
 }
 
 // TestDrainWatcher_ResumesAfterLull is the unit-level reproduction of the
@@ -59,42 +70,44 @@ func TestDrainWatcher_KeepAliveBlocksAutoPause(t *testing.T) {
 // mixer has no such guard.
 func TestDrainWatcher_ResumesAfterLull(t *testing.T) {
 	t.Parallel()
-	m, col := newTestMixer(t)
+	synctest.Test(t, func(t *testing.T) {
+		m, col := newTestMixer(t)
 
-	src := newSource()
-	m.AddInput(1, src)
+		src := newSource()
+		m.AddInput(1, src)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		const idle = 200 * time.Millisecond
+		go NewDrainWatcher(m, idle).Run(t.Context())
 
-	const idle = 200 * time.Millisecond
-	go NewDrainWatcher(m, idle).Run(ctx)
+		frames := generateTestFrames(t, 440, 4, 8000)
 
-	frames := generateTestFrames(t, 440, 4, 8000)
+		// Phase 1 — the mixer carries audio, so it must stay unpaused.
+		stopPump := startPump(t.Context(), src, frames)
+		runTicks(2 * int(idle/mixerFrameDur))
+		if col.count() == 0 {
+			t.Fatal("mixer should emit while audio flows")
+		}
+		if m.Paused() {
+			t.Fatal("mixer must not be paused while audio is flowing")
+		}
 
-	// Phase 1 — the mixer carries audio, so it must stay unpaused.
-	stopPump := startPump(ctx, src, frames)
-	waitFor(t, 2*time.Second, func() bool { return col.count() > 0 }, "mixer should emit while audio flows")
-	if m.Paused() {
-		t.Fatal("mixer must not be paused while audio is flowing")
-	}
+		// Phase 2 — the lull. The caller stays connected, it just stops talking.
+		// The watcher checks every idle/2, so it pauses within idle + idle/2.
+		stopPump()
+		waitFor(t, idle+idle/2, m.Paused, "idle mixer should be auto-paused")
 
-	// Phase 2 — the lull. The caller stays connected, it just stops talking.
-	stopPump()
-	waitFor(t, 2*time.Second, m.Paused, "idle mixer should be auto-paused")
+		// Phase 3 — the caller speaks again. The mixer must wake up at the
+		// watcher's next check and resume emitting. With the latch present it
+		// stays paused forever, because a paused mixer drains its inputs
+		// without refreshing lastActivityAt, so IdleFor() only ever grows.
+		before := col.count()
+		t.Cleanup(startPump(t.Context(), src, frames))
 
-	// Phase 3 — the caller speaks again. The mixer must wake up and resume
-	// emitting. With the latch present it stays paused forever, because a
-	// paused mixer drains its inputs without refreshing lastActivityAt, so
-	// IdleFor() only ever grows.
-	before := col.count()
-	stopPump2 := startPump(ctx, src, frames)
-	defer stopPump2()
-
-	waitFor(t, 3*time.Second, func() bool { return !m.Paused() },
-		"mixer must unpause once audio resumes; it latched paused and is discarding every frame")
-	waitFor(t, 3*time.Second, func() bool { return col.count() > before },
-		"mixer must emit again once audio resumes")
+		waitFor(t, idle/2+mixerFrameDur, func() bool { return !m.Paused() },
+			"mixer must unpause once audio resumes; it latched paused and is discarding every frame")
+		waitFor(t, 2*mixerFrameDur, func() bool { return col.count() > before },
+			"mixer must emit again once audio resumes")
+	})
 }
 
 // TestDrainWatcher_DoesNotOverrideRouterPause pins the pause-ownership rule.
@@ -106,41 +119,35 @@ func TestDrainWatcher_ResumesAfterLull(t *testing.T) {
 // only reverse pauses it applied itself.
 func TestDrainWatcher_DoesNotOverrideRouterPause(t *testing.T) {
 	t.Parallel()
-	m, _ := newTestMixer(t)
+	synctest.Test(t, func(t *testing.T) {
+		m, col := newTestMixer(t)
 
-	src := newSource()
-	m.AddInput(1, src)
+		src := newSource()
+		m.AddInput(1, src)
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+		const idle = 200 * time.Millisecond
+		go NewDrainWatcher(m, idle).Run(t.Context())
 
-	const idle = 200 * time.Millisecond
-	go NewDrainWatcher(m, idle).Run(ctx)
-
-	// Audio flows continuously for the whole test.
-	stopPump := startPump(ctx, src, generateTestFrames(t, 440, 4, 8000))
-	defer stopPump()
-	waitFor(t, 2*time.Second, func() bool { return !m.Paused() }, "mixer should be running while audio flows")
-
-	// The router pauses it — the destination lost its last listener.
-	m.SetPaused(true)
-
-	// Several watcher ticks pass with audio still arriving. The pause holds.
-	time.Sleep(5 * idle)
-	if !m.Paused() {
-		t.Fatal("router pause was overridden by DrainWatcher; a destination with no listeners must stay paused")
-	}
-}
-
-// waitFor polls cond until it holds or the deadline expires.
-func waitFor(t *testing.T, within time.Duration, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(within)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
+		// Audio flows continuously for the whole test.
+		t.Cleanup(startPump(t.Context(), src, generateTestFrames(t, 440, 4, 8000)))
+		runTicks(2)
+		if m.Paused() {
+			t.Fatal("mixer should be running while audio flows")
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal(msg)
+
+		// The router pauses it — the destination lost its last listener.
+		m.SetPaused(true)
+		synctest.Wait()
+		emitted := col.count()
+
+		// Several watcher ticks pass with audio still arriving. The pause holds.
+		time.Sleep(5 * idle)
+		synctest.Wait()
+		if !m.Paused() {
+			t.Fatal("router pause was overridden by DrainWatcher; a destination with no listeners must stay paused")
+		}
+		if got := col.count() - emitted; got != 0 {
+			t.Errorf("router-paused mixer emitted %d frames, want 0", got)
+		}
+	})
 }

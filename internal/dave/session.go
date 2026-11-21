@@ -53,7 +53,7 @@ type options struct {
 	clock       func() time.Time
 }
 
-// withClock replaces time.Now for talk-spurt timing in tests.
+// withClock replaces time.Now for talk-spurt and decrypt timing in tests.
 func withClock(now func() time.Time) Option {
 	return func(o *options) { o.clock = now }
 }
@@ -234,10 +234,10 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 		return s.Session.Decrypt(userID, frame, decryptedFrame)
 	}
 
-	position := spurt.next(s.now())
-	started := time.Now()
+	started := s.now()
+	position := spurt.next(started)
 	n, err := s.Session.Decrypt(userID, frame, decryptedFrame)
-	s.stats.RecordDecryptDuration(s.botUserID, time.Since(started))
+	s.stats.RecordDecryptDuration(s.botUserID, s.now().Sub(started))
 	s.stats.Record(s.botUserID, string(userID), err)
 	s.stats.RecordPosition(s.botUserID, position, err)
 	return n, err

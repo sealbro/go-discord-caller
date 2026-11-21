@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"math"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	hraban "github.com/hraban/opus"
@@ -81,56 +83,48 @@ func (c *outputCollector) count() int {
 	return len(c.frames)
 }
 
-// waitForN blocks until at least n total frames are collected, then returns the first n.
-// Returns nil on timeout.
-func (c *outputCollector) waitForN(n int, timeout time.Duration) [][]byte {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		c.mu.Lock()
-		got := len(c.frames)
-		c.mu.Unlock()
-		if got >= n {
-			c.mu.Lock()
-			result := make([][]byte, n)
-			copy(result, c.frames[:n])
-			c.mu.Unlock()
-			return result
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return nil
+// from returns a copy of the frames collected from index i on.
+func (c *outputCollector) from(i int) [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.frames[i:])
 }
 
-// collectFrom blocks until at least baseline+n frames exist, then returns n frames
-// starting at baseline. Returns nil on timeout.
-func (c *outputCollector) collectFrom(baseline, n int, timeout time.Duration) [][]byte {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		c.mu.Lock()
-		got := len(c.frames)
-		c.mu.Unlock()
-		if got >= baseline+n {
-			c.mu.Lock()
-			result := make([][]byte, n)
-			copy(result, c.frames[baseline:baseline+n])
-			c.mu.Unlock()
-			return result
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	return nil
+// runTicks lets n mixer ticks pass on the bubble's clock and waits for every
+// goroutine to settle. Call it only from inside a synctest bubble.
+func runTicks(n int) {
+	time.Sleep(time.Duration(n) * mixerFrameDur)
+	synctest.Wait()
 }
 
-// newTestMixer creates a running Mixer with no-op metrics and a wired sink.
-// Cancels the mixer and waits for Run to exit on test cleanup.
-func newTestMixer(t *testing.T) (*Mixer, *outputCollector) {
+// waitFor advances the bubble's clock a frame at a time until cond holds,
+// failing once within has passed.
+func waitFor(t *testing.T, within time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for {
+		synctest.Wait()
+		if cond() {
+			return
+		}
+		if !time.Now().Before(deadline) {
+			t.Fatal(msg)
+		}
+		time.Sleep(mixerFrameDur)
+	}
+}
+
+func newBareMixer(t *testing.T) *Mixer {
 	t.Helper()
 	m, err := NewMixer(telemetry.OpusRecorder{})
 	if err != nil {
 		t.Fatalf("NewMixer: %v", err)
 	}
-	col := &outputCollector{}
-	m.SetSink(col.sink)
+	return m
+}
+
+func runMixer(t *testing.T, m *Mixer) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
@@ -141,24 +135,34 @@ func newTestMixer(t *testing.T) (*Mixer, *outputCollector) {
 		cancel()
 		<-done
 	})
+}
+
+// newTestMixer creates a running Mixer with no-op metrics and a wired sink.
+func newTestMixer(t *testing.T) (*Mixer, *outputCollector) {
+	t.Helper()
+	m := newBareMixer(t)
+	col := &outputCollector{}
+	m.SetSink(col.sink)
+	runMixer(t, m)
 	return m, col
 }
 
 // newSource returns a SourceBuffer used as a mixer input in tests.
 func newSource() *SourceBuffer { return NewSourceBuffer(nil) }
 
-// startPump feeds frames from the pre-encoded slice into src at 20ms cadence.
-// Cycles through the slice indefinitely. Returns a stop func.
+// startPump feeds frames from the pre-encoded slice into src at 20ms cadence,
+// half a frame off the mixer's tick grid so each tick sees exactly one frame
+// per pump. Cycles through the slice indefinitely. Returns a stop func.
 func startPump(ctx context.Context, src *SourceBuffer, frames []testFrame) (stop func()) {
 	pumpCtx, cancel := context.WithCancel(ctx)
 	go func() {
-		ticker := time.NewTicker(mixerFrameDur)
-		defer ticker.Stop()
+		next := time.After(mixerFrameDur / 2)
 		for i := 0; ; i++ {
 			select {
 			case <-pumpCtx.Done():
 				return
-			case <-ticker.C:
+			case <-next:
+				next = time.After(mixerFrameDur)
 				f := frames[i%len(frames)]
 				pcm := GetPCM()
 				copy(pcm, f.pcm)

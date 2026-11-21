@@ -3,6 +3,7 @@ package opus
 import (
 	"context"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -68,6 +69,10 @@ func TestNextTickNeverWaitsLessThanAMillisecond(t *testing.T) {
 // The wiring the helpers above cannot show: a running mixer records one
 // lateness observation per tick, tagged with its guild.
 func TestRunningMixerRecordsTickLateness(t *testing.T) {
+	synctest.Test(t, testRunningMixerRecordsTickLateness)
+}
+
+func testRunningMixerRecordsTickLateness(t *testing.T) {
 	reader := sdkmetric.NewManualReader()
 	metrics, err := telemetry.NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("mixer_test"))
 	if err != nil {
@@ -78,7 +83,8 @@ func TestRunningMixerRecordsTickLateness(t *testing.T) {
 		t.Fatalf("NewMixer: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*mixerFrameDur)
+	const ticks = 5
+	ctx, cancel := context.WithTimeout(context.Background(), ticks*mixerFrameDur-mixerFrameDur/2)
 	defer cancel()
 	m.Run(ctx)
 
@@ -98,8 +104,8 @@ func TestRunningMixerRecordsTickLateness(t *testing.T) {
 			if g, _ := h.DataPoints[0].Attributes.Value("guild_id"); g.AsString() != "guild-1" {
 				t.Errorf("guild_id = %q, want guild-1", g.AsString())
 			}
-			if h.DataPoints[0].Count < 2 {
-				t.Errorf("lateness observations = %d over 5 ticks, want at least 2", h.DataPoints[0].Count)
+			if got := h.DataPoints[0].Count; got != ticks {
+				t.Errorf("lateness observations = %d, want one per tick (%d)", got, ticks)
 			}
 			return
 		}

@@ -3,7 +3,9 @@ package opus
 import (
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
+
+	"github.com/disgoorg/disgo/voice"
 
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
@@ -73,32 +75,39 @@ func TestVoiceProviderDrainThreshold(t *testing.T) {
 	}
 }
 
-// TestVoiceProviderClose verifies that Close causes the next ProvideOpusFrame
-// to return an error promptly (priority over a pending frame is acceptable
-// either way; we only check that it does not block indefinitely).
-func TestVoiceProviderClose(t *testing.T) {
-	t.Parallel()
-	ch := make(chan []byte)
-	vp := NewVoiceProvider(ch, telemetry.OpusRecorder{})
-
+// requireBlocksUntilClose checks that ProvideOpusFrame parks until Close, then
+// returns an error, and that Close is idempotent.
+func requireBlocksUntilClose(t *testing.T, vp voice.OpusFrameProvider) {
+	t.Helper()
 	done := make(chan error, 1)
 	go func() { _, err := vp.ProvideOpusFrame(); done <- err }()
 
-	// Give the goroutine a tick to block on the select.
-	time.Sleep(10 * time.Millisecond)
-	vp.Close()
+	synctest.Wait()
+	select {
+	case <-done:
+		t.Fatal("ProvideOpusFrame returned before Close")
+	default:
+	}
 
+	vp.Close()
+	synctest.Wait()
 	select {
 	case err := <-done:
 		if err == nil {
 			t.Fatal("ProvideOpusFrame returned nil error after Close")
 		}
-	case <-time.After(time.Second):
+	default:
 		t.Fatal("ProvideOpusFrame did not return after Close")
 	}
 
-	// Close is idempotent.
 	vp.Close()
+}
+
+func TestVoiceProviderClose(t *testing.T) {
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		requireBlocksUntilClose(t, NewVoiceProvider(make(chan []byte), telemetry.OpusRecorder{}))
+	})
 }
 
 // TestVoiceProviderChannelClosed verifies that closing the input channel
@@ -179,32 +188,36 @@ func TestVoiceProviderPassthroughCap(t *testing.T) {
 	}
 }
 
-// TestEmptyVoiceProviderBlocksUntilClose verifies the no-op provider:
-// ProvideOpusFrame blocks until Close, then returns an error.
 func TestEmptyVoiceProviderBlocksUntilClose(t *testing.T) {
 	t.Parallel()
-	vp := NewEmptyVoiceProvider()
+	synctest.Test(t, func(t *testing.T) {
+		requireBlocksUntilClose(t, NewEmptyVoiceProvider())
+	})
+}
 
-	done := make(chan error, 1)
-	go func() { _, err := vp.ProvideOpusFrame(); done <- err }()
+// A sender that cannot send this tick discards queued frames one at a time,
+// so the queue drains at the frame rate.
+func TestVoiceProviderDiscardFrame(t *testing.T) {
+	t.Parallel()
+	ch := make(chan []byte, 2)
+	vp := NewVoiceProvider(ch, telemetry.OpusRecorder{})
+	ch <- []byte{1}
+	ch <- []byte{2}
 
-	// Sanity: should still be blocked after a brief wait.
-	select {
-	case <-done:
-		t.Fatal("EmptyVoiceProvider returned before Close")
-	case <-time.After(20 * time.Millisecond):
+	if !vp.DiscardFrame() {
+		t.Fatal("DiscardFrame = false with two frames queued")
 	}
-
-	vp.Close()
-	select {
-	case err := <-done:
-		if err == nil {
-			t.Fatal("EmptyVoiceProvider returned nil error after Close")
-		}
-	case <-time.After(time.Second):
-		t.Fatal("EmptyVoiceProvider did not return after Close")
+	if got := len(ch); got != 1 {
+		t.Fatalf("%d frames queued after one discard, want 1", got)
 	}
-
-	// Close is idempotent.
-	vp.Close()
+	if !vp.DiscardFrame() {
+		t.Fatal("DiscardFrame = false with one frame queued")
+	}
+	if vp.DiscardFrame() {
+		t.Error("DiscardFrame = true on an empty queue")
+	}
+	close(ch)
+	if vp.DiscardFrame() {
+		t.Error("DiscardFrame = true on a closed channel")
+	}
 }

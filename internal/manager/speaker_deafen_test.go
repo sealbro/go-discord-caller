@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/rest"
@@ -12,11 +14,9 @@ import (
 )
 
 const (
-	testGuild   = snowflake.ID(1)
-	testBot     = snowflake.ID(100)
-	testOther   = snowflake.ID(101)
-	testDelay   = 40 * time.Millisecond
-	settleAfter = 10 * testDelay
+	testGuild = snowflake.ID(1)
+	testBot   = snowflake.ID(100)
+	testOther = snowflake.ID(101)
 )
 
 // deafRecorder captures every state change the controller drives.
@@ -67,55 +67,63 @@ func (r *deafRecorder) snapshot() []deafEvent {
 	return append([]deafEvent(nil), r.events...)
 }
 
-// waitFor polls until cond holds or the deadline passes. The controller applies
-// changes on their own goroutines, so assertions must be eventual.
-func waitFor(t *testing.T, what string, cond func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", what)
+// setErr swaps the error setDeaf returns, so a test can make a change fail
+// once and then succeed.
+func (r *deafRecorder) setErr(err error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.err = err
 }
 
 func newTestController(rec *deafRecorder) *deafController {
 	return &deafController{
 		guildID: testGuild,
 		setDeaf: rec.set,
-		delay:   testDelay,
+		delay:   deafenDelay,
 		members: map[snowflake.ID]*deafMember{},
 	}
 }
 
-func lastEvent(rec *deafRecorder) (deafEvent, bool) {
-	ev := rec.snapshot()
-	if len(ev) == 0 {
-		return deafEvent{}, false
+// settle advances the bubble's clock by d and lets every goroutine the
+// controller started run until it blocks.
+func settle(d time.Duration) {
+	time.Sleep(d)
+	synctest.Wait()
+}
+
+func assertAttempts(t *testing.T, rec *deafRecorder, want int, when string) {
+	t.Helper()
+	if got := rec.attempts(); got != want {
+		t.Fatalf("%s: %d attempts, want %d", when, got, want)
 	}
-	return ev[len(ev)-1], true
+}
+
+func assertLastEvent(t *testing.T, rec *deafRecorder, want deafEvent, when string) {
+	t.Helper()
+	ev := rec.snapshot()
+	if len(ev) == 0 || ev[len(ev)-1] != want {
+		t.Fatalf("%s: changes = %v, want the last to be %v", when, ev, want)
+	}
 }
 
 // TestDeafControllerDeafensIdleSourceAfterDelay is case 2/4: a capture bot whose
 // channel holds nobody with the role must end up deafened — but only after the
 // idle delay, never instantly.
 func TestDeafControllerDeafensIdleSourceAfterDelay(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	c.Register(testBot, false) // capture bot starts hearing
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testBot, false) // capture bot starts hearing
 
-	c.Observe(map[snowflake.ID]bool{testBot: false})
+		c.Observe(map[snowflake.ID]bool{testBot: false})
 
-	// Must not have fired yet: deafening is deliberately delayed.
-	if got := rec.snapshot(); len(got) != 0 {
-		t.Fatalf("deafened immediately (%v); the delay is what suppresses flapping", got)
-	}
+		settle(deafenDelay - time.Nanosecond)
+		if got := rec.snapshot(); len(got) != 0 {
+			t.Fatalf("deafened before the delay ran out (%v); the delay is what suppresses flapping", got)
+		}
 
-	waitFor(t, "delayed deafen", func() bool {
-		ev, ok := lastEvent(rec)
-		return ok && ev == deafEvent{testBot, true}
+		settle(time.Nanosecond)
+		assertLastEvent(t, rec, deafEvent{testBot, true}, "once the delay ran out")
 	})
 }
 
@@ -123,61 +131,61 @@ func TestDeafControllerDeafensIdleSourceAfterDelay(t *testing.T) {
 // live again the bot must be undeafened without waiting, because the delay
 // would cost the newly-permitted speaker their first words.
 func TestDeafControllerUndeafensImmediately(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	// A long delay: if undeafening ever went through the timer path, the
-	// assertion below would time out long before it fired. Asserting only
-	// "eventually undeafened" would pass either way and prove nothing.
-	c.delay = 30 * time.Second
-	c.Register(testBot, true) // starts deafened
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testBot, true) // starts deafened
 
-	c.Observe(map[snowflake.ID]bool{testBot: true})
+		c.Observe(map[snowflake.ID]bool{testBot: true})
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if ev, ok := lastEvent(rec); ok && ev == (deafEvent{testBot, false}) {
-			return
+		// The bubble's clock has not moved, so a change routed through the
+		// timer has not happened yet.
+		synctest.Wait()
+		if ev := rec.snapshot(); len(ev) != 1 || ev[0] != (deafEvent{testBot, false}) {
+			t.Fatalf("changes = %v before any time passed; undeafen must bypass the deafen delay "+
+				"or the newly-permitted speaker loses their first words", ev)
 		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("undeafen did not happen promptly; it must bypass the deafen delay " +
-		"or the newly-permitted speaker loses their first words")
+	})
 }
 
 // TestDeafControllerCancelsPendingDeafen is the flapping case: a caller who
 // leaves and returns inside the delay window must produce no change at all, and
 // therefore no audit-log entry.
 func TestDeafControllerCancelsPendingDeafen(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	c.Register(testBot, false)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testBot, false)
 
-	c.Observe(map[snowflake.ID]bool{testBot: false}) // arms the deafen timer
-	c.Observe(map[snowflake.ID]bool{testBot: true})  // caller returns in time
+		c.Observe(map[snowflake.ID]bool{testBot: false}) // arms the deafen timer
+		settle(deafenDelay / 2)
+		c.Observe(map[snowflake.ID]bool{testBot: true}) // caller returns in time
 
-	time.Sleep(settleAfter)
-
-	if got := rec.snapshot(); len(got) != 0 {
-		t.Errorf("flapping produced %v; want no changes at all", got)
-	}
+		settle(2 * deafenDelay)
+		if got := rec.snapshot(); len(got) != 0 {
+			t.Errorf("flapping produced %v; want no changes at all", got)
+		}
+	})
 }
 
 // TestDeafControllerIgnoresRedundantState guards against audit-log spam: a
 // steady stream of recomputes reporting the state the bot is already in must
 // issue nothing.
 func TestDeafControllerIgnoresRedundantState(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	c.Register(testBot, false)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testBot, false)
 
-	for range 5 {
-		c.Observe(map[snowflake.ID]bool{testBot: true})
-	}
-	time.Sleep(settleAfter)
+		for range 5 {
+			c.Observe(map[snowflake.ID]bool{testBot: true})
+		}
+		settle(2 * deafenDelay)
 
-	if got := rec.snapshot(); len(got) != 0 {
-		t.Errorf("redundant observations produced %v; want none", got)
-	}
+		if got := rec.snapshot(); len(got) != 0 {
+			t.Errorf("redundant observations produced %v; want none", got)
+		}
+	})
 }
 
 // TestDeafControllerDeafensUnknownSources covers bots the router never reports:
@@ -185,15 +193,15 @@ func TestDeafControllerIgnoresRedundantState(t *testing.T) {
 // whose FanoutHandles are never installed. Absent from the map means not a live
 // source, which means deafen.
 func TestDeafControllerDeafensUnknownSources(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	c.Register(testOther, false) // registered, but never a router source
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testOther, false) // registered, but never a router source
 
-	c.Observe(map[snowflake.ID]bool{testBot: true}) // only the other bot is live
+		c.Observe(map[snowflake.ID]bool{testBot: true}) // only the other bot is live
 
-	waitFor(t, "deafen of non-source bot", func() bool {
-		ev, ok := lastEvent(rec)
-		return ok && ev == deafEvent{testOther, true}
+		settle(deafenDelay)
+		assertLastEvent(t, rec, deafEvent{testOther, true}, "after the delay")
 	})
 }
 
@@ -206,51 +214,45 @@ func TestDeafControllerCloseUndeafens(t *testing.T) {
 
 	c.Close(context.Background())
 
-	found := false
-	for _, ev := range rec.snapshot() {
-		if ev == (deafEvent{testBot, false}) {
-			found = true
-		}
-	}
-	if !found {
-		t.Errorf("Close did not undeafen; events = %v", rec.snapshot())
+	if got := rec.snapshot(); len(got) != 1 || got[0] != (deafEvent{testBot, false}) {
+		t.Errorf("Close did not undeafen; events = %v", got)
 	}
 }
 
 // TestDeafControllerCloseCancelsPendingDeafen stops a timer armed just before
 // teardown from firing afterwards and re-deafening a bot that has left.
 func TestDeafControllerCloseCancelsPendingDeafen(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	c.Register(testBot, false)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testBot, false)
 
-	c.Observe(map[snowflake.ID]bool{testBot: false}) // arm
-	c.Close(context.Background())
-	time.Sleep(settleAfter)
+		c.Observe(map[snowflake.ID]bool{testBot: false}) // arm
+		c.Close(context.Background())
+		settle(2 * deafenDelay)
 
-	for _, ev := range rec.snapshot() {
-		if ev.deaf {
-			t.Errorf("a deafen fired after Close; events = %v", rec.snapshot())
+		if got := rec.snapshot(); len(got) != 0 {
+			t.Errorf("a change fired after Close; events = %v", got)
 		}
-	}
+	})
 }
 
 // TestDeafControllerObserveAfterCloseIsInert protects against a late router
 // recompute racing teardown.
 func TestDeafControllerObserveAfterCloseIsInert(t *testing.T) {
-	rec := &deafRecorder{}
-	c := newTestController(rec)
-	c.Register(testBot, false)
-	c.Close(context.Background())
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{}
+		c := newTestController(rec)
+		c.Register(testBot, false)
+		c.Close(context.Background())
 
-	c.Observe(map[snowflake.ID]bool{testBot: false})
-	time.Sleep(settleAfter)
+		c.Observe(map[snowflake.ID]bool{testBot: false})
+		settle(2 * deafenDelay)
 
-	for _, ev := range rec.snapshot() {
-		if ev.deaf {
-			t.Errorf("Observe after Close still deafened; events = %v", rec.snapshot())
+		if got := rec.snapshot(); len(got) != 0 {
+			t.Errorf("Observe after Close still changed state; events = %v", got)
 		}
-	}
+	})
 }
 
 // permError builds the error Discord returns when the bot may not deafen.
@@ -264,63 +266,69 @@ func permError() error {
 // session. Discord's edge treats sustained 4xx as abuse, so this is not merely
 // wasteful.
 func TestDeafControllerLatchesOffOnPermissionDenied(t *testing.T) {
-	rec := &deafRecorder{err: permError()}
-	c := newTestController(rec)
-	c.Register(testBot, false)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{err: permError()}
+		c := newTestController(rec)
+		c.Register(testBot, false)
 
-	c.Observe(map[snowflake.ID]bool{testBot: false})
-	waitFor(t, "first (failing) attempt", func() bool { return len(rec.snapshot()) == 0 && c.isDisabled() })
-
-	// Any number of further recomputes must produce no further attempts.
-	for range 5 {
 		c.Observe(map[snowflake.ID]bool{testBot: false})
-	}
-	time.Sleep(settleAfter)
+		settle(deafenDelay)
+		assertAttempts(t, rec, 1, "after the delay")
+		if !c.isDisabled() {
+			t.Fatal("a permission denial did not latch the controller off")
+		}
 
-	if n := rec.attempts(); n != 1 {
-		t.Errorf("made %d attempts after a permission denial, want exactly 1", n)
-	}
+		// Any number of further recomputes must produce no further attempts.
+		for range 5 {
+			c.Observe(map[snowflake.ID]bool{testBot: false})
+		}
+		settle(10 * deafenDelay)
+		assertAttempts(t, rec, 1, "after a permission denial")
+	})
 }
 
 // TestDeafControllerDoesNotRecordFailedChange covers the second defect: state
 // was recorded before Discord accepted it, so a failed deafen looked applied
 // and Close would then issue a pointless undeafen for it.
 func TestDeafControllerDoesNotRecordFailedChange(t *testing.T) {
-	rec := &deafRecorder{err: permError()}
-	c := newTestController(rec)
-	c.Register(testBot, false)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{err: permError()}
+		c := newTestController(rec)
+		c.Register(testBot, false)
 
-	c.Observe(map[snowflake.ID]bool{testBot: false})
-	waitFor(t, "failed deafen attempt", func() bool { return rec.attempts() == 1 })
+		c.Observe(map[snowflake.ID]bool{testBot: false})
+		settle(deafenDelay)
+		assertAttempts(t, rec, 1, "after the delay")
 
-	c.mu.Lock()
-	deaf := c.members[testBot].deaf
-	c.mu.Unlock()
-	if deaf {
-		t.Error("a rejected deafen was recorded as applied")
-	}
+		c.mu.Lock()
+		deaf := c.members[testBot].deaf
+		c.mu.Unlock()
+		if deaf {
+			t.Error("a rejected deafen was recorded as applied")
+		}
+	})
 }
 
 // TestDeafControllerNoDuplicateInFlight pins the in-flight guard: recomputes
 // arriving while a change is being applied must not queue a second PATCH for
 // the same bot.
 func TestDeafControllerNoDuplicateInFlight(t *testing.T) {
-	rec := &deafRecorder{block: make(chan struct{})}
-	c := newTestController(rec)
-	c.Register(testBot, true)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{block: make(chan struct{})}
+		c := newTestController(rec)
+		c.Register(testBot, true)
 
-	c.Observe(map[snowflake.ID]bool{testBot: true}) // undeafen, will block in setDeaf
-	waitFor(t, "apply to start", func() bool { return rec.attempts() == 1 })
+		c.Observe(map[snowflake.ID]bool{testBot: true}) // undeafen, will block in setDeaf
+		synctest.Wait()
+		assertAttempts(t, rec, 1, "with the undeafen in flight")
 
-	for range 5 {
-		c.Observe(map[snowflake.ID]bool{testBot: true})
-	}
-	close(rec.block)
-	time.Sleep(settleAfter)
-
-	if n := rec.attempts(); n != 1 {
-		t.Errorf("issued %d changes for one transition, want 1", n)
-	}
+		for range 5 {
+			c.Observe(map[snowflake.ID]bool{testBot: true})
+		}
+		close(rec.block)
+		settle(2 * deafenDelay)
+		assertAttempts(t, rec, 1, "for one transition")
+	})
 }
 
 // TestDeafenReadinessOK pins the predicate the /start reply branches on. The
@@ -357,54 +365,43 @@ func TestDeafenReadinessOK(t *testing.T) {
 // not covered by the per-speaker Undeafen in BuildSpeakerCleanup, so it would
 // capture silence in every later raid.
 func TestDeafControllerCloseWaitsForInFlightDeafen(t *testing.T) {
-	rec := &deafRecorder{block: make(chan struct{})}
-	c := newTestController(rec)
-	c.Register(testBot, false)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{block: make(chan struct{})}
+		c := newTestController(rec)
+		c.Register(testBot, false)
 
-	c.Observe(map[snowflake.ID]bool{testBot: false}) // arm the deafen
-	waitFor(t, "deafen apply to start", func() bool { return rec.attempts() == 1 })
+		c.Observe(map[snowflake.ID]bool{testBot: false}) // arm the deafen
+		settle(deafenDelay)
+		assertAttempts(t, rec, 1, "with the deafen in flight")
 
-	closed := make(chan struct{})
-	go func() {
-		c.Close(context.Background())
-		close(closed)
-	}()
+		closed := make(chan struct{})
+		go func() {
+			c.Close(context.Background())
+			close(closed)
+		}()
 
-	// Give Close time to reach the point where it decides what to undo, while
-	// the deafen is still in flight. Without this the apply would usually
-	// record itself first and the race would not be exercised at all.
-	time.Sleep(settleAfter)
-	select {
-	case <-closed:
-		t.Fatal("Close returned while a deafen was still in flight; it did not wait")
-	default:
-	}
-
-	close(rec.block) // let the in-flight deafen land
-
-	select {
-	case <-closed:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not return")
-	}
-
-	waitFor(t, "both changes to be issued", func() bool { return rec.attempts() >= 2 })
-
-	var deafened, undeafened bool
-	for _, ev := range rec.snapshot() {
-		switch ev {
-		case deafEvent{testBot, true}:
-			deafened = true
-		case deafEvent{testBot, false}:
-			undeafened = true
+		// Every goroutine is blocked now: Close has run as far as it can while
+		// the deafen is still in flight.
+		synctest.Wait()
+		select {
+		case <-closed:
+			t.Error("Close returned while a deafen was still in flight; it did not wait")
+		default:
 		}
-	}
-	if !deafened {
-		t.Fatal("the in-flight deafen never landed; test did not reproduce the race")
-	}
-	if !undeafened {
-		t.Error("Close left the member deafened: it snapshotted before the in-flight apply recorded itself")
-	}
+
+		close(rec.block) // let the in-flight deafen land
+		synctest.Wait()
+		select {
+		case <-closed:
+		default:
+			t.Fatal("Close did not return once the in-flight deafen landed")
+		}
+
+		want := []deafEvent{{testBot, true}, {testBot, false}}
+		if got := rec.snapshot(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("changes = %v, want %v: Close must undo the deafen that landed while it waited", got, want)
+		}
+	})
 }
 
 // TestDeafControllerReconcilesStateObservedDuringApply reproduces a session
@@ -416,29 +413,22 @@ func TestDeafControllerCloseWaitsForInFlightDeafen(t *testing.T) {
 // event-driven, so nothing revisits the decision — the bot stays deafened with
 // a caller in its channel and captures silence for the rest of the raid.
 func TestDeafControllerReconcilesStateObservedDuringApply(t *testing.T) {
-	rec := &deafRecorder{block: make(chan struct{})}
-	c := newTestController(rec)
-	c.Register(testBot, false) // capture bot starts hearing
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{block: make(chan struct{})}
+		c := newTestController(rec)
+		c.Register(testBot, false) // capture bot starts hearing
 
-	c.Observe(map[snowflake.ID]bool{testBot: false}) // channel empties: arm deafen
-	waitFor(t, "deafen apply to start", func() bool { return rec.attempts() == 1 })
+		c.Observe(map[snowflake.ID]bool{testBot: false}) // channel empties: arm deafen
+		settle(deafenDelay)
+		assertAttempts(t, rec, 1, "with the deafen in flight")
 
-	// A caller arrives while the deafen PATCH is in flight.
-	c.Observe(map[snowflake.ID]bool{testBot: true})
-	close(rec.block)
+		// A caller arrives while the deafen PATCH is in flight.
+		c.Observe(map[snowflake.ID]bool{testBot: true})
+		close(rec.block)
 
-	waitFor(t, "undeafen after the caller arrived", func() bool {
-		ev, ok := lastEvent(rec)
-		return ok && ev == deafEvent{testBot, false}
+		synctest.Wait()
+		assertLastEvent(t, rec, deafEvent{testBot, false}, "once the deafen landed with a caller present")
 	})
-}
-
-// setErr swaps the error setDeaf returns, so a test can make a change fail
-// once and then succeed.
-func (r *deafRecorder) setErr(err error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.err = err
 }
 
 // TestDeafControllerRetriesRejectedChange covers the non-permission half of the
@@ -446,17 +436,20 @@ func (r *deafRecorder) setErr(err error) {
 // at the wrong state with nothing to revisit it, because recomputes only happen
 // on voice events. Retries back off by the delay rather than spinning.
 func TestDeafControllerRetriesRejectedChange(t *testing.T) {
-	rec := &deafRecorder{err: errors.New("503 service unavailable")}
-	c := newTestController(rec)
-	c.Register(testBot, true) // deafened; the router wants it hearing
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{err: errors.New("503 service unavailable")}
+		c := newTestController(rec)
+		c.Register(testBot, true) // deafened; the router wants it hearing
 
-	c.Observe(map[snowflake.ID]bool{testBot: true})
-	waitFor(t, "first (failing) undeafen", func() bool { return rec.attempts() == 1 })
+		c.Observe(map[snowflake.ID]bool{testBot: true})
+		synctest.Wait()
+		assertAttempts(t, rec, 1, "after the immediate undeafen")
 
-	rec.setErr(nil)
-	waitFor(t, "retried undeafen", func() bool {
-		ev, ok := lastEvent(rec)
-		return ok && ev == deafEvent{testBot, false}
+		rec.setErr(nil)
+		settle(deafenDelay - time.Nanosecond)
+		assertAttempts(t, rec, 1, "before the retry delay ran out")
+		settle(time.Nanosecond)
+		assertLastEvent(t, rec, deafEvent{testBot, false}, "once the retry delay ran out")
 	})
 }
 
@@ -465,22 +458,24 @@ func TestDeafControllerRetriesRejectedChange(t *testing.T) {
 // longer connected to voice — persists for the session, and retrying it every
 // delay until teardown is the behaviour the latch exists to prevent.
 func TestDeafControllerStopsRetryingRejectedChange(t *testing.T) {
-	rec := &deafRecorder{err: errors.New("10007 unknown member")}
-	c := newTestController(rec)
-	c.Register(testBot, true)
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{err: errors.New("10007 unknown member")}
+		c := newTestController(rec)
+		c.Register(testBot, true)
 
-	c.Observe(map[snowflake.ID]bool{testBot: true})
-	waitFor(t, "retries to be exhausted", func() bool { return rec.attempts() == deafRetryLimit })
+		c.Observe(map[snowflake.ID]bool{testBot: true})
+		settle((deafRetryLimit - 1) * deafenDelay)
+		assertAttempts(t, rec, deafRetryLimit, "once the retries ran")
 
-	time.Sleep(settleAfter)
-	if n := rec.attempts(); n != deafRetryLimit {
-		t.Errorf("made %d attempts, want %d — retries are not bounded", n, deafRetryLimit)
-	}
+		settle(10 * deafenDelay)
+		assertAttempts(t, rec, deafRetryLimit, "long after the last retry (retries are not bounded)")
 
-	// A fresh recompute restores the budget: the router is still asking, so
-	// this is not the quiet chain the limit exists to stop.
-	c.Observe(map[snowflake.ID]bool{testBot: true})
-	waitFor(t, "retries to resume after a recompute", func() bool { return rec.attempts() > deafRetryLimit })
+		// A fresh recompute restores the budget: the router is still asking, so
+		// this is not the quiet chain the limit exists to stop.
+		c.Observe(map[snowflake.ID]bool{testBot: true})
+		settle(deafenDelay)
+		assertAttempts(t, rec, deafRetryLimit+1, "after a recompute")
+	})
 }
 
 // A change Discord keeps rejecting for a reason retrying cannot fix — 10007
@@ -490,24 +485,67 @@ func TestDeafControllerStopsRetryingRejectedChange(t *testing.T) {
 // channel into a burst of rejected moderation requests; the delay is what
 // paces them.
 func TestRecomputesDoNotReissueARejectedChangeUnpaced(t *testing.T) {
-	rec := &deafRecorder{err: errors.New("unknown member")}
-	c := newTestController(rec)
-	c.Register(testBot, true) // deafened, and the router wants it hearing
+	synctest.Test(t, func(t *testing.T) {
+		rec := &deafRecorder{err: errors.New("unknown member")}
+		c := newTestController(rec)
+		c.Register(testBot, true) // deafened, and the router wants it hearing
 
-	capturing := map[snowflake.ID]bool{testBot: true}
-	c.Observe(capturing)
-	waitFor(t, "the first attempt to be rejected", func() bool { return rec.attempts() >= 1 })
-
-	// None of these recomputes is a new request: the desired state is the one
-	// Discord just refused.
-	before := rec.attempts()
-	for range 10 {
+		capturing := map[snowflake.ID]bool{testBot: true}
 		c.Observe(capturing)
-	}
-	time.Sleep(testDelay / 4)
+		synctest.Wait()
+		assertAttempts(t, rec, 1, "after the immediate undeafen")
 
-	if extra := rec.attempts() - before; extra > 0 {
-		t.Errorf("%d extra PATCHes inside a quarter of the retry delay, from 10 recomputes; "+
-			"re-asking for a rejected change must wait out the delay like any other retry", extra)
+		// None of these recomputes is a new request: the desired state is the one
+		// Discord just refused.
+		for range 10 {
+			c.Observe(capturing)
+			synctest.Wait()
+		}
+		settle(deafenDelay - time.Nanosecond)
+		if extra := rec.attempts() - 1; extra > 0 {
+			t.Errorf("%d extra PATCHes inside the retry delay, from 10 recomputes; "+
+				"re-asking for a rejected change must wait out the delay like any other retry", extra)
+		}
+
+		settle(time.Nanosecond)
+		assertAttempts(t, rec, 2, "once the retry delay ran out")
+	})
+}
+
+type lateApplyRecorder struct {
+	closed atomic.Bool
+	late   atomic.Int32
+}
+
+func (r *lateApplyRecorder) set(context.Context, snowflake.ID, snowflake.ID, bool) error {
+	if r.closed.Load() {
+		r.late.Add(1)
 	}
+	return nil
+}
+
+// Observe admits an undeafen under c.mu and starts it once unlocked. Close must
+// count the change from the moment it is admitted, or it can return before the
+// change has even started. That window has no blocking point a test could hold
+// it open at, so this runs the two against each other until one lands in it.
+func TestDeafControllerCloseWaitsForChangeBeingStarted(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rec := &lateApplyRecorder{}
+		for range 3000 {
+			rec.closed.Store(false)
+			c := &deafController{guildID: testGuild, setDeaf: rec.set, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+			c.Register(testBot, true)
+			var wg sync.WaitGroup
+			wg.Go(func() { c.Observe(map[snowflake.ID]bool{testBot: true}) })
+			wg.Go(func() {
+				c.Close(context.Background())
+				rec.closed.Store(true)
+			})
+			wg.Wait()
+			synctest.Wait()
+		}
+		if n := rec.late.Load(); n != 0 {
+			t.Errorf("%d deaf change(s) started after Close returned: Close did not wait for a change it had already admitted", n)
+		}
+	})
 }

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/snowflake/v2"
@@ -77,6 +78,10 @@ func relayBridgeDrops(t *testing.T, reader *sdkmetric.ManualReader) int64 {
 // input between them halves the audio as soon as both talk: 100 frames a
 // second go into a buffer the mixer empties at 50.
 func TestRelayInputKeepsTwoTalkingPeersApart(t *testing.T) {
+	synctest.Test(t, testRelayInputKeepsTwoTalkingPeersApart)
+}
+
+func testRelayInputKeepsTwoTalkingPeersApart(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -97,31 +102,39 @@ func TestRelayInputKeepsTwoTalkingPeersApart(t *testing.T) {
 	})
 
 	session := ally.NewManager().Create("TESTCODE", relayTestReceiver, guild.RaidModeGuildCaller)
-	if got := registerRelayInputs(gm, session, []*DestChannel{{ChannelID: relayTestChannel}},
-		map[snowflake.ID]*opus.Mixer{relayTestChannel: mx}, hraban.NewDecoder); got == nil {
+	bridge := registerRelayInputs(gm, session, []*DestChannel{{ChannelID: relayTestChannel}},
+		map[snowflake.ID]*opus.Mixer{relayTestChannel: mx}, hraban.NewDecoder)
+	if bridge == nil {
 		t.Fatal("relay input was not registered")
 	}
+	defer func() {
+		session.RemoveGuild(relayTestReceiver)
+		bridge.stop()
+	}()
 	go mx.Run(ctx)
 
 	const frames = 50
 	peerA, peerB := tonePackets(t, 140, frames), tonePackets(t, 230, frames)
-	tick := time.NewTicker(20 * time.Millisecond)
-	defer tick.Stop()
 	for i := range frames {
-		<-tick.C
+		time.Sleep(frameInterval)
 		session.BroadcastFromGuild(relayTestPeerA, opus.CopyOpusFrame(peerA[i]))
 		session.BroadcastFromGuild(relayTestPeerB, opus.CopyOpusFrame(peerB[i]))
+		synctest.Wait()
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * frameInterval)
+	synctest.Wait()
 	cancel()
 
-	if lost := relayBridgeDrops(t, reader); lost > frames/10 {
+	if lost := relayBridgeDrops(t, reader); lost != 0 {
 		t.Errorf("%d of %d frames from two talking peers were evicted from the relay input", lost, 2*frames)
 	}
-	if got := emitted.Load(); got < frames*8/10 {
+	if got := emitted.Load(); got != frames {
 		t.Errorf("mixer emitted %d frames for %d ticks of two peers talking", got, frames)
 	}
 }
+
+// frameInterval is the pace a peer's relay mixer sends at.
+const frameInterval = 20 * time.Millisecond
 
 // tonePCM is one stereo 20 ms frame of a harmonic tone, continuous across
 // consecutive frames.
@@ -324,6 +337,10 @@ func countPackets(ctx context.Context, out <-chan []byte) *atomic.Int64 {
 // one stream by the host and one by each of those guests. Its speaker bots can
 // play a single stream, so the streams have to reach them mixed into one.
 func TestListenerGuestMixesThePeersOfASharedMix(t *testing.T) {
+	synctest.Test(t, testListenerGuestMixesThePeersOfASharedMix)
+}
+
+func testListenerGuestMixesThePeersOfASharedMix(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	fx := guestFx()
@@ -345,29 +362,30 @@ func TestListenerGuestMixesThePeersOfASharedMix(t *testing.T) {
 
 	const frames = 50
 	host, guest := tonePackets(t, 140, frames), tonePackets(t, 230, 2*frames)
-	tick := time.NewTicker(20 * time.Millisecond)
-	defer tick.Stop()
-
 	for i := range frames {
-		<-tick.C
+		time.Sleep(frameInterval)
 		p.AllySession.BroadcastFromGuild(otherGuest, opus.CopyOpusFrame(guest[i]))
+		synctest.Wait()
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * frameInterval)
+	synctest.Wait()
 	guestOnly := played.Load()
-	if guestOnly < frames*8/10 {
+	if guestOnly != frames {
 		t.Errorf("speaker was handed %d packets while only another guest talked for %d ticks: the listener does not hear it",
 			guestOnly, frames)
 	}
 
 	for i := range frames {
-		<-tick.C
+		time.Sleep(frameInterval)
 		p.AllySession.BroadcastFromGuild(fx.hostGuildID, opus.CopyOpusFrame(host[i]))
 		p.AllySession.BroadcastFromGuild(otherGuest, opus.CopyOpusFrame(guest[frames+i]))
+		synctest.Wait()
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(5 * frameInterval)
+	synctest.Wait()
 
-	if got := played.Load() - guestOnly; got < frames*8/10 || got > frames*12/10 {
-		t.Errorf("speaker was handed %d packets for %d ticks of two peers talking, want one mixed stream of about %d",
+	if got := played.Load() - guestOnly; got != frames {
+		t.Errorf("speaker was handed %d packets for %d ticks of two peers talking, want one mixed stream of %d",
 			got, frames, frames)
 	}
 }

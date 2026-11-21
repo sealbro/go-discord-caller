@@ -3,91 +3,13 @@ package manager
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 
-	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
-	"go.opentelemetry.io/otel/metric/noop"
 )
-
-const (
-	roleTestGuestGuildID = snowflake.ID(1430511050704289836)
-	roleTestSpeakerID    = snowflake.ID(500)
-	roleTestCallerRoleID = snowflake.ID(700)
-	roleTestHostCode     = ally.Code("HOSTCODE")
-)
-
-// roleTestChannels gives each guild an owner channel and a speaker channel.
-var roleTestChannels = map[snowflake.ID][2]snowflake.ID{
-	testGuildID:          {900, 901},
-	roleTestGuestGuildID: {910, 911},
-}
-
-// callerRoleFixture is a Service whose guilds are fully set up except for the
-// caller role, with a count of every voice join the raid path attempts.
-type callerRoleFixture struct {
-	m      *Service
-	st     *store.InMemoryStore
-	caches cache.Caches
-	joins  atomic.Int32
-
-	ownerConn, speakerConn *fakeVoiceConn
-	ownerVM, speakerVM     *fakeVoiceManager
-}
-
-func newCallerRoleFixture(t *testing.T) *callerRoleFixture {
-	t.Helper()
-	f := &callerRoleFixture{
-		st:     store.NewInMemoryStore(),
-		caches: cache.New(cache.WithCaches(cache.FlagsAll)),
-	}
-	statuses := map[snowflake.ID]*guild.Status{}
-	for guildID, channels := range roleTestChannels {
-		f.st.BindChannel(guildID, testBotID, channels[0])
-		f.st.BindChannel(guildID, roleTestSpeakerID, channels[1])
-		for _, channelID := range channels {
-			f.caches.AddChannel(voiceChannel(t, guildID, channelID))
-		}
-		statuses[guildID] = &guild.Status{
-			GuildID:     guildID,
-			OwnerUserID: testBotID,
-			Speakers:    map[snowflake.ID]*guild.Speaker{roleTestSpeakerID: {ID: roleTestSpeakerID, Enabled: true}},
-		}
-	}
-
-	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("caller_role_required_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
-	countJoin := func() { f.joins.Add(1) }
-	f.ownerConn, f.speakerConn = &fakeVoiceConn{}, &fakeVoiceConn{}
-	f.ownerVM = &fakeVoiceManager{conn: f.ownerConn, onOpen: countJoin}
-	f.speakerVM = &fakeVoiceManager{conn: f.speakerConn, onOpen: countJoin}
-	f.m = &Service{
-		statuses:    statuses,
-		store:       f.st,
-		poolSvc:     onePool{id: roleTestSpeakerID, client: &bot.Client{VoiceManager: f.speakerVM, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{VoiceManager: f.ownerVM, Caches: f.caches, Rest: stubRest{}},
-		ownerBotID:  testBotID,
-		sessions:    ally.NewManager(),
-		metrics:     metrics,
-		reconnect:   newReconnectState(),
-	}
-	empty := map[snowflake.ID]guild.AutoRouter{}
-	f.m.activeRouters.Store(&empty)
-	return f
-}
-
-func (f *callerRoleFixture) addMember(guildID, userID snowflake.ID, roleIDs ...snowflake.ID) {
-	f.caches.AddMember(discord.Member{GuildID: guildID, User: discord.User{ID: userID}, RoleIDs: roleIDs})
-}
 
 // Without a caller role every non-bot user in the captured channel is relayed —
 // to every speaker channel and, through a relay code, into other servers. A

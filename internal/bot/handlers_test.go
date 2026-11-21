@@ -4,15 +4,18 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/events"
+	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
@@ -385,136 +388,124 @@ func TestOnGuildJoin_NilSyncerStillSeeds(t *testing.T) {
 	waitFor(t, func() bool { return len(f.snapshotCalls().seedCalls) == 1 }, "SeedExistingSpeakers")
 }
 
-func TestOnGuildMemberAdd_BotOnly(t *testing.T) {
+// READY seeds every guild it lists, until the gateway re-identifies so often
+// that the guard calls it a storm; from then on seeding is skipped.
+func TestOnReady_SeedsGuildsUntilAReadyStorm(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name      string
-		isBot     bool
-		wantCalls int
-	}{
-		{"bot user triggers seed", true, 1},
-		{"human user is ignored", false, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			f := &fakeManager{}
-			h := onGuildMemberAdd(f)
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeManager{}
+		h := onReady(f, newReadyGuard())
+		ready := &events.Ready{
+			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
+			EventReady: gateway.EventReady{
+				Guilds: []discord.UnavailableGuild{{ID: 11}, {ID: 12}},
+			},
+		}
 
-			guildID := snowflake.ID(10)
-			userID := snowflake.ID(20)
-			h(&events.GuildMemberJoin{
+		for range readyStormLimit + 2 {
+			h(ready)
+			synctest.Wait()
+		}
+
+		seeds := f.snapshotCalls().seedCalls
+		if len(seeds) != readyStormLimit {
+			t.Fatalf("seeded %d times for %d READYs, want %d: seeding must stop once READY storms",
+				len(seeds), readyStormLimit+2, readyStormLimit)
+		}
+		if !slices.Equal(seeds[0], []snowflake.ID{11, 12}) {
+			t.Errorf("seeded guilds %v, want every guild READY listed", seeds[0])
+		}
+	})
+}
+
+// Only bots are speakers, so only a bot joining or leaving a guild is passed on.
+func TestOnGuildMemberJoinAndLeave_BotOnly(t *testing.T) {
+	t.Parallel()
+	const guildID, userID = snowflake.ID(10), snowflake.ID(20)
+	fire := map[string]func(f *fakeManager, isBot bool){
+		"join": func(f *fakeManager, isBot bool) {
+			onGuildMemberAdd(f)(&events.GuildMemberJoin{
 				GenericGuildMember: &events.GenericGuildMember{
 					GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
 					GuildID:      guildID,
-					Member:       discord.Member{User: discord.User{ID: userID, Bot: tc.isBot}},
+					Member:       discord.Member{User: discord.User{ID: userID, Bot: isBot}},
 				},
 			})
-
-			if tc.wantCalls == 0 {
-				// Give the goroutine a moment in case the handler is wrong.
-				time.Sleep(20 * time.Millisecond)
-				if got := len(f.snapshotCalls().trySeedCalls); got != 0 {
-					t.Errorf("expected no TrySeedMember calls; got %d", got)
-				}
-				return
-			}
-			waitFor(t, func() bool { return len(f.snapshotCalls().trySeedCalls) == 1 }, "TrySeedMember")
-			got := f.snapshotCalls().trySeedCalls[0]
-			if got.guild != guildID || got.user != userID {
-				t.Errorf("TrySeedMember args: want (%s,%s) got (%s,%s)", guildID, userID, got.guild, got.user)
-			}
-		})
-	}
-}
-
-func TestOnGuildMemberLeave_BotOnly(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		isBot     bool
-		wantCalls int
-	}{
-		{"bot user triggers remove", true, 1},
-		{"human user is ignored", false, 0},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			f := &fakeManager{}
-			h := onGuildMemberLeave(f)
-
-			guildID := snowflake.ID(10)
-			userID := snowflake.ID(20)
-			h(&events.GuildMemberLeave{
+		},
+		"leave": func(f *fakeManager, isBot bool) {
+			onGuildMemberLeave(f)(&events.GuildMemberLeave{
 				GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
 				GuildID:      guildID,
-				User:         discord.User{ID: userID, Bot: tc.isBot},
-				Member:       discord.Member{User: discord.User{ID: userID, Bot: tc.isBot}},
+				User:         discord.User{ID: userID, Bot: isBot},
+				Member:       discord.Member{User: discord.User{ID: userID, Bot: isBot}},
 			})
+		},
+	}
+	calls := map[string]func(c fakeManagerSnapshot) []snowflakePair{
+		"join":  func(c fakeManagerSnapshot) []snowflakePair { return c.trySeedCalls },
+		"leave": func(c fakeManagerSnapshot) []snowflakePair { return c.removeSpeakerCalls },
+	}
+	for event := range fire {
+		for _, isBot := range []bool{true, false} {
+			name := event + "/human"
+			if isBot {
+				name = event + "/bot"
+			}
+			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+				synctest.Test(t, func(t *testing.T) {
+					f := &fakeManager{}
+					fire[event](f, isBot)
+					synctest.Wait()
 
-			if tc.wantCalls == 0 {
-				time.Sleep(20 * time.Millisecond)
-				if got := len(f.snapshotCalls().removeSpeakerCalls); got != 0 {
-					t.Errorf("expected no RemoveSpeaker calls; got %d", got)
+					got := calls[event](f.snapshotCalls())
+					var want []snowflakePair
+					if isBot {
+						want = []snowflakePair{{guildID, userID}}
+					}
+					if !slices.Equal(got, want) {
+						t.Errorf("manager calls = %v, want %v", got, want)
+					}
+				})
+			})
+		}
+	}
+}
+
+// A bot dropped from voice during a raid is reconnected to its bound channel;
+// with no raid running it is left alone. Neither is a caller leaving.
+func TestOnVoiceLeave_Bot(t *testing.T) {
+	t.Parallel()
+	const guildID, botID, chID = snowflake.ID(50), snowflake.ID(99), snowflake.ID(1001)
+	for _, active := range []bool{true, false} {
+		t.Run(map[bool]string{true: "raid running", false: "no raid"}[active], func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				f := &fakeManager{hasActiveFn: func(snowflake.ID) bool { return active }}
+				ch := chID
+				onVoiceLeave(f)(&events.GuildVoiceLeave{
+					GenericGuildVoiceState: &events.GenericGuildVoiceState{
+						GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
+						VoiceState:   discord.VoiceState{GuildID: guildID, UserID: botID, ChannelID: &ch},
+						Member:       discord.Member{User: discord.User{ID: botID, Bot: true}},
+					},
+					OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: botID, ChannelID: &ch},
+				})
+				synctest.Wait()
+
+				snap := f.snapshotCalls()
+				var want []snowflakePair
+				if active {
+					want = []snowflakePair{{guildID, botID}}
 				}
-				return
-			}
-			waitFor(t, func() bool { return len(f.snapshotCalls().removeSpeakerCalls) == 1 }, "RemoveSpeaker")
-			got := f.snapshotCalls().removeSpeakerCalls[0]
-			if got.guild != guildID || got.user != userID {
-				t.Errorf("RemoveSpeaker args: want (%s,%s) got (%s,%s)", guildID, userID, got.guild, got.user)
-			}
+				if !slices.Equal(snap.reconnectCalls, want) {
+					t.Errorf("ReconnectBotChannel calls = %v, want %v", snap.reconnectCalls, want)
+				}
+				if len(snap.autoRouteCalls) != 0 {
+					t.Errorf("AutoRoute must not be called for bot leave; got %d calls", len(snap.autoRouteCalls))
+				}
+			})
 		})
-	}
-}
-
-func TestOnVoiceLeave_BotReconnectsWhenSessionActive(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{hasActiveFn: func(snowflake.ID) bool { return true }}
-	h := onVoiceLeave(f)
-
-	guildID := snowflake.ID(50)
-	botID := snowflake.ID(99)
-	chID := snowflake.ID(1001)
-	h(&events.GuildVoiceLeave{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: botID, ChannelID: &chID},
-			Member:       discord.Member{User: discord.User{ID: botID, Bot: true}},
-		},
-		OldVoiceState: discord.VoiceState{GuildID: guildID, UserID: botID, ChannelID: &chID},
-	})
-	waitFor(t, func() bool { return len(f.snapshotCalls().reconnectCalls) == 1 }, "ReconnectBotChannel")
-	snap := f.snapshotCalls()
-	got := snap.reconnectCalls[0]
-	if got.guild != guildID || got.user != botID {
-		t.Errorf("ReconnectBotChannel args: want (%s,%s) got (%s,%s)", guildID, botID, got.guild, got.user)
-	}
-	// Bots must not trigger AutoRoute / VoiceCallerAdd on leave.
-	if len(snap.autoRouteCalls) != 0 {
-		t.Errorf("AutoRoute must not be called for bot leave; got %d calls", len(snap.autoRouteCalls))
-	}
-}
-
-func TestOnVoiceLeave_BotIgnoredWithoutSession(t *testing.T) {
-	t.Parallel()
-	f := &fakeManager{} // HasActiveSession defaults to false
-	h := onVoiceLeave(f)
-
-	chID := snowflake.ID(1001)
-	h(&events.GuildVoiceLeave{
-		GenericGuildVoiceState: &events.GenericGuildVoiceState{
-			GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
-			VoiceState:   discord.VoiceState{GuildID: 50, UserID: 99, ChannelID: &chID},
-			Member:       discord.Member{User: discord.User{ID: 99, Bot: true}},
-		},
-		OldVoiceState: discord.VoiceState{GuildID: 50, UserID: 99, ChannelID: &chID},
-	})
-	// Give the goroutine a moment in case the handler spawns one anyway.
-	time.Sleep(20 * time.Millisecond)
-	if got := len(f.snapshotCalls().reconnectCalls); got != 0 {
-		t.Errorf("ReconnectBotChannel must not be called when HasActiveSession=false; got %d", got)
 	}
 }
 

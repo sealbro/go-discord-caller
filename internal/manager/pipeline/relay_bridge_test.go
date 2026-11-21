@@ -5,7 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/disgoorg/snowflake/v2"
 	hraban "github.com/hraban/opus"
@@ -29,40 +29,39 @@ func TestHostRaidTeardownStopsTheRelayBridge(t *testing.T) {
 	for _, mode := range []guild.RaidMode{guild.RaidModeGuildCaller, guild.RaidModeOneManyGuildCaller} {
 		t.Run(string(mode), func(t *testing.T) {
 			t.Parallel()
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
 
-			fx := hostFx()
-			p := buildHostParams(t, ctx, fx, mode)
-			p.CancelFunc = cancel
-			session, start, err := HostFor(mode).Build(ctx, p)
-			if err != nil {
-				t.Fatalf("build: %v", err)
-			}
-			start()
-			t.Cleanup(func() {
-				p.OwnerHandle.Close()
-				for _, r := range p.Setup.Joined {
-					r.Handle.Close()
+				fx := hostFx()
+				p := buildHostParams(t, ctx, fx, mode)
+				p.CancelFunc = cancel
+				session, start, err := HostFor(mode).Build(ctx, p)
+				if err != nil {
+					t.Fatalf("build: %v", err)
 				}
-			})
+				start()
+				t.Cleanup(func() {
+					p.OwnerHandle.Close()
+					for _, r := range p.Setup.Joined {
+						r.Handle.Close()
+					}
+				})
 
-			hub := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
-			if !slices.Contains(hub.InputIDs(), RelayInputID) {
-				t.Fatalf("relay input never registered on the owner channel mixer; got %v", hub.InputIDs())
-			}
+				hub := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
+				if !slices.Contains(hub.InputIDs(), RelayInputID) {
+					t.Fatalf("relay input never registered on the owner channel mixer; got %v", hub.InputIDs())
+				}
 
-			session.Cancel()
-			session.Cleanup()
+				session.Cancel()
+				session.Cleanup()
+				synctest.Wait()
 
-			deadline := time.Now().Add(2 * time.Second)
-			for slices.Contains(hub.InputIDs(), RelayInputID) {
-				if time.Now().After(deadline) {
-					t.Fatalf("relay bridge still running 2s after the raid was torn down: " +
+				if slices.Contains(hub.InputIDs(), RelayInputID) {
+					t.Fatal("relay bridge still running after the raid was torn down: " +
 						"each host raid leaks its goroutine, decoder and mixers")
 				}
-				time.Sleep(10 * time.Millisecond)
-			}
+			})
 		})
 	}
 }
@@ -126,11 +125,7 @@ func TestRelayInputsNotRegisteredWhenDecoderFails(t *testing.T) {
 	if slices.Contains(session.GuestGuildIDs(), guestGuildID) {
 		t.Error("guild stayed registered in the session with nothing consuming its relay input")
 	}
-	deadline := time.Now().Add(time.Second)
-	for slices.Contains(mx.InputIDs(), RelayInputID) {
-		if time.Now().After(deadline) {
-			t.Fatal("relay input left on the channel mixer after the decoder failed")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if slices.Contains(mx.InputIDs(), RelayInputID) {
+		t.Fatal("relay input left on the channel mixer after the decoder failed")
 	}
 }

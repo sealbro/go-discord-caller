@@ -3,6 +3,7 @@ package manager
 import (
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
@@ -144,7 +145,7 @@ func TestSessionTeardownForgetsStallBackoff(t *testing.T) {
 
 func TestFreshGatewayTargetsOnlyGuildsWithActiveSessions(t *testing.T) {
 	m := newTestService(true)
-	idleGuild := snowflake.ID(1430511050704289836)
+	idleGuild := testGuildID + 1
 	m.statuses[idleGuild] = &guild.Status{}
 
 	got := m.activeSessionGuilds()
@@ -152,4 +153,59 @@ func TestFreshGatewayTargetsOnlyGuildsWithActiveSessions(t *testing.T) {
 	if len(got) != 1 || got[0] != testGuildID {
 		t.Fatalf("activeSessionGuilds = %v, want only %s", got, testGuildID)
 	}
+}
+
+func TestOnBotVoiceMove(t *testing.T) {
+	bound := roleTestChannels[testGuildID][1]
+	elsewhere := snowflake.ID(999)
+	cases := []struct {
+		name      string
+		active    bool
+		botID     snowflake.ID
+		channelID *snowflake.ID
+		wantJoins int32
+	}{
+		{"moved away during a raid", true, roleTestSpeakerID, &elsewhere, 1},
+		{"disconnected during a raid", true, roleTestSpeakerID, nil, 1},
+		{"still in its bound channel", true, roleTestSpeakerID, &bound, 0},
+		{"no bound channel", true, roleTestSpeakerID + 1, &elsewhere, 0},
+		{"no raid running", false, roleTestSpeakerID, &elsewhere, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newCallerRoleFixture(t)
+				if tc.active {
+					f.m.statuses[testGuildID].Session = &guild.Session{GuildID: testGuildID}
+				}
+
+				f.m.OnBotVoiceMove(t.Context(), testGuildID, tc.botID, tc.channelID)
+				synctest.Wait()
+
+				if got := f.joins.Load(); got != tc.wantJoins {
+					t.Errorf("rejoins = %d, want %d", got, tc.wantJoins)
+				}
+			})
+		})
+	}
+}
+
+// A speaker whose gateway had to be re-identified lost every voice connection
+// it held, so it rejoins each guild with a raid running, and only those.
+func TestOnSpeakerFreshGatewayRejoinsEveryActiveRaid(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newCallerRoleFixture(t)
+		for _, guildID := range []snowflake.ID{testGuildID, roleTestGuestGuildID} {
+			f.m.statuses[guildID].Session = &guild.Session{GuildID: guildID}
+		}
+		idleGuild := testGuildID + 100
+		f.m.statuses[idleGuild] = &guild.Status{GuildID: idleGuild}
+
+		f.m.OnSpeakerFreshGateway(roleTestSpeakerID)
+		synctest.Wait()
+
+		if got := f.joins.Load(); got != 2 {
+			t.Errorf("rejoins = %d, want one per guild with a raid running (2)", got)
+		}
+	})
 }

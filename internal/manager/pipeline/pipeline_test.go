@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"slices"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -414,6 +414,10 @@ func TestGuildCallerPipeline_RelayFedMixersRunWhileHostIsQuiet(t *testing.T) {
 // route when a guest attaches, without anyone calling Recompute by hand.
 func TestGuildCallerPipeline_GuestJoinTriggersRecompute(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, testGuildCallerPipelineGuestJoinTriggersRecompute)
+}
+
+func testGuildCallerPipelineGuestJoinTriggersRecompute(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -428,6 +432,7 @@ func TestGuildCallerPipeline_GuestJoinTriggersRecompute(t *testing.T) {
 	start()
 	t.Cleanup(func() {
 		cancel()
+		session.Cleanup()
 		p.OwnerHandle.Close()
 		for _, r := range p.Setup.Joined {
 			r.Handle.Close()
@@ -436,12 +441,8 @@ func TestGuildCallerPipeline_GuestJoinTriggersRecompute(t *testing.T) {
 
 	p.AllySession.SetCapturing(snowflake.ID(999))
 
-	mx := mixerOf(t, session.ChannelMixers[fx.ownerChannelID])
-	deadline := time.Now().Add(2 * time.Second)
-	for mx.Paused() && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-	}
-	if mx.Paused() {
+	synctest.Wait()
+	if mixerOf(t, session.ChannelMixers[fx.ownerChannelID]).Paused() {
 		t.Error("guest join must trigger a router recompute that unpauses the relay-fed mixer")
 	}
 }

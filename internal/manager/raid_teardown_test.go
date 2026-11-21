@@ -4,9 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
@@ -18,89 +16,145 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
-func withCallerRole(f *callerRoleFixture) *callerRoleFixture {
-	f.st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
-	f.st.BindRole(roleTestGuestGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
-	return f
+// raidSide is one way a guild comes into a raid: hosting it, or joining
+// another guild's as a guest. Their teardown paths are separate code with the
+// same obligations.
+type raidSide struct {
+	name    string
+	guildID snowflake.ID
+	prepare func(f *callerRoleFixture)
+	start   func(f *callerRoleFixture) (context.CancelFunc, error)
 }
 
-func startHostRaid(t *testing.T, f *callerRoleFixture) (context.Context, context.CancelFunc, error) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
-	return ctx, cancel, err
+var raidSides = []raidSide{
+	{
+		name:    "host",
+		guildID: testGuildID,
+		prepare: func(*callerRoleFixture) {},
+		start: func(f *callerRoleFixture) (context.CancelFunc, error) {
+			ctx, cancel := context.WithCancel(context.Background())
+			_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
+			return cancel, err
+		},
+	},
+	{
+		name:    "guest",
+		guildID: roleTestGuestGuildID,
+		prepare: func(f *callerRoleFixture) {
+			f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)
+		},
+		start: func(f *callerRoleFixture) (context.CancelFunc, error) {
+			ctx, cancel := context.WithCancel(context.Background())
+			_, err := f.m.JoinSession(ctx, roleTestGuestGuildID, cancel, guild.RaidModeAllyListener, roleTestHostCode)
+			return cancel, err
+		},
+	},
 }
 
-func TestStartVoiceRaid_OwnerSetupFailureReleasesEverything(t *testing.T) {
-	f := withCallerRole(newCallerRoleFixture(t))
-	f.ownerConn.speakingErr = errors.New("speaking refused")
+func TestRaidStart_OwnerFailureReleasesEverything(t *testing.T) {
+	failures := []struct {
+		name  string
+		apply func(*fakeVoiceConn)
+		// joined is whether the owner got into voice and so has to leave.
+		joined bool
+	}{
+		{"owner cannot be set up", func(c *fakeVoiceConn) { c.speakingErr = errors.New("speaking refused") }, true},
+		// The speakers join before the owner does, so an owner that cannot
+		// join leaves the same things behind as one that joins and then cannot
+		// be set up.
+		{"owner cannot join", func(c *fakeVoiceConn) { c.openErr = errors.New("join refused") }, false},
+	}
+	for _, side := range raidSides {
+		for _, failure := range failures {
+			if side.name == "guest" && !failure.joined {
+				continue // a guest tolerates an owner that cannot join
+			}
+			t.Run(side.name+"/"+failure.name, func(t *testing.T) {
+				f := withCallerRole(newCallerRoleFixture(t))
+				side.prepare(f)
+				failure.apply(f.ownerConn)
 
-	_, cancel, err := startHostRaid(t, f)
-	defer cancel()
+				cancel, err := side.start(f)
+				defer cancel()
 
-	if err == nil {
-		t.Fatal("a raid whose owner bot could not be set up must fail")
-	}
-	if f.ownerConn.closeCount() == 0 {
-		t.Error("owner bot was left in its voice channel after the start failed")
-	}
-	if f.speakerConn.closeCount() == 0 {
-		t.Error("speaker bot was left in its voice channel after the start failed")
-	}
-	if _, ok := f.m.reconnect.loadApplier(testGuildID, roleTestSpeakerID); ok {
-		t.Error("a failed start left a reconnect applier registered")
-	}
-	if f.m.HasActiveSession(testGuildID) {
-		t.Error("a failed start was committed")
+				if err == nil {
+					t.Fatal("a raid whose owner bot failed must fail")
+				}
+				if failure.joined && f.ownerConn.closeCount() == 0 {
+					t.Error("owner bot was left in its voice channel after the start failed")
+				}
+				if f.speakerConn.closeCount() == 0 {
+					t.Error("speaker bot was left in its voice channel after the start failed")
+				}
+				if _, ok := f.m.reconnect.loadApplier(side.guildID, roleTestSpeakerID); ok {
+					t.Error("a failed start left a reconnect applier registered")
+				}
+				if f.m.HasActiveSession(side.guildID) {
+					t.Error("a failed start was committed")
+				}
+				if _, attached := f.m.sessions.GetByGuild(side.guildID); attached {
+					t.Error("a failed start stayed registered in an ally session")
+				}
+			})
+		}
 	}
 }
 
-// The speakers join before the owner does, so an owner that cannot join leaves
-// the same things behind as one that joins and then cannot be set up.
-func TestStartVoiceRaid_OwnerJoinFailureReleasesEverything(t *testing.T) {
-	f := withCallerRole(newCallerRoleFixture(t))
-	f.ownerConn.openErr = errors.New("join refused")
-
-	_, cancel, err := startHostRaid(t, f)
-	defer cancel()
-
-	if err == nil {
-		t.Fatal("a raid whose owner bot could not join must fail")
-	}
-	if f.speakerConn.closeCount() == 0 {
-		t.Error("speaker bot was left in its voice channel after the start failed")
-	}
-	if _, ok := f.m.reconnect.loadApplier(testGuildID, roleTestSpeakerID); ok {
-		t.Error("a failed start left a reconnect applier registered")
-	}
-	if f.m.HasActiveSession(testGuildID) {
-		t.Error("a failed start was committed")
-	}
+func blockOwnerLeave(f *callerRoleFixture) (entered <-chan struct{}, release func()) {
+	in := make(chan struct{}, 1)
+	block := make(chan struct{})
+	f.ownerConn.setOnClose(func() {
+		select {
+		case in <- struct{}{}:
+		default:
+		}
+		<-block
+	})
+	var once sync.Once
+	return in, func() { once.Do(func() { close(block) }) }
 }
 
-func TestJoinSession_OwnerSetupFailureLeavesOwnerAndFails(t *testing.T) {
-	f := withCallerRole(newCallerRoleFixture(t))
-	f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)
-	f.ownerConn.speakingErr = errors.New("speaking refused")
+func TestStopVoiceRaid_NewStartRefusedUntilTeardownEnds(t *testing.T) {
+	for _, side := range raidSides {
+		t.Run(side.name, func(t *testing.T) {
+			f := withCallerRole(newCallerRoleFixture(t))
+			side.prepare(f)
+			cancel, err := side.start(f)
+			if err != nil {
+				t.Fatalf("first start: %v", err)
+			}
+			defer cancel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_, err := f.m.JoinSession(ctx, roleTestGuestGuildID, cancel, guild.RaidModeAllyListener, roleTestHostCode)
+			entered, release := blockOwnerLeave(f)
+			defer release()
+			stopped := make(chan error, 1)
+			go func() { stopped <- f.m.StopVoiceRaid(context.Background(), side.guildID) }()
+			await(t, entered, "the teardown to reach the owner leave")
 
-	if err == nil {
-		t.Fatal("a guest whose owner bot could not be set up must fail to join")
-	}
-	if f.ownerConn.closeCount() == 0 {
-		t.Error("owner bot was left in its voice channel after the join failed")
-	}
-	if f.m.HasActiveSession(roleTestGuestGuildID) {
-		t.Error("a failed join was committed")
-	}
-	if _, attached := f.m.sessions.GetByGuild(roleTestGuestGuildID); attached {
-		t.Error("a failed join stayed attached to the host's ally session")
-	}
-	if _, ok := f.m.reconnect.loadApplier(roleTestGuestGuildID, roleTestSpeakerID); ok {
-		t.Error("a failed join left a reconnect applier registered")
+			cancel2, err := side.start(f)
+			cancel2()
+			if !errors.Is(err, ErrSessionExists) {
+				t.Errorf("start during teardown: err = %v, want ErrSessionExists (the old teardown would tear the new raid down)", err)
+			}
+
+			release()
+			if err := await(t, stopped, "the stop to return"); err != nil {
+				t.Fatalf("stop: %v", err)
+			}
+			f.ownerConn.setOnClose(nil)
+
+			if side.guildID != testGuildID {
+				if _, attached := f.m.sessions.GetByGuild(side.guildID); attached {
+					t.Error("guest still attached to the ally session after its teardown finished")
+				}
+			}
+			cancel3, err := side.start(f)
+			defer cancel3()
+			if err != nil {
+				t.Errorf("start after teardown finished: %v", err)
+			}
+			_ = f.m.StopVoiceRaid(context.Background(), side.guildID)
+		})
 	}
 }
 
@@ -123,107 +177,6 @@ func TestStartVoiceRaid_AbortedStartLeavesWithLiveContext(t *testing.T) {
 		if e != nil {
 			t.Errorf("owner leave ran on a cancelled context (%v): disgo drops such a leave and the bot stays in the channel", e)
 		}
-	}
-}
-
-func blockOwnerLeave(f *callerRoleFixture) (entered <-chan struct{}, release func()) {
-	in := make(chan struct{}, 1)
-	block := make(chan struct{})
-	f.ownerConn.setOnClose(func() {
-		select {
-		case in <- struct{}{}:
-		default:
-		}
-		<-block
-	})
-	var once sync.Once
-	return in, func() { once.Do(func() { close(block) }) }
-}
-
-func awaitSignal(t *testing.T, ch <-chan struct{}, what string) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(5 * time.Second):
-		t.Fatalf("timed out waiting for %s", what)
-	}
-}
-
-func TestStopVoiceRaid_NewStartRefusedUntilTeardownEnds(t *testing.T) {
-	f := withCallerRole(newCallerRoleFixture(t))
-	_, cancel, err := startHostRaid(t, f)
-	if err != nil {
-		t.Fatalf("first start: %v", err)
-	}
-	defer cancel()
-
-	entered, release := blockOwnerLeave(f)
-	defer release()
-	stopped := make(chan error, 1)
-	go func() { stopped <- f.m.StopVoiceRaid(context.Background(), testGuildID) }()
-	awaitSignal(t, entered, "the teardown to reach the owner leave")
-
-	ctx, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
-	_, err = f.m.StartVoiceRaid(ctx, testGuildID, cancel2, guild.RaidModeOneCaller)
-	if !errors.Is(err, ErrSessionExists) {
-		t.Errorf("start during teardown: err = %v, want ErrSessionExists (the old teardown would tear the new raid down)", err)
-	}
-
-	release()
-	if err := <-stopped; err != nil {
-		t.Fatalf("stop: %v", err)
-	}
-	f.ownerConn.setOnClose(nil)
-
-	ctx3, cancel3 := context.WithCancel(context.Background())
-	defer cancel3()
-	if _, err := f.m.StartVoiceRaid(ctx3, testGuildID, cancel3, guild.RaidModeOneCaller); err != nil {
-		t.Errorf("start after teardown finished: %v", err)
-	}
-	_ = f.m.StopVoiceRaid(context.Background(), testGuildID)
-}
-
-func TestStopVoiceRaid_GuestNewJoinRefusedUntilTeardownEnds(t *testing.T) {
-	f := withCallerRole(newCallerRoleFixture(t))
-	f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)
-
-	join := func() (context.CancelFunc, error) {
-		ctx, cancel := context.WithCancel(context.Background())
-		_, err := f.m.JoinSession(ctx, roleTestGuestGuildID, cancel, guild.RaidModeAllyListener, roleTestHostCode)
-		return cancel, err
-	}
-	cancel, err := join()
-	if err != nil {
-		t.Fatalf("first join: %v", err)
-	}
-	defer cancel()
-
-	entered, release := blockOwnerLeave(f)
-	defer release()
-	stopped := make(chan error, 1)
-	go func() { stopped <- f.m.StopVoiceRaid(context.Background(), roleTestGuestGuildID) }()
-	awaitSignal(t, entered, "the teardown to reach the owner leave")
-
-	cancel2, err := join()
-	cancel2()
-	if !errors.Is(err, ErrSessionExists) {
-		t.Errorf("join during teardown: err = %v, want ErrSessionExists", err)
-	}
-
-	release()
-	if err := <-stopped; err != nil {
-		t.Fatalf("stop: %v", err)
-	}
-	f.ownerConn.setOnClose(nil)
-
-	if _, attached := f.m.sessions.GetByGuild(roleTestGuestGuildID); attached {
-		t.Error("guest still attached to the ally session after its teardown finished")
-	}
-	cancel3, err := join()
-	defer cancel3()
-	if err != nil {
-		t.Errorf("join after teardown finished: %v", err)
 	}
 }
 
@@ -308,18 +261,14 @@ func TestToggleSpeaker_StoreWriteDoesNotHoldServiceLock(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() { done <- f.m.ToggleSpeaker(testGuildID, roleTestSpeakerID, false) }()
-	awaitSignal(t, bs.entered, "the toggle to reach the store")
+	await(t, bs.entered, "the toggle to reach the store")
 
 	read := make(chan struct{})
 	go func() {
 		f.m.HasActiveSession(testGuildID)
 		close(read)
 	}()
-	select {
-	case <-read:
-	case <-time.After(time.Second):
-		t.Error("the service lock is held across the store write: every guild's state is blocked behind a disk write")
-	}
+	await(t, read, "a state read during the store write: if the service lock is held across it, every guild's state is blocked behind a disk write")
 	close(bs.release)
 	if err := <-done; err != nil {
 		t.Fatalf("ToggleSpeaker: %v", err)
@@ -359,49 +308,8 @@ func TestBuildApplier_ClosesTheProviderItReplaces(t *testing.T) {
 		_, _ = conn.providers[0].ProvideOpusFrame()
 		close(closed)
 	}()
-	select {
-	case <-closed:
-	case <-time.After(300 * time.Millisecond):
-		t.Error("the replaced provider was never closed")
-	}
+	await(t, closed, "the replaced provider to be closed")
 	conn.providers[1].(*opus.VoiceProvider).Close()
-}
-
-type lateApplyRecorder struct {
-	closedAt atomic.Bool
-	late     atomic.Int32
-}
-
-func (r *lateApplyRecorder) set(context.Context, snowflake.ID, snowflake.ID, bool) error {
-	if r.closedAt.Load() {
-		r.late.Add(1)
-	}
-	return nil
-}
-
-func TestDeafController_CloseWaitsForChangeBeingStarted(t *testing.T) {
-	rec := &lateApplyRecorder{}
-	for range 3000 {
-		rec.closedAt.Store(false)
-		c := &deafController{guildID: testGuild, setDeaf: rec.set, delay: time.Hour, members: map[snowflake.ID]*deafMember{}}
-		c.Register(testBot, true)
-		var wg sync.WaitGroup
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
-			c.Observe(map[snowflake.ID]bool{testBot: true})
-		}()
-		go func() {
-			defer wg.Done()
-			c.Close(context.Background())
-			rec.closedAt.Store(true)
-		}()
-		wg.Wait()
-	}
-	time.Sleep(50 * time.Millisecond)
-	if n := rec.late.Load(); n != 0 {
-		t.Errorf("%d deaf change(s) started after Close returned: Close did not wait for a change it had already admitted", n)
-	}
 }
 
 // joinGuestUntilStopped starts a guest join whose bot handshake on conn hangs,
@@ -424,22 +332,11 @@ func joinGuestUntilStopped(t *testing.T, f *callerRoleFixture, conn *fakeVoiceCo
 		joined <- err
 	}()
 
-	select {
-	case <-joining:
-	case <-time.After(5 * time.Second):
-		t.Fatal("join never reached the bot handshake")
-	}
+	await(t, joining, "the join to reach the bot handshake")
 	if err := f.m.StopVoiceRaid(context.Background(), roleTestGuestGuildID); err != nil {
 		t.Fatalf("StopVoiceRaid: %v", err)
 	}
-
-	select {
-	case err := <-joined:
-		return err
-	case <-time.After(5 * time.Second):
-		t.Fatal("join never returned")
-		return nil
-	}
+	return await(t, joined, "the join to return")
 }
 
 // The guest tolerates an owner that cannot join, so a /stop during the owner's

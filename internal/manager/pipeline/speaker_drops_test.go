@@ -17,11 +17,11 @@ import (
 )
 
 const (
-	dropsGuildID   = snowflake.ID(1564203449351020574)
-	dropsChannelID = snowflake.ID(1529403555667251310)
-	dropsSourceID  = snowflake.ID(1529403555667251399)
-	drainingBot    = snowflake.ID(1484911902801924237)
-	stuckBot       = snowflake.ID(1484918389884452904)
+	dropsGuildID   = snowflake.ID(8001)
+	dropsChannelID = snowflake.ID(8201)
+	dropsSourceID  = snowflake.ID(8301)
+	drainingBot    = snowflake.ID(8101)
+	stuckBot       = snowflake.ID(8102)
 )
 
 func dropMetrics(t *testing.T) (telemetry.GuildMetrics, *sdkmetric.ManualReader) {

@@ -19,9 +19,9 @@ import (
 // it overwrites each other's.
 func TestChannelMixerSinkGivesEachSpeakerItsOwnBuffer(t *testing.T) {
 	const (
-		guildID   = snowflake.ID(1430511050704289835)
-		channelID = snowflake.ID(1529403555667251310)
-		sourceID  = snowflake.ID(1529403555667251399)
+		guildID   = snowflake.ID(8001)
+		channelID = snowflake.ID(8201)
+		sourceID  = snowflake.ID(8301)
 	)
 
 	ctx, cancel := context.WithCancel(context.Background())

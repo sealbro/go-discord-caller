@@ -4,17 +4,33 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
-	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/cache"
-	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/store"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
-	"go.opentelemetry.io/otel/metric/noop"
 )
+
+// startHostRaidAsync starts a raid in the background and returns what it
+// reports.
+func startHostRaidAsync(t *testing.T, f *callerRoleFixture) <-chan error {
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	started := make(chan error, 1)
+	go func() {
+		_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
+		started <- err
+	}()
+	return started
+}
+
+// holdOwnerJoin parks the start at the owner's CreateConn — past the speaker
+// joins, short of the commit — until release is closed.
+func holdOwnerJoin(f *callerRoleFixture) (reached <-chan struct{}, release chan<- struct{}) {
+	in, out := make(chan struct{}), make(chan struct{})
+	f.ownerVM.onOpen = func() {
+		close(in)
+		<-out
+	}
+	return in, out
+}
 
 // A raid is only committed once every bot is in, so for the whole startup —
 // seconds, a Discord round trip per bot — /stop finds nothing in m.statuses and
@@ -22,100 +38,37 @@ import (
 // and the manager who asked for it to stop has to ask again once it has
 // finished. Stopping a raid that is still starting must abort it.
 func TestStopVoiceRaid_AbortsAStartStillInFlight(t *testing.T) {
-	const (
-		ownerChannelID   = snowflake.ID(900)
-		speakerID        = snowflake.ID(500)
-		speakerChannelID = snowflake.ID(901)
-	)
+	f := withCallerRole(newCallerRoleFixture(t))
+	reached, release := holdOwnerJoin(f)
 
-	st := store.NewInMemoryStore()
-	st.BindChannel(testGuildID, testBotID, ownerChannelID)
-	st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
-	st.BindChannel(testGuildID, speakerID, speakerChannelID)
+	started := startHostRaidAsync(t, f)
+	await(t, reached, "the start to reach the owner join")
 
-	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("stop_during_start_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
-
-	// The start is held at the owner's CreateConn — past the speaker joins,
-	// short of the commit — which is the window a /stop lands in.
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	ownerConn := &fakeVoiceConn{channelID: ownerChannelID}
-	ownerVM := &fakeVoiceManager{conn: ownerConn, onOpen: func() {
-		close(reached)
-		<-release
-	}}
-	speakerConn := &fakeVoiceConn{channelID: speakerChannelID}
-	speakerVM := &fakeVoiceManager{conn: speakerConn}
-
-	m := &Service{
-		statuses: map[snowflake.ID]*guild.Status{
-			testGuildID: {
-				GuildID:     testGuildID,
-				OwnerUserID: testBotID,
-				Speakers: map[snowflake.ID]*guild.Speaker{
-					speakerID: {ID: speakerID, Enabled: true},
-				},
-			},
-		},
-		store:       st,
-		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: speakerVM, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{VoiceManager: ownerVM, Caches: cachesWithChannels(t, testGuildID, ownerChannelID, speakerChannelID), Rest: stubRest{}},
-		ownerBotID:  testBotID,
-		sessions:    ally.NewManager(),
-		metrics:     metrics,
-		reconnect:   newReconnectState(),
-	}
-	empty := map[snowflake.ID]guild.AutoRouter{}
-	m.activeRouters.Store(&empty)
-
-	startCtx, startCancel := context.WithCancel(context.Background())
-	defer startCancel()
-	started := make(chan error, 1)
-	go func() {
-		_, err := m.StartVoiceRaid(startCtx, testGuildID, startCancel, guild.RaidModeOneCaller)
-		started <- err
-	}()
-
-	select {
-	case <-reached:
-	case <-time.After(5 * time.Second):
-		t.Fatal("start never reached the owner join")
-	}
-
-	stopErr := m.StopVoiceRaid(context.Background(), testGuildID)
+	stopErr := f.m.StopVoiceRaid(context.Background(), testGuildID)
 	close(release)
 
-	select {
-	case err := <-started:
-		if err == nil {
-			t.Error("a start that was stopped must not report success")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("start never returned")
+	if err := await(t, started, "the start to return"); err == nil {
+		t.Error("a start that was stopped must not report success")
 	}
-
 	if errors.Is(stopErr, ErrNoActiveSession) {
 		t.Error("/stop reported no active raid while one was starting, and the raid came up anyway")
 	} else if stopErr != nil {
 		t.Errorf("stop failed for an unrelated reason: %v", stopErr)
 	}
 
-	m.mu.RLock()
-	committed := m.statuses[testGuildID].Session
-	m.mu.RUnlock()
+	f.m.mu.RLock()
+	committed := f.m.statuses[testGuildID].Session
+	f.m.mu.RUnlock()
 	if committed != nil {
 		t.Error("a stopped start must not commit its session")
 	}
-	if _, ok := m.sessions.GetByGuild(testGuildID); ok {
+	if _, ok := f.m.sessions.GetByGuild(testGuildID); ok {
 		t.Error("a stopped start must not leave its ally session registered")
 	}
-	if n := ownerConn.closeCount(); n == 0 {
+	if n := f.ownerConn.closeCount(); n == 0 {
 		t.Error("a stopped start must leave the owner bot's voice channel")
 	}
-	if n := speakerConn.closeCount(); n == 0 {
+	if n := f.speakerConn.closeCount(); n == 0 {
 		t.Error("a stopped start must leave the speaker bot's voice channel")
 	}
 }
@@ -125,79 +78,28 @@ func TestStopVoiceRaid_AbortsAStartStillInFlight(t *testing.T) {
 // speaker channels are bound…" sends whoever reads it to check a setup that is
 // fine; the start was cancelled, and the error has to say so.
 func TestStopDuringSpeakerJoins_ReportsCancellationNotMissingSpeakers(t *testing.T) {
-	const (
-		ownerChannelID   = snowflake.ID(900)
-		speakerID        = snowflake.ID(500)
-		speakerChannelID = snowflake.ID(901)
-	)
-
-	st := store.NewInMemoryStore()
-	st.BindChannel(testGuildID, testBotID, ownerChannelID)
-	st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
-	st.BindChannel(testGuildID, speakerID, speakerChannelID)
-
-	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("stop_during_start_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
+	f := withCallerRole(newCallerRoleFixture(t))
 
 	// The speaker's handshake hangs, as disgo's Open does until its context ends.
 	joining := make(chan struct{})
-	speakerConn := &fakeVoiceConn{channelID: speakerChannelID, open: func(ctx context.Context) error {
+	f.speakerConn.open = func(ctx context.Context) error {
 		close(joining)
 		<-ctx.Done()
 		return ctx.Err()
-	}}
-	ownerConn := &fakeVoiceConn{channelID: ownerChannelID}
-
-	m := &Service{
-		statuses: map[snowflake.ID]*guild.Status{
-			testGuildID: {
-				GuildID:     testGuildID,
-				OwnerUserID: testBotID,
-				Speakers: map[snowflake.ID]*guild.Speaker{
-					speakerID: {ID: speakerID, Enabled: true},
-				},
-			},
-		},
-		store:       st,
-		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: &fakeVoiceManager{conn: speakerConn}, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{VoiceManager: &fakeVoiceManager{conn: ownerConn}, Caches: cachesWithChannels(t, testGuildID, ownerChannelID, speakerChannelID), Rest: stubRest{}},
-		ownerBotID:  testBotID,
-		sessions:    ally.NewManager(),
-		metrics:     metrics,
-		reconnect:   newReconnectState(),
 	}
-	empty := map[snowflake.ID]guild.AutoRouter{}
-	m.activeRouters.Store(&empty)
 
-	startCtx, startCancel := context.WithCancel(context.Background())
-	defer startCancel()
-	started := make(chan error, 1)
-	go func() {
-		_, err := m.StartVoiceRaid(startCtx, testGuildID, startCancel, guild.RaidModeOneCaller)
-		started <- err
-	}()
-
-	select {
-	case <-joining:
-	case <-time.After(5 * time.Second):
-		t.Fatal("start never reached the speaker join")
-	}
-	if err := m.StopVoiceRaid(context.Background(), testGuildID); err != nil {
+	started := startHostRaidAsync(t, f)
+	await(t, joining, "the start to reach the speaker join")
+	if err := f.m.StopVoiceRaid(context.Background(), testGuildID); err != nil {
 		t.Fatalf("StopVoiceRaid: %v", err)
 	}
 
-	select {
-	case err := <-started:
-		if errors.Is(err, ErrNoSpeakers) {
-			t.Errorf("a start stopped during the speaker joins reported %q", err)
-		}
-		if !errors.Is(err, context.Canceled) {
-			t.Errorf("start error = %v, want it to wrap context.Canceled", err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("start never returned")
+	err := await(t, started, "the start to return")
+	if errors.Is(err, ErrNoSpeakers) {
+		t.Errorf("a start stopped during the speaker joins reported %q", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("start error = %v, want it to wrap context.Canceled", err)
 	}
 }
 
@@ -208,33 +110,17 @@ func TestStopDuringSpeakerJoins_ReportsCancellationNotMissingSpeakers(t *testing
 // a start begins until its teardown is over.
 func TestSetupLocked_WhileARaidIsStillStarting(t *testing.T) {
 	f := withCallerRole(newCallerRoleFixture(t))
-	reached := make(chan struct{})
-	release := make(chan struct{})
-	f.ownerVM.onOpen = func() {
-		close(reached)
-		<-release
-	}
+	reached, release := holdOwnerJoin(f)
 
 	if f.m.SetupLocked(testGuildID) {
 		t.Fatal("settings locked before any raid")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	started := make(chan error, 1)
-	go func() {
-		_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
-		started <- err
-	}()
-
-	select {
-	case <-reached:
-	case <-time.After(5 * time.Second):
-		t.Fatal("start never reached the owner join")
-	}
+	started := startHostRaidAsync(t, f)
+	await(t, reached, "the start to reach the owner join")
 	locked := f.m.SetupLocked(testGuildID)
 	close(release)
-	if err := <-started; err != nil {
+	if err := await(t, started, "the start to return"); err != nil {
 		t.Fatalf("StartVoiceRaid: %v", err)
 	}
 	if !locked {

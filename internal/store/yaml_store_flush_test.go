@@ -31,10 +31,11 @@ func TestYAMLStore_FlushDoesNotBlockAccess(t *testing.T) {
 	s.mu.Unlock()
 
 	s.BindChannel(1, 2, 3)
+	go func() { _ = s.flush() }()
 	select {
 	case <-writing:
-	case <-time.After(10 * saveDebounce):
-		t.Fatal("the debounced flush never started")
+	case <-time.After(5 * time.Second):
+		t.Fatal("the flush never started")
 	}
 
 	accessed := make(chan struct{})

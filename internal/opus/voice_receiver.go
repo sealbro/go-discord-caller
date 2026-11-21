@@ -365,9 +365,9 @@ func (v *VoiceReceiver) dispatchFanout(state *fanoutDispatch, userID snowflake.I
 		copy(pcm, v.scratch[:n*MixerChannels])
 		opusCopy := getRecvFrame(len(opusBytes))
 		copy(opusCopy, opusBytes)
-		ahead := t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt})
+		ahead, lost := t.Feed(Frame{PCM: pcm, Opus: opusCopy, CreatedAt: receivedAt})
 		v.metrics.RecordSourceDepth(ahead)
-		evicted = evicted || ahead == audioSourceCap
+		evicted = evicted || lost
 	}
 	if evicted {
 		v.metrics.RecordSourceFramesLost()

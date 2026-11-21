@@ -80,9 +80,9 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if o.sourceDepth, err = meter.Int64Histogram("gdc.opus.source.depth",
-		metric.WithDescription("Frames already waiting in a user's mixer input when a new frame is fed; 3 means the feed evicted the oldest"),
+		metric.WithDescription("Frames already waiting in a user's mixer input when a new frame is fed; the input grows from 3 to 6 frames under sustained jitter, so evictions are counted by gdc.opus.source.frames.lost.total"),
 		metric.WithUnit("{frame}"),
-		metric.WithExplicitBucketBoundaries(0, 1, 2, 3),
+		metric.WithExplicitBucketBoundaries(0, 1, 2, 3, 4, 5),
 	); err != nil {
 		return
 	}
@@ -93,7 +93,8 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 	}
 	// Boundaries are clustered between 15 and 60 ms because that is where the
 	// distribution actually lives: the floor is ~20 ms (a frame waits for the
-	// next mixer tick) and the ceiling is 60 ms (audioSourceCap = 3 frames).
+	// next mixer tick) and the ceiling is 60 ms (audioSourceCap = 3 frames) for
+	// all but jittery inputs, which grow to at most 120 ms.
 	// The previous 10/30/50/70/100/200/500 layout put two thirds of all
 	// observations inside the single 10-30 ms bucket, so every quantile below
 	// p95 was linear interpolation across the whole interesting range, while

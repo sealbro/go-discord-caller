@@ -34,6 +34,7 @@ type fakeManager struct {
 	isBotFn         func(discord.User) bool
 	hasCallerRoleFn func(snowflake.ID, []snowflake.ID) bool
 	hasActiveFn     func(snowflake.ID) bool
+	startingFn      func(snowflake.ID) bool
 	hasManagerFn    func(snowflake.ID, []snowflake.ID) bool
 	statusFn        func(snowflake.ID) guild.Status
 	startFn         func(guild.RaidMode) (ally.Code, error)
@@ -92,6 +93,9 @@ func (f *fakeManager) HasActiveSession(g snowflake.ID) bool {
 		return f.hasActiveFn(g)
 	}
 	return false
+}
+func (f *fakeManager) SetupLocked(g snowflake.ID) bool {
+	return f.HasActiveSession(g) || (f.startingFn != nil && f.startingFn(g))
 }
 func (f *fakeManager) SeedExistingSpeakers(ids []snowflake.ID) {
 	f.mu.Lock()

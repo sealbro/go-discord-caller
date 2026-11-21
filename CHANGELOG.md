@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Caller count included channels nobody relays**: the callers metric now counts only the channels a raid captures, so a one-caller raid no longer counts listeners with the caller role in the speaker channels.
+- **`/setup` could change a raid that was still starting**: channels, the caller role and the relay code are now locked from `/start` on, not only once every bot has joined.
 
 ## [0.17.0] - 2026-11-20
 

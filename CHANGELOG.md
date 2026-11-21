@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Caller count included channels nobody relays**: the callers metric now counts only the channels a raid captures, so a one-caller raid no longer counts listeners with the caller role in the speaker channels.
 - **`/setup` could change a raid that was still starting**: channels, the caller role and the relay code are now locked from `/start` on, not only once every bot has joined.
 - **Choppy audio from callers on a distant voice server**: when a caller's audio arrives in bursts, their mixer input now grows to hold them instead of dropping a frame per burst, and shrinks back once the bursts stop. One guild lost about 10% of its callers' audio this way.
+- **Garbage collection ran every 15 seconds regardless of `GOGC`**: the profiler forced a collection before each heap profile upload. It no longer does, so collections and their pauses are now about 8× rarer.
 
 ## [0.17.0] - 2026-11-20
 

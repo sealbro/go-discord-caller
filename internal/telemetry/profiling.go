@@ -23,11 +23,22 @@ func StartProfiling(endpoint string) (func(), error) {
 		return func() {}, nil
 	}
 
-	profiler, err := pyroscope.Start(pyroscope.Config{
+	profiler, err := pyroscope.Start(profilerConfig(endpoint))
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = profiler.Stop() }, nil
+}
+
+func profilerConfig(endpoint string) pyroscope.Config {
+	return pyroscope.Config{
 		ApplicationName: ServiceName,
 		ServerAddress:   endpoint,
 		Logger:          newProfilingLogger(slog.Default(), profilingWarnInterval),
 		Tags:            map[string]string{"version": buildinfo.Version},
+		// Otherwise the profiler forces a full GC before any heap upload no
+		// collection preceded — every 15 s at our allocation rate, overriding GOGC.
+		DisableGCRuns: true,
 		ProfileTypes: []pyroscope.ProfileType{
 			pyroscope.ProfileCPU,
 			pyroscope.ProfileAllocObjects,
@@ -36,11 +47,7 @@ func StartProfiling(endpoint string) (func(), error) {
 			pyroscope.ProfileInuseSpace,
 			pyroscope.ProfileGoroutines,
 		},
-	})
-	if err != nil {
-		return nil, err
 	}
-	return func() { _ = profiler.Stop() }, nil
 }
 
 // profilingLogger reports the profiler's errors — in practice, rejected

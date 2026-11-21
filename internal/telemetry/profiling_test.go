@@ -5,9 +5,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/grafana/pyroscope-go"
 )
 
 func captureDefaultLogger(t *testing.T) *bytes.Buffer {
@@ -39,6 +43,38 @@ func TestProfilingUploadFailureIsLoggedAsWarning(t *testing.T) {
 	if !strings.Contains(out, "level=WARN") || !strings.Contains(out, "401") {
 		t.Fatalf("want a WARN line carrying the 401, got:\n%s", out)
 	}
+}
+
+// The profiler forced a full collection before every heap upload that no GC
+// had preceded. With little allocation that was every 15 s, so it set the GC
+// rate on its own and made GOGC irrelevant. Natural GC is switched off here,
+// so any collection during the flushes was forced by the profiler.
+func TestProfilingDoesNotForceGC(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+
+	profiler, err := pyroscope.Start(profilerConfig(srv.URL))
+	if err != nil {
+		t.Fatalf("pyroscope.Start: %v", err)
+	}
+	t.Cleanup(func() { _ = profiler.Stop() })
+
+	prevPercent := debug.SetGCPercent(-1)
+	t.Cleanup(func() { debug.SetGCPercent(prevPercent) })
+	before := numGC()
+
+	profiler.Flush(true)
+	profiler.Flush(true)
+
+	if forced := numGC() - before; forced != 0 {
+		t.Fatalf("profiler forced %d GC cycles across two uploads, want 0", forced)
+	}
+}
+
+func numGC() uint32 {
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	return stats.NumGC
 }
 
 // Uploads run every 15 s per profile type, so a lasting failure must not turn

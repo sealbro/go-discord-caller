@@ -8358,8 +8358,8 @@
                 "name": "panel-8"
               },
               "height": 8,
-              "width": 6,
-              "x": 18,
+              "width": 5,
+              "x": 14,
               "y": 61
             }
           },
@@ -8462,7 +8462,7 @@
                 "name": "panel-11"
               },
               "height": 8,
-              "width": 6,
+              "width": 4,
               "x": 0,
               "y": 61
             }
@@ -8475,8 +8475,8 @@
                 "name": "panel-9"
               },
               "height": 8,
-              "width": 6,
-              "x": 6,
+              "width": 5,
+              "x": 4,
               "y": 61
             }
           },
@@ -8488,8 +8488,8 @@
                 "name": "panel-10"
               },
               "height": 8,
-              "width": 6,
-              "x": 12,
+              "width": 5,
+              "x": 9,
               "y": 61
             }
           },
@@ -8763,7 +8763,7 @@
               "height": 8,
               "width": 8,
               "x": 0,
-              "y": 112
+              "y": 120
             }
           },
           {
@@ -8776,7 +8776,7 @@
               "height": 8,
               "width": 8,
               "x": 8,
-              "y": 112
+              "y": 120
             }
           },
           {
@@ -8789,7 +8789,7 @@
               "height": 8,
               "width": 8,
               "x": 16,
-              "y": 112
+              "y": 120
             }
           },
           {
@@ -8800,9 +8800,9 @@
                 "name": "panel-46"
               },
               "height": 8,
-              "width": 8,
-              "x": 16,
-              "y": 128
+              "width": 6,
+              "x": 12,
+              "y": 136
             }
           },
           {
@@ -8813,9 +8813,9 @@
                 "name": "panel-47"
               },
               "height": 8,
-              "width": 12,
+              "width": 8,
               "x": 0,
-              "y": 120
+              "y": 128
             }
           },
           {
@@ -8828,7 +8828,7 @@
               "height": 3,
               "width": 24,
               "x": 0,
-              "y": 165
+              "y": 173
             }
           },
           {
@@ -8839,9 +8839,9 @@
                 "name": "panel-49"
               },
               "height": 8,
-              "width": 8,
+              "width": 6,
               "x": 0,
-              "y": 128
+              "y": 136
             }
           },
           {
@@ -8850,6 +8850,19 @@
               "element": {
                 "kind": "ElementReference",
                 "name": "panel-50"
+              },
+              "height": 8,
+              "width": 6,
+              "x": 6,
+              "y": 136
+            }
+          },
+          {
+            "kind": "GridLayoutItem",
+            "spec": {
+              "element": {
+                "kind": "ElementReference",
+                "name": "panel-51"
               },
               "height": 8,
               "width": 8,
@@ -8862,25 +8875,12 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "panel-51"
-              },
-              "height": 8,
-              "width": 12,
-              "x": 12,
-              "y": 120
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
                 "name": "panel-52"
               },
               "height": 9,
               "width": 24,
               "x": 0,
-              "y": 156
+              "y": 164
             }
           },
           {
@@ -8893,7 +8893,7 @@
               "height": 8,
               "width": 12,
               "x": 0,
-              "y": 136
+              "y": 144
             }
           },
           {
@@ -8906,7 +8906,7 @@
               "height": 8,
               "width": 12,
               "x": 12,
-              "y": 136
+              "y": 144
             }
           },
           {
@@ -8919,7 +8919,7 @@
               "height": 12,
               "width": 12,
               "x": 0,
-              "y": 144
+              "y": 152
             }
           },
           {
@@ -8932,7 +8932,7 @@
               "height": 12,
               "width": 12,
               "x": 12,
-              "y": 144
+              "y": 152
             }
           },
           {
@@ -8990,9 +8990,9 @@
           {
             "kind": "GridLayoutItem",
             "spec": {
-              "x": 0,
-              "y": 168,
-              "width": 8,
+              "x": 19,
+              "y": 61,
+              "width": 5,
               "height": 8,
               "element": {
                 "kind": "ElementReference",
@@ -9003,8 +9003,8 @@
           {
             "kind": "GridLayoutItem",
             "spec": {
-              "x": 8,
-              "y": 168,
+              "x": 16,
+              "y": 128,
               "width": 8,
               "height": 8,
               "element": {
@@ -9016,9 +9016,9 @@
           {
             "kind": "GridLayoutItem",
             "spec": {
-              "x": 16,
-              "y": 168,
-              "width": 8,
+              "x": 18,
+              "y": 136,
+              "width": 6,
               "height": 8,
               "element": {
                 "kind": "ElementReference",
@@ -9030,7 +9030,7 @@
             "kind": "GridLayoutItem",
             "spec": {
               "x": 0,
-              "y": 176,
+              "y": 112,
               "width": 12,
               "height": 8,
               "element": {
@@ -9043,7 +9043,7 @@
             "kind": "GridLayoutItem",
             "spec": {
               "x": 12,
-              "y": 176,
+              "y": 112,
               "width": 12,
               "height": 8,
               "element": {

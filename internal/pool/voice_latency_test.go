@@ -3,16 +3,14 @@ package pool
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
-	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/gorilla/websocket"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -109,6 +107,27 @@ func ackingVoiceServer(t *testing.T, heartbeatInterval time.Duration, firstHeart
 	return srv
 }
 
+// latencyMetrics reports botID's voice latency into a fresh reader, with the
+// guild's region known.
+func latencyMetrics(t *testing.T, guildID, botID snowflake.ID) *sdkmetric.ManualReader {
+	t.Helper()
+
+	reader := sdkmetric.NewManualReader()
+	m, err := telemetry.NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("pool_test"))
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+	_ = VoiceRegionListeners(botID, &m.Voice)
+	m.Voice.SetRegion(guildID, botID, "c-fra12-50a8bfa.discord.media:443")
+	return reader
+}
+
+func openLatencyConn(t *testing.T, srv *httptest.Server, guildID, botID, channelID snowflake.ID) voice.Conn {
+	t.Helper()
+	vm := newVoiceManager(botID, sessionOf(&helloSession{}), withDialer(trustingDialer(srv)))
+	return openVoiceConn(t, vm, srv, guildID, botID, channelID)
+}
+
 // disgo's voice gateway reports lastHeartbeatReceived - lastHeartbeatSent, and
 // starts the heartbeat loop by setting lastHeartbeatReceived to now while
 // lastHeartbeatSent still holds the dial time. Until the first ACK, Latency is
@@ -120,81 +139,49 @@ func TestVoiceLatencyNotExportedBeforeFirstAck(t *testing.T) {
 	// Unique in the package: regionMetrics is keyed by bot ID, so a parallel
 	// test reusing one would retire this test's series.
 	const (
-		guildID   = snowflake.ID(1530000000000000101)
-		botID     = snowflake.ID(1530000000000000102)
-		channelID = snowflake.ID(1530000000000000103)
+		guildID   = snowflake.ID(901)
+		botID     = snowflake.ID(902)
+		channelID = snowflake.ID(903)
 		rtt       = 40 * time.Millisecond
 	)
 
-	reader := sdkmetric.NewManualReader()
-	m, err := telemetry.NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("pool_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
-	_ = VoiceRegionListeners(botID, &m.Voice)
-	m.Voice.SetRegion(guildID, botID, "c-fra12-50a8bfa.discord.media:443")
-
+	reader := latencyMetrics(t, guildID, botID)
 	firstHeartbeat := make(chan struct{})
 	ack := make(chan struct{})
-	var ackOnce sync.Once
-	releaseAck := func() { ackOnce.Do(func() { close(ack) }) }
-	srv := ackingVoiceServer(t, time.Second, firstHeartbeat, ack)
+	releaseAck := sync.OnceFunc(func() { close(ack) })
+	// The reading must be taken before the second heartbeat, which is ACKed at
+	// once, replaces it.
+	srv := ackingVoiceServer(t, 500*time.Millisecond, firstHeartbeat, ack)
 	t.Cleanup(releaseAck)
 
-	vm := voice.NewManager(
-		func(context.Context, snowflake.ID, *snowflake.ID, bool, bool) error { return nil },
-		botID,
-		voice.WithDaveSessionCreateFunc(func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session {
-			return &helloSession{}
-		}),
-		SafeAudioSenderOpt(),
-		VoiceConnOpt(),
-		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(&websocket.Dialer{
-			TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone(),
-		}))),
-		voice.WithLogger(slog.New(slog.DiscardHandler)),
-	)
-	conn := vm.CreateConn(guildID)
-	gw := conn.Gateway()
-	t.Cleanup(gw.Close)
+	t.Cleanup(openLatencyConn(t, srv, guildID, botID, channelID).Gateway().Close)
 
-	openCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := gw.Open(openCtx, voice.State{
-		GuildID:   guildID,
-		UserID:    botID,
-		ChannelID: channelID,
-		SessionID: "session",
-		Token:     "token",
-		Endpoint:  strings.TrimPrefix(srv.URL, "https://"),
-	}); err != nil {
-		t.Fatalf("open voice gateway: %v", err)
-	}
-
-	for deadline := time.Now().Add(300 * time.Millisecond); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	heartbeatSent := false
+	for deadline := time.Now().Add(5 * time.Second); !heartbeatSent; {
 		if got := voiceLatencyPoints(t, reader); len(got) != 0 {
 			t.Fatalf("exported %v ms before the first heartbeat ACK, want nothing", got)
 		}
-	}
-
-	select {
-	case <-firstHeartbeat:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the gateway never sent a heartbeat")
+		if time.Now().After(deadline) {
+			t.Fatal("the gateway never sent a heartbeat")
+		}
+		select {
+		case <-firstHeartbeat:
+			heartbeatSent = true
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 	time.Sleep(rtt)
+	if got := voiceLatencyPoints(t, reader); len(got) != 0 {
+		t.Fatalf("exported %v ms while the first heartbeat waited for its ACK, want nothing", got)
+	}
 	releaseAck()
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		got := voiceLatencyPoints(t, reader)
-		if len(got) == 1 && got[0] >= float64(rtt.Milliseconds()) && got[0] < 1000 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("after the ACK: got %v ms, want one reading of about %d ms", got, rtt.Milliseconds())
-		}
-		time.Sleep(10 * time.Millisecond)
+	var got []float64
+	if !eventually(2*time.Second, func() bool {
+		got = voiceLatencyPoints(t, reader)
+		return len(got) == 1 && got[0] >= float64(rtt.Milliseconds()) && got[0] < 1000
+	}) {
+		t.Fatalf("after the ACK: got %v ms, want one reading of about %d ms", got, rtt.Milliseconds())
 	}
 }
 
@@ -202,51 +189,27 @@ func TestVoiceLatencyNotExportedBeforeFirstAck(t *testing.T) {
 // connection keeps exporting its last healthy round trip.
 func TestAckLatencyGoesStaleWhenAcksStop(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			interval = 10 * time.Millisecond
+			rtt      = 30 * time.Millisecond
+		)
+		var a ackLatency
+		a.observe(voice.OpcodeHello, voice.GatewayMessageDataHello{HeartbeatInterval: float64(interval.Milliseconds())})
+		a.observe(voice.OpcodeHeartbeatACK, voice.GatewayMessageDataHeartbeatACK{T: time.Now().Add(-rtt).UnixMilli()})
+		if got := a.read(); got != rtt {
+			t.Fatalf("right after an ACK: got %v, want %v", got, rtt)
+		}
 
-	var a ackLatency
-	a.observe(voice.OpcodeHello, voice.GatewayMessageDataHello{HeartbeatInterval: 10})
-	a.observe(voice.OpcodeHeartbeatACK, voice.GatewayMessageDataHeartbeatACK{T: time.Now().Add(-30 * time.Millisecond).UnixMilli()})
-	if a.read() <= 0 {
-		t.Fatalf("right after an ACK: got %v, want a reading", a.read())
-	}
-
-	time.Sleep(50 * time.Millisecond)
-	if got := a.read(); got != 0 {
-		t.Fatalf("two heartbeat intervals after the last ACK: got %v, want nothing", got)
-	}
-}
-
-func openLatencyConn(t *testing.T, srv *httptest.Server, guildID, botID, channelID snowflake.ID) voice.Conn {
-	t.Helper()
-
-	vm := voice.NewManager(
-		func(context.Context, snowflake.ID, *snowflake.ID, bool, bool) error { return nil },
-		botID,
-		voice.WithDaveSessionCreateFunc(func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session {
-			return &helloSession{}
-		}),
-		SafeAudioSenderOpt(),
-		VoiceConnOpt(),
-		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(&websocket.Dialer{
-			TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone(),
-		}))),
-		voice.WithLogger(slog.New(slog.DiscardHandler)),
-	)
-	conn := vm.CreateConn(guildID)
-
-	openCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := conn.Gateway().Open(openCtx, voice.State{
-		GuildID:   guildID,
-		UserID:    botID,
-		ChannelID: channelID,
-		SessionID: "session",
-		Token:     "token",
-		Endpoint:  strings.TrimPrefix(srv.URL, "https://"),
-	}); err != nil {
-		t.Fatalf("open voice gateway: %v", err)
-	}
-	return conn
+		time.Sleep(staleAfterHeartbeats * interval)
+		if got := a.read(); got != rtt {
+			t.Fatalf("%d heartbeat intervals after the last ACK: got %v, want %v still", staleAfterHeartbeats, got, rtt)
+		}
+		time.Sleep(time.Nanosecond)
+		if got := a.read(); got != 0 {
+			t.Fatalf("over %d heartbeat intervals after the last ACK: got %v, want nothing", staleAfterHeartbeats, got)
+		}
+	})
 }
 
 // Two conns can briefly exist for one bot and guild — the replacement is built
@@ -255,39 +218,32 @@ func openLatencyConn(t *testing.T, srv *httptest.Server, guildID, botID, channel
 func TestOldConnTeardownKeepsNewConnLatency(t *testing.T) {
 	t.Parallel()
 
+	// The test must end before a heartbeat follows an ACK: disgo v0.20.0
+	// writes the heartbeat times from its listen goroutine unsynchronised, and
+	// the race detector flags the next heartbeat's read.
 	const (
-		guildID   = snowflake.ID(1530000000000000201)
-		botID     = snowflake.ID(1530000000000000202)
-		channelID = snowflake.ID(1530000000000000203)
+		guildID   = snowflake.ID(911)
+		botID     = snowflake.ID(912)
+		channelID = snowflake.ID(913)
+		heartbeat = 300 * time.Millisecond
 	)
 
-	reader := sdkmetric.NewManualReader()
-	m, err := telemetry.NewMetrics(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)).Meter("pool_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
-	_ = VoiceRegionListeners(botID, &m.Voice)
-	m.Voice.SetRegion(guildID, botID, "c-fra12-50a8bfa.discord.media:443")
-
+	reader := latencyMetrics(t, guildID, botID)
 	ack := make(chan struct{})
 	close(ack)
-	srv := ackingVoiceServer(t, 500*time.Millisecond, make(chan struct{}), ack)
+	srv := ackingVoiceServer(t, heartbeat, make(chan struct{}), ack)
 
 	oldConn := openLatencyConn(t, srv, guildID, botID, channelID)
 	newConn := openLatencyConn(t, srv, guildID, botID, channelID)
 	t.Cleanup(newConn.Gateway().Close)
 
-	deadline := time.Now().Add(3 * time.Second)
-	for len(voiceLatencyPoints(t, reader)) == 0 {
-		if time.Now().After(deadline) {
-			t.Fatal("the new conn never reported a latency")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !eventually(3*time.Second, func() bool { return len(voiceLatencyPoints(t, reader)) != 0 }) {
+		t.Fatal("the new conn never reported a latency")
 	}
 
 	oldConn.Close(context.Background())
 
-	for end := time.Now().Add(300 * time.Millisecond); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
+	for end := time.Now().Add(heartbeat / 3); time.Now().Before(end); time.Sleep(10 * time.Millisecond) {
 		if got := voiceLatencyPoints(t, reader); len(got) == 0 {
 			t.Fatal("the old conn's teardown retired the new conn's latency series")
 		}

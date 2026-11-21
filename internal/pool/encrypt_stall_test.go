@@ -1,14 +1,12 @@
 package pool
 
 import (
-	"context"
 	"errors"
-	"log/slog"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
 
@@ -30,22 +28,25 @@ func (ratchetlessSession) Encrypt(uint32, []byte, []byte) (int, error) {
 }
 
 // speakingCaller feeds ch a frame every 20 ms, as a speaker relaying a caller
-// is fed, dropping frames while ch is full as the fanout does.
+// is fed, dropping frames while ch is full as the fanout does. The frames land
+// half a frame out of phase with the sender's ticks, so each tick finds
+// exactly one.
 func speakingCaller(t *testing.T, ch chan<- []byte) {
 	done := make(chan struct{})
 	t.Cleanup(func() { close(done) })
 	go func() {
-		tick := time.NewTicker(voice.OpusFrameSizeMs * time.Millisecond)
+		time.Sleep(frameTime / 2)
+		tick := time.NewTicker(frameTime)
 		defer tick.Stop()
 		for {
+			select {
+			case ch <- []byte{0xF8, 0xFF, 0xFE}:
+			default:
+			}
 			select {
 			case <-done:
 				return
 			case <-tick.C:
-				select {
-				case ch <- []byte{0xF8, 0xFF, 0xFE}:
-				default:
-				}
 			}
 		}
 	}()
@@ -58,20 +59,24 @@ func speakingCaller(t *testing.T, ch chan<- []byte) {
 // so the frame is never encrypted, never fails, and the stall is never seen.
 func TestEncryptStallReportedWhileDaveNotReady(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		frames := make(chan []byte, opus.AudioChanBuf)
+		speakingCaller(t, frames)
+		stalls := startRatchetlessSpeaker(t, frames, withListener)
 
-	frames := make(chan []byte, opus.AudioChanBuf)
-	speakingCaller(t, frames)
-	stalls := startRatchetlessSpeaker(t, frames, withListener)
-
-	// stallFrames ticks are 100 ms; a second is ten times that.
-	deadline := time.Now().Add(time.Second)
-	for stalls.Load() == 0 {
-		if time.Now().After(deadline) {
-			t.Fatalf("a speaker with audio to send and no key ratchet went %v without an encrypt stall "+
-				"being reported (threshold %d frames): it stays silent and is never rejoined", time.Second, stallFrames)
+		stallAfter := stallFrames * frameTime
+		time.Sleep(stallAfter - time.Nanosecond)
+		synctest.Wait()
+		if n := stalls.Load(); n != 0 {
+			t.Fatalf("an encrypt stall was reported %d times before %d frames went unsent", n, stallFrames)
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if n := stalls.Load(); n != 1 {
+			t.Fatalf("a speaker with audio to send and no key ratchet left %d frames unsent and was reported stalled %d times, want 1: "+
+				"it stays silent and is never rejoined", stallFrames, n)
+		}
+	})
 }
 
 // Rejoining is only worth it while there is speech the bot cannot send. An
@@ -79,14 +84,16 @@ func TestEncryptStallReportedWhileDaveNotReady(t *testing.T) {
 // cycle through a rejoin every few seconds for a whole raid.
 func TestNoEncryptStallWhileIdle(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		stalls := startRatchetlessSpeaker(t, make(chan []byte, opus.AudioChanBuf), withListener)
 
-	stalls := startRatchetlessSpeaker(t, make(chan []byte, opus.AudioChanBuf), withListener)
-
-	time.Sleep(4 * stallFrames * voice.OpusFrameSizeMs * time.Millisecond)
-	if n := stalls.Load(); n > 0 {
-		t.Fatalf("an idle speaker with no key ratchet was reported stalled %d times: "+
-			"it would be rejoined with nothing to say", n)
-	}
+		time.Sleep(4 * stallFrames * frameTime)
+		synctest.Wait()
+		if n := stalls.Load(); n > 0 {
+			t.Fatalf("an idle speaker with no key ratchet was reported stalled %d times: "+
+				"it would be rejoined with nothing to say", n)
+		}
+	})
 }
 
 // Discord does not make a lone bot's DAVE session ready (integration E22), so a
@@ -95,16 +102,18 @@ func TestNoEncryptStallWhileIdle(t *testing.T) {
 // 2026-10-26: 1,927 futile rejoins in a day.
 func TestNoEncryptStallWhileAlone(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		frames := make(chan []byte, opus.AudioChanBuf)
+		speakingCaller(t, frames)
+		stalls := startRatchetlessSpeaker(t, frames, alone)
 
-	frames := make(chan []byte, opus.AudioChanBuf)
-	speakingCaller(t, frames)
-	stalls := startRatchetlessSpeaker(t, frames, alone)
-
-	time.Sleep(4 * stallFrames * voice.OpusFrameSizeMs * time.Millisecond)
-	if n := stalls.Load(); n > 0 {
-		t.Fatalf("a speaker alone in its channel was reported stalled %d times: "+
-			"it would be rejoined into the same empty channel", n)
-	}
+		time.Sleep(4 * stallFrames * frameTime)
+		synctest.Wait()
+		if n := stalls.Load(); n > 0 {
+			t.Fatalf("a speaker alone in its channel was reported stalled %d times: "+
+				"it would be rejoined into the same empty channel", n)
+		}
+	})
 }
 
 const stallFrames = 5
@@ -123,23 +132,19 @@ func startRatchetlessSpeaker(t *testing.T, frames chan []byte, company channelCo
 	t.Helper()
 
 	var stalls atomic.Int64
-	vm := voice.NewManager(
-		func(context.Context, snowflake.ID, *snowflake.ID, bool, bool) error { return nil },
-		snowflake.ID(1529403555667251310),
-		voice.WithDaveSessionCreateFunc(dave.Instrument(
-			func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return ratchetlessSession{} },
-			dave.NewStats(),
-			dave.WithEncryptStall(stallFrames, func(godave.UserID, godave.Callbacks, dave.Trace) { stalls.Add(1) }),
-		)),
-		SafeAudioSenderOpt(),
-		VoiceConnOpt(),
-		voice.WithLogger(slog.New(slog.DiscardHandler)),
-	)
-	conn := vm.CreateConn(snowflake.ID(1430511050704289835))
+	vm := newVoiceManager(snowflake.ID(501), dave.Instrument(
+		sessionOf(ratchetlessSession{}),
+		dave.NewStats(),
+		dave.WithEncryptStall(stallFrames, func(godave.UserID, godave.Callbacks, dave.Trace) { stalls.Add(1) }),
+	))
+	conn := vm.CreateConn(snowflake.ID(502))
 	if company == withListener {
-		conn.DAVE().AddUser(godave.UserID("1484911902801924237"))
+		conn.DAVE().AddUser(godave.UserID("503"))
 	}
 	conn.SetOpusFrameProvider(opus.NewVoiceProvider(frames, telemetry.OpusRecorder{}))
-	t.Cleanup(func() { defaultSenders.Close(conn) })
+	t.Cleanup(func() {
+		defaultSenders.Close(conn)
+		time.Sleep(frameTime)
+	})
 	return &stalls
 }

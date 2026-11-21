@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -48,15 +49,17 @@ func TestIdentifyBackoffWait(t *testing.T) {
 	})
 
 	t.Run("second call waits out the spacing", func(t *testing.T) {
-		b := newIdentifyBackoff(0)
-		_ = b.Wait(context.Background(), 0)
-		start := time.Now()
-		if err := b.Wait(context.Background(), 0); err != nil {
-			t.Fatalf("Wait = %v, want nil", err)
-		}
-		if waited := time.Since(start); waited < identifyBackoffBase/2 {
-			t.Errorf("second IDENTIFY waited only %v", waited)
-		}
+		synctest.Test(t, func(t *testing.T) {
+			b := newIdentifyBackoff(0)
+			_ = b.Wait(context.Background(), 0)
+			start := time.Now()
+			if err := b.Wait(context.Background(), 0); err != nil {
+				t.Fatalf("Wait = %v, want nil", err)
+			}
+			if waited := time.Since(start); waited != identifyBackoffBase {
+				t.Errorf("second IDENTIFY waited %v, want %v", waited, identifyBackoffBase)
+			}
+		})
 	})
 
 	t.Run("cancelled context aborts the wait", func(t *testing.T) {

@@ -5,16 +5,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/http"
-	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/gorilla/websocket"
 )
 
 // stubConn is a voice.Conn used as a registry key. It reports a ready DAVE
@@ -49,12 +47,17 @@ func (p *blockedProvider) Close() {
 	}
 }
 
-// pollsWithin reports how many times the provider was polled over d.
+// pollsWithin reports how many times the provider was polled over d of a
+// synctest bubble's time, counting the polls due at its last instant.
 func (p *blockedProvider) pollsWithin(d time.Duration) int64 {
+	synctest.Wait()
 	before := p.calls.Load()
 	time.Sleep(d)
+	synctest.Wait()
 	return p.calls.Load() - before
 }
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // TestAudioSenderRegistryStopsSpinningSender is the regression test for the
 // 2026-09-07 incident: one speaker bot logged "error while reading opus frame"
@@ -71,70 +74,69 @@ func (p *blockedProvider) pollsWithin(d time.Duration) int64 {
 // actually stops the goroutine.
 func TestAudioSenderRegistryStopsSpinningSender(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		r := NewAudioSenderRegistry()
+		conn := &stubConn{}
+		p := newBlockedProvider()
 
-	r := NewAudioSenderRegistry()
-	conn := &stubConn{}
-	p := newBlockedProvider()
+		sender := r.CreateFunc()(discardLogger(), p, conn)
+		sender.Open()
+		t.Cleanup(func() { stopInBubble(sender) })
 
-	sender := r.CreateFunc()(slog.New(slog.NewTextHandler(io.Discard, nil)), p, conn)
-	sender.Open()
-	t.Cleanup(sender.Close)
+		// Teardown closes the provider, as manager.VoiceConnSetup.Apply's cleanup does.
+		p.Close()
 
-	// Teardown closes the provider, as manager.VoiceConnSetup.Apply's cleanup does.
-	p.Close()
+		// Precondition: without intervention the sender spins at the 20 ms frame
+		// cadence. If this ever stops being true, disgo has fixed the underlying
+		// bug and this whole workaround can be deleted.
+		const window = 200 * time.Millisecond
+		if spun, want := p.pollsWithin(window), int64(window/frameTime); spun != want {
+			t.Fatalf("precondition failed: sender polled a closed provider %d times in %v, want %d (one per frame) — "+
+				"if disgo no longer spins on provider errors, AudioSenderRegistry, "+
+				"SafeAudioSenderOpt, and the sender cleanup in pool.newConn "+
+				"are obsolete and should be removed", spun, window, want)
+		}
 
-	// Precondition: without intervention the sender spins at the 20 ms frame
-	// cadence. If this ever stops being true, disgo has fixed the underlying
-	// bug and this whole workaround can be deleted.
-	if spun := p.pollsWithin(200 * time.Millisecond); spun < 5 {
-		t.Fatalf("precondition failed: sender polled a closed provider only %d times in 200ms — "+
-			"disgo no longer spins on provider errors, so AudioSenderRegistry, "+
-			"SafeAudioSenderOpt, and the sender cleanup in pool.newConn "+
-			"are obsolete and should be removed", spun)
-	}
+		// This is what newConn's removal hook does after conn.Close.
+		r.Close(conn)
 
-	// This is what newConn's removal hook does after conn.Close.
-	r.Close(conn)
+		if got := p.pollsWithin(window); got != 0 {
+			t.Fatalf("after registry Close the sender was still polling %d times in %v — "+
+				"the sender goroutine outlived teardown and keeps logging an ERROR every tick",
+				got, window)
+		}
 
-	const window = 400 * time.Millisecond
-	// Allow one in-flight tick that raced the close.
-	if got := p.pollsWithin(window); got > 1 {
-		t.Fatalf("after registry Close the sender was still polling %d times in %v (%.0f calls/sec) — "+
-			"the sender goroutine outlived teardown and keeps logging an ERROR every tick",
-			got, window, float64(got)/window.Seconds())
-	}
-
-	// Close is idempotent and safe for an unknown conn.
-	r.Close(conn)
-	r.Close(&stubConn{})
+		// Close is idempotent and safe for an unknown conn.
+		r.Close(conn)
+		r.Close(&stubConn{})
+	})
 }
 
 // TestAudioSenderRegistryCloseAll verifies the shutdown backstop stops senders
 // whose conn was never removed.
 func TestAudioSenderRegistryCloseAll(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		r := NewAudioSenderRegistry()
 
-	r := NewAudioSenderRegistry()
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-
-	providers := make([]*blockedProvider, 3)
-	for i := range providers {
-		p := newBlockedProvider()
-		providers[i] = p
-		sender := r.CreateFunc()(logger, p, &stubConn{})
-		sender.Open()
-		t.Cleanup(sender.Close)
-		p.Close()
-	}
-
-	r.CloseAll()
-
-	const window = 300 * time.Millisecond
-	for i, p := range providers {
-		if got := p.pollsWithin(window); got > 1 {
-			t.Errorf("sender %d still polling %d times in %v after CloseAll", i, got, window)
+		providers := make([]*blockedProvider, 3)
+		for i := range providers {
+			p := newBlockedProvider()
+			providers[i] = p
+			sender := r.CreateFunc()(discardLogger(), p, &stubConn{})
+			sender.Open()
+			t.Cleanup(func() { stopInBubble(sender) })
+			p.Close()
 		}
-	}
+
+		r.CloseAll()
+
+		for i, p := range providers {
+			if got := p.pollsWithin(time.Second); got != 0 {
+				t.Errorf("sender %d still polling %d times a second after CloseAll", i, got)
+			}
+		}
+	})
 }
 
 // TestAudioSenderCloseBeforeOpen covers the Close-before-Open hazard:
@@ -143,18 +145,20 @@ func TestAudioSenderRegistryCloseAll(t *testing.T) {
 // timeouts make teardown of a never-started sender routine, and an unrecovered
 // panic there would kill the process.
 func TestAudioSenderCloseBeforeOpen(t *testing.T) {
-	// Not parallel: senderStartTimeout is package state.
-	orig := senderStartTimeout
-	senderStartTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { senderStartTimeout = orig })
+	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		r := NewAudioSenderRegistry()
+		conn := &stubConn{}
+		// Register a sender but never Open it, so cancelFunc is never set.
+		r.CreateFunc()(discardLogger(), newBlockedProvider(), conn)
 
-	r := NewAudioSenderRegistry()
-	conn := &stubConn{}
-	// Register a sender but never Open it, so cancelFunc is never set.
-	r.CreateFunc()(slog.New(slog.NewTextHandler(io.Discard, nil)), newBlockedProvider(), conn)
-
-	// Must not panic.
-	r.Close(conn)
+		start := time.Now()
+		// Must not panic.
+		r.Close(conn)
+		if waited := time.Since(start); waited != senderStartTimeout {
+			t.Errorf("Close of a never-opened sender returned after %v, want the %v start timeout", waited, senderStartTimeout)
+		}
+	})
 }
 
 // TestDisgoAudioSenderStillPanicsOnCloseBeforeOpen is the tripwire for the
@@ -170,22 +174,18 @@ func TestDisgoAudioSenderStillPanicsOnCloseBeforeOpen(t *testing.T) {
 				"the recover in safeAudioSender.Close is obsolete and should be removed")
 		}
 	}()
-	voice.NewAudioSender(slog.New(slog.NewTextHandler(io.Discard, nil)), newBlockedProvider(), &stubConn{}).Close()
+	voice.NewAudioSender(discardLogger(), newBlockedProvider(), &stubConn{}).Close()
 }
 
+// readySession is a DAVE session that reports ready, so an audio sender polls
+// its provider every tick.
 type readySession struct{ godave.Session }
 
-func (readySession) Ready() bool { return true }
+func (readySession) SetChannelID(godave.ChannelID) {}
+func (readySession) Ready() bool                   { return true }
+func (readySession) Close() error                  { return nil }
 
 func (stubConn) DAVE() godave.Session { return readySession{} }
-
-// readyDaveSession is a DAVE session that reports ready, so a real conn's
-// audio sender polls its provider every tick.
-type readyDaveSession struct{ godave.Session }
-
-func (readyDaveSession) SetChannelID(godave.ChannelID) {}
-func (readyDaveSession) Ready() bool                   { return true }
-func (readyDaveSession) Close() error                  { return nil }
 
 // A conn disgo closes on its own — the voice server disconnecting the bot —
 // is already gone from the manager when our teardown runs, so Leave cannot
@@ -194,56 +194,29 @@ func TestAudioSenderStoppedWhenDisgoClosesTheConn(t *testing.T) {
 	t.Parallel()
 
 	const (
-		guildID   = snowflake.ID(1430511050704289835)
-		userID    = snowflake.ID(1529403555667251310)
-		channelID = snowflake.ID(1430511051383767101)
+		guildID   = snowflake.ID(301)
+		userID    = snowflake.ID(302)
+		channelID = snowflake.ID(303)
 	)
 
 	closeNow := make(chan struct{})
 	srv := closingVoiceServer(t, voice.GatewayCloseEventCodeDisconnected.Code, closeNow)
-
-	vm := voice.NewManager(
-		func(context.Context, snowflake.ID, *snowflake.ID, bool, bool) error { return nil },
-		userID,
-		voice.WithDaveSessionCreateFunc(func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session {
-			return readyDaveSession{}
-		}),
-		SafeAudioSenderOpt(),
-		VoiceConnOpt(),
-		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(&websocket.Dialer{
-			TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone(),
-		}))),
-		voice.WithLogger(slog.New(slog.DiscardHandler)),
-	)
-	conn := vm.CreateConn(guildID)
-
-	openCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := conn.Gateway().Open(openCtx, voice.State{
-		GuildID:   guildID,
-		UserID:    userID,
-		ChannelID: channelID,
-		SessionID: "session",
-		Token:     "token",
-		Endpoint:  strings.TrimPrefix(srv.URL, "https://"),
-	}); err != nil {
-		t.Fatalf("open voice gateway: %v", err)
-	}
+	vm := newVoiceManager(userID, sessionOf(readySession{}), withDialer(trustingDialer(srv)))
+	conn := openVoiceConn(t, vm, srv, guildID, userID, channelID)
 	p := newBlockedProvider()
 	conn.SetOpusFrameProvider(p)
 
 	close(closeNow)
-	deadline := time.Now().Add(5 * time.Second)
-	for vm.GetConn(guildID) != nil {
-		if time.Now().After(deadline) {
-			t.Fatal("disgo never closed the conn after the voice server disconnected it")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !eventually(5*time.Second, func() bool { return vm.GetConn(guildID) == nil }) {
+		t.Fatal("disgo never closed the conn after the voice server disconnected it")
 	}
 
 	NewGuildVoice(vm, channelID).Leave(context.Background(), guildID)
 	p.Close()
-	if n := p.pollsWithin(200 * time.Millisecond); n > 0 {
-		t.Errorf("audio sender polled its closed provider %d times in 200ms: disgo closed the conn itself, so Leave never stopped the sender", n)
+	const window = 100 * time.Millisecond
+	before := p.calls.Load()
+	time.Sleep(window)
+	if n := p.calls.Load() - before; n > 0 {
+		t.Errorf("audio sender polled its closed provider %d times in %v: disgo closed the conn itself, so Leave never stopped the sender", n, window)
 	}
 }

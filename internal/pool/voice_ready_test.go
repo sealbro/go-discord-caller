@@ -2,15 +2,12 @@ package pool
 
 import (
 	"context"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
-	"github.com/disgoorg/godave"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/gorilla/websocket"
 )
@@ -98,53 +95,25 @@ func TestReadyWatchForgottenWhenDisgoClosesTheConn(t *testing.T) {
 	t.Parallel()
 
 	const (
-		guildID   = snowflake.ID(1430511050704289835)
-		userID    = snowflake.ID(1529403555667251310)
-		channelID = snowflake.ID(1430511051383767101)
+		guildID   = snowflake.ID(841)
+		userID    = snowflake.ID(842)
+		channelID = snowflake.ID(843)
 	)
 
 	closeNow := make(chan struct{})
 	srv := closingVoiceServer(t, voice.GatewayCloseEventCodeDisconnected.Code, closeNow)
-
-	dave := &epochSession{preparing: make(chan struct{})}
-	vm := voice.NewManager(
-		func(context.Context, snowflake.ID, *snowflake.ID, bool, bool) error { return nil },
-		userID,
-		voice.WithDaveSessionCreateFunc(func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return dave }),
-		SafeAudioSenderOpt(),
-		VoiceConnOpt(),
-		voice.WithConnConfigOpts(voice.WithConnGatewayConfigOpts(voice.WithGatewayDialer(&websocket.Dialer{
-			TLSClientConfig: srv.Client().Transport.(*http.Transport).TLSClientConfig.Clone(),
-		}))),
-		voice.WithLogger(slog.New(slog.DiscardHandler)),
-	)
-	conn := vm.CreateConn(guildID)
+	vm := newVoiceManager(userID, sessionOf(&epochSession{preparing: make(chan struct{})}), withDialer(trustingDialer(srv)))
+	conn := openVoiceConn(t, vm, srv, guildID, userID, channelID)
 	gw := conn.Gateway()
 
-	openCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := gw.Open(openCtx, voice.State{
-		GuildID:   guildID,
-		UserID:    userID,
-		ChannelID: channelID,
-		SessionID: "session",
-		Token:     "token",
-		Endpoint:  strings.TrimPrefix(srv.URL, "https://"),
-	}); err != nil {
-		t.Fatalf("open voice gateway: %v", err)
-	}
 	OnVoiceReady(conn, func() {})
 	if !isWatched(gw) {
 		t.Fatal("OnVoiceReady registered no watch")
 	}
 
 	close(closeNow)
-	deadline := time.Now().Add(5 * time.Second)
-	for vm.GetConn(guildID) != nil {
-		if time.Now().After(deadline) {
-			t.Fatal("disgo never closed the conn after the voice server disconnected it")
-		}
-		time.Sleep(10 * time.Millisecond)
+	if !eventually(5*time.Second, func() bool { return vm.GetConn(guildID) == nil }) {
+		t.Fatal("disgo never closed the conn after the voice server disconnected it")
 	}
 
 	NewGuildVoice(vm, channelID).Leave(context.Background(), guildID)

@@ -41,9 +41,9 @@ func regionSeries(t *testing.T, reader *sdkmetric.ManualReader) int {
 // process's life, so teardown must retire the series itself.
 func TestLeaveForgetsTheVoiceRegion(t *testing.T) {
 	const (
-		botID     = snowflake.ID(1430511050704289835)
-		guildID   = snowflake.ID(1529403555667251310)
-		channelID = snowflake.ID(1529403555667251311)
+		botID     = snowflake.ID(801)
+		guildID   = snowflake.ID(802)
+		channelID = snowflake.ID(803)
 	)
 
 	reader := sdkmetric.NewManualReader()

@@ -37,8 +37,9 @@ func decryptDurationPoints(t *testing.T, reader *metric.ManualReader) []metricda
 func TestDecryptDurationIsExported(t *testing.T) {
 	stats := NewStats()
 	reader, _ := newReader(t, stats)
-	session, backend := knownSession(t, stats, "bot-1", nil, "user-a")
-	backend.delay = 30 * time.Millisecond
+	clock := &fakeClock{t: time.Unix(1_000_000, 0)}
+	session, backend := clockedSession(t, stats, clock)
+	backend.onDecrypt = func() { clock.advance(30 * time.Millisecond) }
 
 	if _, err := session.Decrypt("user-a", nil, make([]byte, 64)); err != nil {
 		t.Fatalf("Decrypt: %v", err)
@@ -52,8 +53,8 @@ func TestDecryptDurationIsExported(t *testing.T) {
 	if p.Count != 1 {
 		t.Errorf("count = %d, want 1", p.Count)
 	}
-	if p.Sum < 30 {
-		t.Errorf("sum = %.1f ms, want at least the backend's 30 ms", p.Sum)
+	if p.Sum != 30 {
+		t.Errorf("sum = %.1f ms, want the backend's 30 ms", p.Sum)
 	}
 	if bot, _ := p.Attributes.Value(attribute.Key("bot_user_id")); bot.AsString() != "bot-1" {
 		t.Errorf("bot_user_id = %q, want bot-1", bot.AsString())

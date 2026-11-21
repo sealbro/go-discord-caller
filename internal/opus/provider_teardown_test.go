@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/voice"
@@ -83,33 +84,38 @@ func (readyConn) DAVE() godave.Session { return readySession{} }
 // UPSTREAM-TRIPWIRE(disgo v0.20.0): delete AudioSenderRegistry.
 func TestDisgoSpinsOnClosedProvider(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		p := &countingProvider{inner: NewEmptyVoiceProvider()}
+		h := &countingHandler{Handler: slog.NewTextHandler(io.Discard, nil)}
+		sender := voice.NewAudioSender(slog.New(h), p, readyConn{})
+		sender.Open()
 
-	p := &countingProvider{inner: NewEmptyVoiceProvider()}
-	h := &countingHandler{Handler: slog.NewTextHandler(io.Discard, nil)}
-	sender := voice.NewAudioSender(slog.New(h), p, readyConn{})
-	sender.Open()
-	t.Cleanup(sender.Close)
+		synctest.Wait()
+		if got := p.calls.Load(); got != 1 {
+			t.Fatalf("before Close: got %d ProvideOpusFrame calls, want 1 (sender should be parked)", got)
+		}
+		// The sender has set its cancel func by now, so Close cannot panic. It
+		// exits after its current 20 ms sleep, which has to pass in the bubble.
+		t.Cleanup(func() {
+			sender.Close()
+			time.Sleep(mixerFrameDur)
+		})
 
-	// Sender is running and parked inside ProvideOpusFrame.
-	time.Sleep(100 * time.Millisecond)
-	if got := p.calls.Load(); got != 1 {
-		t.Fatalf("before Close: got %d ProvideOpusFrame calls, want 1 (sender should be parked)", got)
-	}
+		// Teardown closes the provider, as VoiceConnSetup.Apply's cleanup does.
+		p.Close()
 
-	// Teardown closes the provider, as VoiceConnSetup.Apply's cleanup does.
-	p.Close()
+		baseline := p.calls.Load()
+		const window = 500 * time.Millisecond
+		time.Sleep(window)
+		synctest.Wait()
+		after := p.calls.Load() - baseline
 
-	baseline := p.calls.Load()
-	const window = 500 * time.Millisecond
-	time.Sleep(window)
-	after := p.calls.Load() - baseline
-
-	// At the 20 ms frame cadence the loop yields ~25 calls per 500 ms.
-	if after < 5 {
-		t.Fatalf("disgo polled a closed provider only %d times in %v (%d ERROR lines) — "+
-			"it no longer spins on provider errors, so pool.AudioSenderRegistry, "+
-			"SafeAudioSenderOpt, and the sender cleanup in pool.newConn "+
-			"are obsolete and should be removed",
-			after, window, h.errors.Load())
-	}
+		if want := int64(window / mixerFrameDur); after != want {
+			t.Fatalf("disgo polled a closed provider %d times in %v (%d ERROR lines), want %d (one per 20 ms frame) — "+
+				"if it no longer spins on provider errors, pool.AudioSenderRegistry, "+
+				"SafeAudioSenderOpt, and the sender cleanup in pool.newConn "+
+				"are obsolete and should be removed",
+				after, window, h.errors.Load(), want)
+		}
+	})
 }

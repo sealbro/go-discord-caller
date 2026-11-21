@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/disgoorg/godave"
 	"go.opentelemetry.io/otel/sdk/metric"
@@ -32,8 +31,9 @@ type fakeSession struct {
 	// onAddUser runs at the start of AddUser, before the decryptor exists, to
 	// stand in for a frame arriving during libdave's CGO setup work.
 	onAddUser func()
-	// delay makes Decrypt block, to stand in for a stalled backend.
-	delay time.Duration
+	// onDecrypt runs inside Decrypt for a known user, to stand in for a
+	// backend that takes time.
+	onDecrypt func()
 
 	mu         sync.Mutex
 	readyCalls int
@@ -110,8 +110,8 @@ func (f *fakeSession) Decrypt(userID godave.UserID, frame []byte, out []byte) (i
 	if !known {
 		return copy(out[:cap(out)], frame), nil // upstream's passthrough, verbatim
 	}
-	if f.delay > 0 {
-		time.Sleep(f.delay)
+	if f.onDecrypt != nil {
+		f.onDecrypt()
 	}
 	if f.err != nil {
 		return 0, f.err

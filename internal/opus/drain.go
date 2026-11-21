@@ -64,31 +64,24 @@ func (w *DrainWatcher) Run(ctx context.Context) {
 			if w.keepAlive != nil && w.keepAlive() {
 				continue
 			}
-			w.step()
+			idle := w.mixer.IdleFor() > w.idle
+
+			// The router unpaused it (or never paused it): drop our claim.
+			if !w.mixer.Paused() {
+				w.pausedByWatcher = false
+				if idle {
+					w.mixer.SetPaused(true)
+					w.pausedByWatcher = true
+				}
+				continue
+			}
+
+			// Paused. Only lift it if the pause is ours and audio has resumed;
+			// a router pause stays put no matter how busy the inputs are.
+			if w.pausedByWatcher && !idle {
+				w.mixer.SetPaused(false)
+				w.pausedByWatcher = false
+			}
 		}
-	}
-}
-
-// step applies one pause/unpause decision. Split out so tests can drive it
-// deterministically instead of racing the ticker.
-func (w *DrainWatcher) step() {
-	idle := w.mixer.IdleFor() > w.idle
-	paused := w.mixer.Paused()
-
-	// The router unpaused it (or never paused it): drop our claim.
-	if !paused {
-		w.pausedByWatcher = false
-		if idle {
-			w.mixer.SetPaused(true)
-			w.pausedByWatcher = true
-		}
-		return
-	}
-
-	// Paused. Only lift it if the pause is ours and audio has resumed;
-	// a router pause stays put no matter how busy the inputs are.
-	if w.pausedByWatcher && !idle {
-		w.mixer.SetPaused(false)
-		w.pausedByWatcher = false
 	}
 }

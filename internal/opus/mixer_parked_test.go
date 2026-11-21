@@ -1,12 +1,10 @@
 package opus
 
 import (
-	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
-
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // countingSource is an AudioSource of a kind the mixer cannot gate at Feed,
@@ -20,66 +18,46 @@ func (s *countingSource) Pull() (Frame, bool) { s.pulls.Add(1); return Frame{}, 
 func (s *countingSource) Drain()              { s.drains.Add(1) }
 func (s *countingSource) Len() int            { return 0 }
 
-func runMixer(t *testing.T, m *Mixer) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		m.Run(ctx)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		<-done
-	})
-}
-
-func newBareMixer(t *testing.T) *Mixer {
-	t.Helper()
-	m, err := NewMixer(telemetry.OpusRecorder{})
-	if err != nil {
-		t.Fatalf("NewMixer: %v", err)
-	}
-	return m
-}
-
 // Most mixers of a raid are paused most of the time: every one in copy mode,
 // and every destination nobody is listening in. Waking each of them 50 times
 // a second to find nothing was a measurable share of the process's CPU.
 func TestPausedMixerTicksSlowly(t *testing.T) {
-	m := newBareMixer(t)
-	src := &countingSource{}
-	m.AddInput(1, src)
-	m.SetPaused(true)
-	runMixer(t, m)
+	synctest.Test(t, func(t *testing.T) {
+		m := newBareMixer(t)
+		src := &countingSource{}
+		m.AddInput(1, src)
+		m.SetPaused(true)
+		runMixer(t, m)
 
-	const window = time.Second
-	time.Sleep(window)
+		const window = time.Second
+		time.Sleep(window)
+		synctest.Wait()
 
-	atFrameRate := int64(window / mixerFrameDur)
-	if got := src.drains.Load(); got > atFrameRate/4 {
-		t.Errorf("paused mixer looked at its input %d times in %v; the frame rate is %d, a parked mixer should need about %d",
-			got, window, atFrameRate, int64(window/parkedTickDur))
-	}
+		// One immediate tick at start, then one per parked interval.
+		want := int64(window/parkedTickDur) + 1
+		if got := src.drains.Load(); got != want {
+			t.Errorf("paused mixer looked at its input %d times in %v, want %d (the frame rate would be %d)",
+				got, window, want, int64(window/mixerFrameDur))
+		}
+	})
 }
 
 func TestUnpauseWakesAParkedMixer(t *testing.T) {
-	m := newBareMixer(t)
-	src := &countingSource{}
-	m.AddInput(1, src)
-	m.SetPaused(true)
-	runMixer(t, m)
-	// Past the first tick, so the mixer is waiting out a parked interval.
-	time.Sleep(3 * mixerFrameDur)
+	synctest.Test(t, func(t *testing.T) {
+		m := newBareMixer(t)
+		src := &countingSource{}
+		m.AddInput(1, src)
+		m.SetPaused(true)
+		runMixer(t, m)
+		// Past the first tick, so the mixer is waiting out a parked interval.
+		runTicks(3)
 
-	m.SetPaused(false)
-	unpaused := time.Now()
-	for src.pulls.Load() == 0 {
-		if time.Since(unpaused) > parkedTickDur/2 {
-			t.Fatalf("no tick within %v of unpausing: the mixer sat out its parked interval and the first words of the mix are lost", parkedTickDur/2)
+		m.SetPaused(false)
+		synctest.Wait()
+		if got := src.pulls.Load(); got != 1 {
+			t.Fatalf("%d ticks at the instant of unpausing, want 1: the mixer sat out its parked interval and the first words of the mix are lost", got)
 		}
-		time.Sleep(time.Millisecond)
-	}
+	})
 }
 
 // A parked mixer no longer drains its inputs every 20 ms, so the frames fed to

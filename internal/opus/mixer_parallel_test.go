@@ -1,164 +1,156 @@
 package opus
 
 import (
-	"context"
+	"slices"
 	"testing"
-	"time"
+	"testing/synctest"
+
+	"github.com/disgoorg/snowflake/v2"
 )
 
-const collectTimeout = 3 * time.Second
+// requireFrames fails unless exactly n frames were collected from index i on.
+func requireFrames(t *testing.T, col *outputCollector, i, n int, phase string) [][]byte {
+	t.Helper()
+	got := col.from(i)
+	if len(got) != n {
+		t.Fatalf("%s: got %d output frames over %d ticks, want one per tick", phase, len(got), n)
+	}
+	return got
+}
+
+func TestMixerInputIDsFollowAddAndRemove(t *testing.T) {
+	m := newBareMixer(t)
+	m.AddInput(1, newSource())
+	m.AddInput(2, newSource())
+	m.AddInput(3, newSource())
+	m.RemoveInput(2)
+
+	got := m.InputIDs()
+	slices.Sort(got)
+	if want := []snowflake.ID{1, 3}; !slices.Equal(got, want) {
+		t.Errorf("InputIDs = %v, want %v", got, want)
+	}
+}
 
 // TestMixerSoloPassthrough verifies the single-source fast path:
 // the mixer must forward the raw Opus packet byte-for-byte without re-encoding.
 func TestMixerSoloPassthrough(t *testing.T) {
 	t.Parallel()
-	m, col := newTestMixer(t)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		m, col := newTestMixer(t)
 
-	frames := generateTestFrames(t, 440, 8, testAmplitude)
-	ch := newSource()
-	m.AddInput(newID(), ch)
-	stop := startPump(ctx, ch, frames)
-	t.Cleanup(stop)
-
-	got := col.waitForN(8, collectTimeout)
-	if got == nil {
-		t.Fatal("timed out waiting for 8 output frames")
-	}
-
-	for i, pkt := range got {
-		if !matchesAnyFrame(pkt, frames) {
-			t.Errorf("frame %d: not byte-equal to any input Opus packet — passthrough optimization not active", i)
-		}
-	}
-
-	pcm := decodeOpusFrames(t, got)
-	if rms := rmsInt16(pcm); rms < 500 {
-		t.Errorf("solo passthrough: decoded RMS %.1f below threshold 500 (silence or corrupt output)", rms)
-	}
-}
-
-// TestMixerTwoSpeakers verifies the two-source mix path:
-// output must be re-encoded (not byte-equal to either source), audible, and free of hard clipping.
-func TestMixerTwoSpeakers(t *testing.T) {
-	t.Parallel()
-	m, col := newTestMixer(t)
-	ctx := context.Background()
-
-	framesA := generateTestFrames(t, 440, 8, testAmplitude)
-	framesB := generateTestFrames(t, 880, 8, testAmplitude)
-
-	chA, chB := newSource(), newSource()
-	m.AddInput(newID(), chA)
-	m.AddInput(newID(), chB)
-	stopA := startPump(ctx, chA, framesA)
-	stopB := startPump(ctx, chB, framesB)
-	t.Cleanup(stopA)
-	t.Cleanup(stopB)
-
-	got := col.waitForN(10, collectTimeout)
-	if got == nil {
-		t.Fatal("timed out waiting for 10 output frames")
-	}
-
-	for i, pkt := range got {
-		if matchesAnyFrame(pkt, framesA) {
-			t.Errorf("frame %d: matches source A verbatim — mixer skipped re-encode for two-source mix", i)
-		}
-		if matchesAnyFrame(pkt, framesB) {
-			t.Errorf("frame %d: matches source B verbatim — mixer skipped re-encode for two-source mix", i)
-		}
-	}
-
-	pcm := decodeOpusFrames(t, got)
-	if rms := rmsInt16(pcm); rms < 500 {
-		t.Errorf("two speakers: decoded RMS %.1f below threshold 500 (silence or corrupt output)", rms)
-	}
-	if peak := maxAbsInt16(pcm); peak == 32767 {
-		t.Errorf("two speakers: hard clipping detected — check PCM accumulator clamping (testAmplitude=%d, 2 sources)", testAmplitude)
-	}
-}
-
-// TestMixerThreeSpeakers verifies the three-source mix path: audible output with no hard clipping.
-// Uses testAmplitude3 (10000) so three sources sum to at most 30000, safely below the int16 ceiling.
-func TestMixerThreeSpeakers(t *testing.T) {
-	t.Parallel()
-	m, col := newTestMixer(t)
-	ctx := context.Background()
-
-	for _, freq := range []int{440, 880, 1320} {
-		frames := generateTestFrames(t, freq, 8, testAmplitude3)
+		frames := generateTestFrames(t, 440, 8, testAmplitude)
 		ch := newSource()
 		m.AddInput(newID(), ch)
-		stop := startPump(ctx, ch, frames)
-		t.Cleanup(stop)
-	}
+		t.Cleanup(startPump(t.Context(), ch, frames))
 
-	got := col.waitForN(10, collectTimeout)
-	if got == nil {
-		t.Fatal("timed out waiting for 10 output frames")
-	}
+		runTicks(8)
+		got := requireFrames(t, col, 0, 8, "solo")
 
-	pcm := decodeOpusFrames(t, got)
-	if rms := rmsInt16(pcm); rms < 300 {
-		t.Errorf("three speakers: decoded RMS %.1f below threshold 300", rms)
-	}
-	if peak := maxAbsInt16(pcm); peak == 32767 {
-		t.Errorf("three speakers: hard clipping detected — PCM sum exceeded int16 range (testAmplitude3=%d, 3 sources)", testAmplitude3)
+		for i, pkt := range got {
+			if !matchesAnyFrame(pkt, frames) {
+				t.Errorf("frame %d: not byte-equal to any input Opus packet — passthrough optimization not active", i)
+			}
+		}
+
+		pcm := decodeOpusFrames(t, got)
+		if rms := rmsInt16(pcm); rms < 500 {
+			t.Errorf("solo passthrough: decoded RMS %.1f below threshold 500 (silence or corrupt output)", rms)
+		}
+	})
+}
+
+// TestMixerMultipleSpeakers verifies the mix path: output must be re-encoded
+// (not byte-equal to any source), audible, and free of hard clipping.
+func TestMixerMultipleSpeakers(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		freqs     []int
+		amplitude int
+		minRMS    float64
+	}{
+		{name: "two", freqs: []int{440, 880}, amplitude: testAmplitude, minRMS: 500},
+		{name: "three", freqs: []int{440, 880, 1320}, amplitude: testAmplitude3, minRMS: 300},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			synctest.Test(t, func(t *testing.T) {
+				m, col := newTestMixer(t)
+
+				var sources [][]testFrame
+				for _, freq := range tc.freqs {
+					frames := generateTestFrames(t, freq, 8, tc.amplitude)
+					sources = append(sources, frames)
+					ch := newSource()
+					m.AddInput(newID(), ch)
+					t.Cleanup(startPump(t.Context(), ch, frames))
+				}
+
+				runTicks(10)
+				got := requireFrames(t, col, 0, 10, tc.name+" speakers")
+
+				for i, pkt := range got {
+					for s, frames := range sources {
+						if matchesAnyFrame(pkt, frames) {
+							t.Errorf("frame %d: matches source %d verbatim — mixer skipped re-encode", i, s)
+						}
+					}
+				}
+
+				pcm := decodeOpusFrames(t, got)
+				if rms := rmsInt16(pcm); rms < tc.minRMS {
+					t.Errorf("decoded RMS %.1f below threshold %.0f (silence or corrupt output)", rms, tc.minRMS)
+				}
+				if peak := maxAbsInt16(pcm); peak == 32767 {
+					t.Errorf("hard clipping detected — check PCM accumulator clamping (amplitude=%d, %d sources)", tc.amplitude, len(tc.freqs))
+				}
+			})
+		})
 	}
 }
 
 // TestMixerJoinMidStream verifies the passthrough→mix transition:
 // solo output must be byte-identical to the source; after a second source joins,
-// output must switch to re-encoded frames.
+// output must switch to re-encoded frames from the very next tick.
 func TestMixerJoinMidStream(t *testing.T) {
 	t.Parallel()
-	m, col := newTestMixer(t)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		m, col := newTestMixer(t)
 
-	framesA := generateTestFrames(t, 440, 8, testAmplitude)
-	framesB := generateTestFrames(t, 880, 8, testAmplitude)
+		framesA := generateTestFrames(t, 440, 8, testAmplitude)
+		framesB := generateTestFrames(t, 880, 8, testAmplitude)
 
-	// Phase 1: solo source A — passthrough must be active.
-	chA := newSource()
-	m.AddInput(newID(), chA)
-	stopA := startPump(ctx, chA, framesA)
-	t.Cleanup(stopA)
+		chA := newSource()
+		m.AddInput(newID(), chA)
+		t.Cleanup(startPump(t.Context(), chA, framesA))
 
-	phase1 := col.waitForN(5, collectTimeout)
-	if phase1 == nil {
-		t.Fatal("phase 1: timed out waiting for 5 solo frames")
-	}
-	for i, pkt := range phase1 {
-		if !matchesAnyFrame(pkt, framesA) {
-			t.Errorf("phase 1 frame %d: not a passthrough of source A (solo fast-path broken)", i)
+		runTicks(5)
+		for i, pkt := range requireFrames(t, col, 0, 5, "phase 1") {
+			if !matchesAnyFrame(pkt, framesA) {
+				t.Errorf("phase 1 frame %d: not a passthrough of source A (solo fast-path broken)", i)
+			}
 		}
-	}
 
-	// Phase 2: add source B and allow a few ticks for the mixer to see both inputs.
-	chB := newSource()
-	m.AddInput(newID(), chB)
-	stopB := startPump(ctx, chB, framesB)
-	t.Cleanup(stopB)
-	time.Sleep(60 * time.Millisecond)
+		chB := newSource()
+		m.AddInput(newID(), chB)
+		t.Cleanup(startPump(t.Context(), chB, framesB))
 
-	baseline := col.count()
-	phase2 := col.collectFrom(baseline, 5, collectTimeout)
-	if phase2 == nil {
-		t.Fatal("phase 2: timed out waiting for 5 mixed frames after join")
-	}
-	for i, pkt := range phase2 {
-		if matchesAnyFrame(pkt, framesA) {
-			t.Errorf("phase 2 frame %d: still passing source A through after B joined — mix not active", i)
+		runTicks(5)
+		phase2 := requireFrames(t, col, 5, 5, "phase 2")
+		for i, pkt := range phase2 {
+			if matchesAnyFrame(pkt, framesA) {
+				t.Errorf("phase 2 frame %d: still passing source A through after B joined — mix not active", i)
+			}
+			if matchesAnyFrame(pkt, framesB) {
+				t.Errorf("phase 2 frame %d: still passing source B through after joining — mix not active", i)
+			}
 		}
-		if matchesAnyFrame(pkt, framesB) {
-			t.Errorf("phase 2 frame %d: still passing source B through after joining — mix not active", i)
+		pcm := decodeOpusFrames(t, phase2)
+		if rms := rmsInt16(pcm); rms < 500 {
+			t.Errorf("phase 2: decoded RMS %.1f too low after second speaker joined", rms)
 		}
-	}
-	pcm := decodeOpusFrames(t, phase2)
-	if rms := rmsInt16(pcm); rms < 500 {
-		t.Errorf("phase 2: decoded RMS %.1f too low after second speaker joined", rms)
-	}
+	})
 }
 
 // TestMixerLeaveMidStream verifies the mix→passthrough transition:
@@ -166,102 +158,81 @@ func TestMixerJoinMidStream(t *testing.T) {
 // the mixer must revert to byte-identical passthrough for the remaining source.
 func TestMixerLeaveMidStream(t *testing.T) {
 	t.Parallel()
-	m, col := newTestMixer(t)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		m, col := newTestMixer(t)
 
-	framesA := generateTestFrames(t, 440, 8, testAmplitude)
-	framesB := generateTestFrames(t, 880, 8, testAmplitude)
+		framesA := generateTestFrames(t, 440, 8, testAmplitude)
+		framesB := generateTestFrames(t, 880, 8, testAmplitude)
 
-	chA, chB := newSource(), newSource()
-	idB := newID()
-	m.AddInput(newID(), chA)
-	m.AddInput(idB, chB)
-	stopA := startPump(ctx, chA, framesA)
-	stopB := startPump(ctx, chB, framesB)
-	t.Cleanup(stopA)
-	t.Cleanup(stopB)
+		chA, chB := newSource(), newSource()
+		idB := newID()
+		m.AddInput(newID(), chA)
+		m.AddInput(idB, chB)
+		t.Cleanup(startPump(t.Context(), chA, framesA))
+		stopB := startPump(t.Context(), chB, framesB)
+		t.Cleanup(stopB)
 
-	// Warm up: let the mixer produce a few mixed frames.
-	if col.waitForN(5, collectTimeout) == nil {
-		t.Fatal("warmup: timed out waiting for 5 mixed frames")
-	}
+		runTicks(5)
+		requireFrames(t, col, 0, 5, "warmup")
 
-	// Remove source B; allow a couple of ticks before collecting.
-	m.RemoveInput(idB)
-	stopB()
-	time.Sleep(60 * time.Millisecond)
+		m.RemoveInput(idB)
+		stopB()
 
-	baseline := col.count()
-	phase2 := col.collectFrom(baseline, 5, collectTimeout)
-	if phase2 == nil {
-		t.Fatal("leave: timed out waiting for 5 post-leave frames")
-	}
-	for i, pkt := range phase2 {
-		if !matchesAnyFrame(pkt, framesA) {
-			t.Errorf("post-leave frame %d: not a passthrough of source A (passthrough not resumed after B left)", i)
+		runTicks(5)
+		for i, pkt := range requireFrames(t, col, 5, 5, "leave") {
+			if !matchesAnyFrame(pkt, framesA) {
+				t.Errorf("post-leave frame %d: not a passthrough of source A (passthrough not resumed after B left)", i)
+			}
 		}
-	}
+	})
 }
 
 // TestMixerRapidJoinLeave verifies that the mixer handles multiple mode transitions
 // (passthrough→mix→passthrough) without producing silence or corrupted frames.
 func TestMixerRapidJoinLeave(t *testing.T) {
 	t.Parallel()
-	m, col := newTestMixer(t)
-	ctx := context.Background()
+	synctest.Test(t, func(t *testing.T) {
+		m, col := newTestMixer(t)
 
-	framesA := generateTestFrames(t, 440, 8, testAmplitude)
-	framesB := generateTestFrames(t, 660, 8, testAmplitude)
-	framesC := generateTestFrames(t, 880, 8, testAmplitude)
+		framesA := generateTestFrames(t, 440, 8, testAmplitude)
+		framesB := generateTestFrames(t, 660, 8, testAmplitude)
+		framesC := generateTestFrames(t, 880, 8, testAmplitude)
 
-	// Phase 1: solo A.
-	chA := newSource()
-	m.AddInput(newID(), chA)
-	stopA := startPump(ctx, chA, framesA)
-	t.Cleanup(stopA)
-	if col.waitForN(3, collectTimeout) == nil {
-		t.Fatal("phase 1: timed out")
-	}
+		chA := newSource()
+		m.AddInput(newID(), chA)
+		t.Cleanup(startPump(t.Context(), chA, framesA))
+		runTicks(3)
+		requireFrames(t, col, 0, 3, "phase 1")
 
-	// Phase 2: three simultaneous speakers.
-	chB, chC := newSource(), newSource()
-	idB, idC := newID(), newID()
-	m.AddInput(idB, chB)
-	m.AddInput(idC, chC)
-	stopB := startPump(ctx, chB, framesB)
-	stopC := startPump(ctx, chC, framesC)
-	t.Cleanup(stopB)
-	t.Cleanup(stopC)
-	time.Sleep(60 * time.Millisecond)
-	baseline2 := col.count()
-	if col.collectFrom(baseline2, 3, collectTimeout) == nil {
-		t.Fatal("phase 2: timed out waiting for mixed frames")
-	}
-
-	// Phase 3: remove B and C, back to solo A.
-	m.RemoveInput(idB)
-	m.RemoveInput(idC)
-	stopB()
-	stopC()
-	time.Sleep(60 * time.Millisecond)
-
-	baseline3 := col.count()
-	phase3 := col.collectFrom(baseline3, 5, collectTimeout)
-	if phase3 == nil {
-		t.Fatal("phase 3: timed out waiting for passthrough frames after B+C left")
-	}
-	for i, pkt := range phase3 {
-		if !matchesAnyFrame(pkt, framesA) {
-			t.Errorf("phase 3 frame %d: not passthrough of source A after B+C left", i)
+		chB, chC := newSource(), newSource()
+		idB, idC := newID(), newID()
+		m.AddInput(idB, chB)
+		m.AddInput(idC, chC)
+		stopB := startPump(t.Context(), chB, framesB)
+		stopC := startPump(t.Context(), chC, framesC)
+		t.Cleanup(stopB)
+		t.Cleanup(stopC)
+		runTicks(3)
+		for i, pkt := range requireFrames(t, col, 3, 3, "phase 2") {
+			if matchesAnyFrame(pkt, framesA) {
+				t.Errorf("phase 2 frame %d: passthrough of source A while three speak", i)
+			}
 		}
-	}
 
-	// Overall: no silence throughout all phases.
-	all := col.waitForN(col.count(), time.Millisecond)
-	if all != nil {
-		pcm := decodeOpusFrames(t, all)
+		m.RemoveInput(idB)
+		m.RemoveInput(idC)
+		stopB()
+		stopC()
+		runTicks(5)
+		for i, pkt := range requireFrames(t, col, 6, 5, "phase 3") {
+			if !matchesAnyFrame(pkt, framesA) {
+				t.Errorf("phase 3 frame %d: not passthrough of source A after B+C left", i)
+			}
+		}
+
+		pcm := decodeOpusFrames(t, col.from(0))
 		if rms := rmsInt16(pcm); rms < 100 {
 			t.Errorf("overall RMS %.1f too low — possible silence or dropout during mode transitions", rms)
 		}
-	}
+	})
 }

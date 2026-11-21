@@ -21,7 +21,9 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/pool"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/metric"
 	"go.opentelemetry.io/otel/metric/noop"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 // Harness holds all bot connections shared across integration tests.
@@ -95,12 +97,12 @@ func NewHarness(ctx context.Context, cfg *Config) (*Harness, error) {
 // gets speakerChannelIDs[0], etc.). The owner and caller role are pre-bound.
 // Always call manager.StopVoiceRaid in t.Cleanup.
 func (h *Harness) NewManager(speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
-	return h.newManagerForGuild(h.Cfg.GuildID, h.Cfg.OwnerChannelID, speakerChannelIDs...)
+	return h.newManagerForGuild(noop.NewMeterProvider(), h.Cfg.GuildID, h.Cfg.OwnerChannelID, speakerChannelIDs...)
 }
 
-func (h *Harness) newManagerForGuild(guildID, ownerChannelID snowflake.ID, speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
+func (h *Harness) newManagerForGuild(provider metric.MeterProvider, guildID, ownerChannelID snowflake.ID, speakerChannelIDs ...snowflake.ID) (*manager.Service, *store.InMemoryStore) {
 	st := store.NewInMemoryStore()
-	metrics, _ := telemetry.NewMetrics(noop.NewMeterProvider().Meter("integration"))
+	metrics, _ := telemetry.NewMetrics(provider.Meter("integration"))
 	svc := manager.NewService(st, h.Pool, h.Owner, h.OwnerID, config.TestConfig{AllowBots: true}, metrics)
 	h.daveStalls.SetHandler(svc.OnEncryptStall)
 	h.Pool.SetFreshGatewayHandler(svc.OnSpeakerFreshGateway)
@@ -185,6 +187,18 @@ func (h *Harness) MustStartRaid(t testing.TB, ctx context.Context, cancel contex
 	return mgr
 }
 
+// MustStartRaidRecording is MustStartRaid with the manager's metrics collected
+// by the returned reader, for tests that assert on what the raid recorded.
+func (h *Harness) MustStartRaidRecording(t testing.TB, ctx context.Context, cancel context.CancelFunc, mode guild.RaidMode, speakerChannelIDs ...snowflake.ID) (*manager.Service, *sdkmetric.ManualReader) {
+	t.Helper()
+	reader := sdkmetric.NewManualReader()
+	mgr, _ := h.newManagerForGuild(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), h.Cfg.GuildID, h.Cfg.OwnerChannelID, speakerChannelIDs...)
+	if _, err := mgr.StartVoiceRaid(ctx, h.Cfg.GuildID, cancel, mode); err != nil {
+		t.Fatalf("StartVoiceRaid: %v", err)
+	}
+	return mgr, reader
+}
+
 // MustStartPlaying calls speaker.StartPlaying and fatals on error.
 func (h *Harness) MustStartPlaying(t testing.TB, ctx context.Context, speaker *Speaker, channelID snowflake.ID) func() {
 	t.Helper()
@@ -227,7 +241,7 @@ func (h *Harness) MustStartListening(t testing.TB, ctx context.Context, guildID,
 }
 
 // RegisterCleanup registers t.Cleanup to call each stop func then StopVoiceRaid for h.Cfg.GuildID.
-// Do not use when stop funcs are reassigned after registration (e.g. E11) or when multiple
+// Do not use when stop funcs are reassigned after registration or when multiple
 // guild IDs need separate StopVoiceRaid calls (e.g. E5).
 func (h *Harness) RegisterCleanup(t testing.TB, mgr *manager.Service, stops ...func()) {
 	t.Helper()

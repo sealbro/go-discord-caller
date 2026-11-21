@@ -16,11 +16,11 @@ go test --tags=integration --timeout=15m ./integration/...
 | **owner bot** | existing production owner | same token as `DISCORD_OWNER_BOT_TOKEN`; keep permissions identical to production |
 | **speaker bot(s)** | existing production speakers | same tokens as `DISCORD_SPEAKER_BOT_TOKEN_N` |
 | **source bot** | harness audio source | new dedicated bot; must never be a production speaker |
-| **source bot 2** | second harness source | required for E2, E5b, E5c, E5d, E5f, E6, E12, E13–E15 (mix-minus, star topology, auto-route, cross-guild caller) |
+| **source bot 2** | second harness source | required for E2, E5b/E5d, E5c, E5f, E6, E13–E15 (mix-minus, star topology, auto-route, cross-guild caller) |
 | **listener bot** | harness frame counter + **test-admin** | new dedicated bot; grant **Administrator** in the test guild only |
 
 The **listener bot** doubles as the test-admin for privileged REST calls (E9: move
-members, E12: manage roles). Giving Administrator to the listener bot — not the
+members, E12 and E14: manage roles). Giving Administrator to the listener bot — not the
 owner bot — keeps the owner bot at production-identical permissions, so tests
 cannot pass on permissions that don't exist in production.
 
@@ -57,9 +57,9 @@ Create or reuse a private server. Do **not** use a production guild.
 | owner bot | `View Channels`, `Connect`, `Speak`, `Use Voice Activity`, `Deafen Members` — same as production, nothing extra. Without `Deafen Members` the raid is refused, in the guest guild too |
 | speaker bots | same as owner bot |
 | source bots | `View Channels`, `Connect`, `Speak`, `Use Voice Activity` |
-| listener bot | **Administrator** (test guild only) — used as test-admin for E9 / E12 |
+| listener bot | **Administrator** (test guild only) — used as test-admin for E9 / E12 / E14 |
 
-E9 and E12 skip automatically if the listener bot lacks the necessary permissions.
+E9, E12 and E14 skip automatically if the listener bot lacks the necessary permissions.
 
 After inviting, run `/setup` or the equivalent commands to bind the owner and speaker channels within the bot's store (this wiring is re-done programmatically in each test, but the bots must be guild members for `SeedExistingSpeakers` to find them).
 
@@ -67,10 +67,10 @@ After inviting, run `/setup` or the equivalent commands to bind the owner and sp
 - source bot
 - source bot 2 (if used)
 
-### 2.2 Guest guild (E5 / E5b / E5c / E5d / E5e / E5f)
+### 2.2 Guest guild (E5 / E5b–E5f)
 
 Required for the inter-guild relay tests `TestE5_InterGuildRelay`,
-`TestE5b_AllyCaller`, `TestE5c_OneManyAllyCaller`, `TestE5d_RelayResumesAfterIdleHost`,
+`TestE5c_OneManyAllyCaller`, `TestE5d_RelayResumesAfterIdleHost` (whose first phase is E5b),
 `TestE5e_RelayResumesAfterIdleGuest`, and `TestE5f_StarRelayResumesAfterIdleHost`.
 Create a second private
 server. (E5b, E5c, E5d and E5f additionally need source bot 2; E5c needs
@@ -153,7 +153,7 @@ E2E_CALLER_ROLE_ID=
 E2E_GUEST_GUILD_ID=
 E2E_GUEST_OWNER_CHANNEL_ID=
 E2E_GUEST_SPEAKER_CHANNEL_ID=
-E2E_GUEST_CALLER_ROLE_ID=        # optional; required for E5b / E5d / E5f
+E2E_GUEST_CALLER_ROLE_ID=        # optional; required for E5b/E5d / E5f
 
 # --- Audio (optional; defaults to integration/samples, all *.dca played randomly) ---
 # E2E_SAMPLES_DIR=integration/samples
@@ -195,7 +195,7 @@ go test --tags=integration --timeout=15m -v ./integration/...
 Run a single test:
 
 ```bash
-go test --tags=integration --timeout=30s -v -run TestE1_OneCaller ./integration/...
+go test --tags=integration --timeout=3m -v -run TestE1_OneCallerLifecycle ./integration/...
 ```
 
 ### 5.1 Long-running stress tests (separate `stress` build tag)
@@ -314,10 +314,11 @@ harness.
 | File | Build tag | Contains |
 |------|-----------|---------|
 | `main_test.go` | `integration` \|\| `stress` | `TestMain`, shared `h *Harness` |
-| `host_test.go` | `integration` | E1, E2, E4, E6, E7 — host-guild audio relay tests |
-| `guest_test.go` | `integration` | E5, E5b, E5c, E5d, E5e, E5f — inter-guild relay |
-| `handlers_test.go` | `integration` | E8–E12 — Discord event handler tests |
+| `host_test.go` | `integration` | E1 lifecycle (E1, E4, E8, E9, E19), E2, E6 — host-guild audio relay tests |
+| `guest_test.go` | `integration` | E5, E5b–E5f — inter-guild relay |
+| `handlers_test.go` | `integration` | E10, E12 — Discord event handler tests |
 | `auto_route_test.go` | `integration` | E13–E15 — auto-router copy↔mix transitions |
+| `helpers_test.go` | `integration` \|\| `stress` | shared waits (voice state, route transitions), phases, role helpers |
 | `stress_test.go` | `stress` | long-running by-ear / soak tests (see §5.1) |
 
 ---
@@ -326,24 +327,22 @@ harness.
 
 | Test | File | Mode (host / guest) | What it proves | Extra bots / perms needed |
 |------|------|---------------------|---------------|--------------------------|
-| E1 | host | `OneCaller` | basic relay: source → speaker | — |
+| E1 | host | `OneCaller` | basic relay: source already in channel at raid start (`RequestMembers` prefetch) → speaker; first phase of the lifecycle scenario that also runs E19, E8, E9 and E4 | — |
 | E2 | host | `GuildCaller` | mix-minus routing (A hears B, not itself) | source bot 2 |
-| E4 | host | `OneCaller` | stop + restart raid resumes audio (voice reconnect, no gateway kill) | — |
+| E4 | host | `OneCaller` | stop + restart raid resumes audio (voice reconnect, no gateway kill); phase of E1 | — |
 | E5 | guest | `OneCaller` / `AllyListener` | inter-guild relay: host audio reaches guest speaker channel | guest guild |
-| E5b | guest | `GuildCaller` / `AllyCaller` | bidirectional cross-guild: guest captures audio into host relay mixer | guest guild, source bot 2 |
+| E5b | guest | `GuildCaller` / `AllyCaller` | bidirectional cross-guild: guest captures audio into host relay mixer; first phase of E5d | guest guild, source bot 2 |
 | E5c | guest | `OneManyGuildCaller` / `OneManyAllyCaller` | star-topology guest: host owner audio → guest speakers, guests feed back | guest guild, source bot 2, `E2E_SPEAKER2_CHANNEL_ID` |
-| E5d | guest | `GuildCaller` / `AllyCaller` | issue #51: guest→host relay survives an idle lull past `DrainIdleTimeout` (relay-fed mixers must not be paused by the cascade or the drain watcher) | guest guild, source bot 2 |
+| E5d | guest | `GuildCaller` / `AllyCaller` | issue #51: guest→host relay survives an idle lull (caller muted, still connected) past `DrainIdleTimeout` (relay-fed mixers must not be paused by the cascade or the drain watcher) | guest guild, source bot 2 |
 | E5e | guest | `GuildCaller` / `AllyCaller` | issue #51: host→guest relay survives the same lull when the guest joined in caller mode | guest guild |
 | E5f | guest | `OneManyGuildCaller` / `OneManyAllyCaller` | issue #51 in star topology: guest→host relay into the hub mixer survives the lull (the direction E5c does not assert) | guest guild, source bot 2 |
 | E6 | host | `OneManyGuildCaller` | star topology (hub hears all) | source bot 2 |
-| E7 | host | `OneCaller` | `RequestMembers` pre-fetch allows pre-joined source | — |
-| E8 | handlers | `OneCaller` | `onVoiceLeave` → `ReconnectBotChannel` after voice disconnect | — |
-| E9 | handlers | `OneCaller` | `onVoiceMove` → `OnBotVoiceMove` → `ReconnectBotChannel` after admin move | listener bot: Move Members |
+| E8 | host | `OneCaller` | `onVoiceLeave` → `ReconnectBotChannel` after voice disconnect; phase of E1 | — |
+| E9 | host | `OneCaller` | `onVoiceMove` → `OnBotVoiceMove` → `ReconnectBotChannel` after admin move; phase of E1 | listener bot: Move Members |
 | E10 | handlers | `OneCaller` | `onVoiceJoin` live-join: caller joins after raid start → captured | — |
-| E11 | handlers | `OneCaller` | `onVoiceLeave`/`onVoiceJoin` → auto-pause/resume via voice events | — |
-| E12 | handlers | `GuildCaller` | `onGuildMemberUpdate` → AllowFilter updated on role revoke | source bot 2, listener bot: Manage Roles |
-| E13 | auto_route | `OneCaller` | auto-router promotes source copy→mix on 2nd caller, no catastrophic gap | source bot 2 |
-| E14 | auto_route | `OneCaller` | auto-router demotes mix→copy when a caller leaves, no lost delivery | source bot 2 |
+| E12 | handlers | `OneCaller` | `onGuildMemberUpdate`: revoking the only caller's role stops its audio, granting it back resumes it | listener bot: Manage Roles |
+| E13 | auto_route | `OneCaller` | auto-router promotes source copy→mix on 2nd caller (asserted on the transition counter), no catastrophic gap | source bot 2 |
+| E14 | auto_route | `OneCaller` | auto-router demotes mix→copy when the 2nd caller's role is revoked (a bot leaving triggers no recompute), no lost delivery | source bot 2, listener bot: Manage Roles |
 | E15 | auto_route | `OneCaller` | two callers in one channel: sustained mixer throughput, no eviction/panic | source bot 2 |
 
 Tests that require optional bots, guilds, or permissions are skipped automatically

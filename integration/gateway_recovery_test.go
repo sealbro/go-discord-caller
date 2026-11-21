@@ -35,7 +35,24 @@ const recoveryDeadline = 25 * time.Second
 //
 // A single caller is used so the speaker is fed by raw copy, with no mixer in
 // between: the only thing under test is the speaker's own send path.
+//
+// Both close codes run against one raid: each drop must leave the speaker
+// relaying, so the second starts from the state a recovered first one leaves.
 func TestE24_SpeakerAudioRecoversAfterMainGatewayDrop(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
+	defer cancel()
+
+	stopCaller := startCaller(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
+
+	mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID)
+	stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
+	speakerID := h.RequireSpeakers(t)[0]
+	h.RegisterCleanup(t, mgr, stopCaller, stopListener)
+
+	phase(t, "relaying before the drop", func(t *testing.T) {
+		AssertFramesReceived(t, h.Listener, speakerID, 100, 20*time.Second)
+	})
+
 	for _, tc := range []struct {
 		name string
 		code int
@@ -43,24 +60,10 @@ func TestE24_SpeakerAudioRecoversAfterMainGatewayDrop(t *testing.T) {
 		{"resumable close", closeCodeServiceRestart},
 		{"session discarded", closeCodeNormal},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(t.Context(), 120*time.Second)
-			defer cancel()
-
-			stopCaller := h.MustStartPlaying(t, ctx, h.Speaker, h.Cfg.OwnerChannelID)
-			time.Sleep(500 * time.Millisecond)
-
-			mgr := h.MustStartRaid(t, ctx, cancel, guild.RaidModeGuildCaller, h.Cfg.Speaker1ChannelID)
-			stopListener := h.MustStartListening(t, ctx, h.Cfg.GuildID, h.Cfg.Speaker1ChannelID)
-			speakerIDs := h.RequireSpeakers(t)
-			h.RegisterCleanup(t, mgr, stopCaller, stopListener)
-
-			AssertFramesReceived(t, h.Listener, speakerIDs[0], 100, 20*time.Second)
-
-			client := mustPoolClient(t, speakerIDs[0])
+		phase(t, tc.name, func(t *testing.T) {
+			client := mustPoolClient(t, speakerID)
 			dropAndReopenGateway(t, ctx, client, tc.code)
-
-			AssertFramesIncreasedBy(t, h.Listener, speakerIDs[0], 100, recoveryDeadline)
+			AssertFramesIncreasedBy(t, h.Listener, speakerID, 100, recoveryDeadline)
 		})
 	}
 }

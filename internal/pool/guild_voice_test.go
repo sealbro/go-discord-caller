@@ -6,6 +6,7 @@ import (
 	"iter"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/gateway"
@@ -60,47 +61,46 @@ func (m *hangingVoiceManager) Close(context.Context)                            
 // handshake — and the cleanup after a failed one — by itself.
 func TestGuildVoiceJoinBoundsTheHandshake(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			guildID   = snowflake.ID(851)
+			channelID = snowflake.ID(852)
+		)
 
-	const (
-		guildID   = snowflake.ID(851)
-		channelID = snowflake.ID(852)
-	)
+		conn := newHangingConn()
+		gv := NewGuildVoice(&hangingVoiceManager{conn: conn}, channelID)
 
-	conn := newHangingConn()
-	gv := NewGuildVoice(&hangingVoiceManager{conn: conn}, channelID)
-	gv.joinTimeout = 50 * time.Millisecond
-	gv.retryCleanupTimeout = 50 * time.Millisecond
-	gv.retryTimeout = 50 * time.Millisecond
-	gv.cleanupTimeout = 50 * time.Millisecond
+		joined := make(chan error, 1)
+		go func() { _, err := gv.Join(context.Background(), guildID); joined <- err }()
 
-	sessionCtx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	joined := make(chan error, 1)
-	go func() { _, err := gv.Join(sessionCtx, guildID); joined <- err }()
-
-	var openCtx context.Context
-	select {
-	case openCtx = <-conn.openCtx:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Join never reached conn.Open")
-	}
-
-	deadline, ok := openCtx.Deadline()
-	if !ok {
-		t.Fatal("conn.Open got a context with no deadline: a handshake Discord never answers blocks the raid forever")
-	}
-	if d := time.Until(deadline); d > gv.joinTimeout {
-		t.Errorf("join deadline is %v away, want at most %v", d, gv.joinTimeout)
-	}
-	select {
-	case err := <-joined:
-		if err == nil {
-			t.Error("Join returned a nil error after a handshake that never completed")
+		openCtx := <-conn.openCtx
+		deadline, ok := openCtx.Deadline()
+		if !ok {
+			t.Fatal("conn.Open got a context with no deadline: a handshake Discord never answers blocks the raid forever")
 		}
-	case <-time.After(time.Until(deadline) + gv.retryCleanupTimeout + gv.retryTimeout + gv.cleanupTimeout + 5*time.Second):
-		t.Error("Join did not return after its deadline: releasing the conn inherited the same unbounded wait")
-	}
+		if d := time.Until(deadline); d != voiceJoinFirstTimeout {
+			t.Errorf("join deadline is %v away, want %v", d, voiceJoinFirstTimeout)
+		}
+
+		time.Sleep(VoiceJoinCost - time.Nanosecond)
+		synctest.Wait()
+		select {
+		case err := <-joined:
+			t.Fatalf("Join returned (%v) before both handshakes and both leaves had run out", err)
+		default:
+		}
+
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		select {
+		case err := <-joined:
+			if err == nil {
+				t.Error("Join returned a nil error after a handshake that never completed")
+			}
+		default:
+			t.Errorf("Join did not return after %v: releasing the conn inherited the same unbounded wait", VoiceJoinCost)
+		}
+	})
 }
 
 // Stopping a raid mid-join cancels the context Join is holding. Releasing the
@@ -108,42 +108,32 @@ func TestGuildVoiceJoinBoundsTheHandshake(t *testing.T) {
 // nothing left to drive it out.
 func TestGuildVoiceJoinReleasesConnAfterParentCancelled(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			guildID   = snowflake.ID(851)
+			channelID = snowflake.ID(852)
+		)
 
-	const (
-		guildID   = snowflake.ID(851)
-		channelID = snowflake.ID(852)
-	)
+		conn := newHangingConn()
+		gv := NewGuildVoice(&hangingVoiceManager{conn: conn}, channelID)
 
-	conn := newHangingConn()
-	gv := NewGuildVoice(&hangingVoiceManager{conn: conn}, channelID)
-	gv.cleanupTimeout = 50 * time.Millisecond
+		sessionCtx, cancel := context.WithCancel(context.Background())
+		joined := make(chan error, 1)
+		go func() { _, err := gv.Join(sessionCtx, guildID); joined <- err }()
 
-	sessionCtx, cancel := context.WithCancel(context.Background())
-	joined := make(chan error, 1)
-	go func() { _, err := gv.Join(sessionCtx, guildID); joined <- err }()
+		<-conn.openCtx
+		cancel()
 
-	<-conn.openCtx
-	cancel()
-
-	var closeCtx context.Context
-	select {
-	case closeCtx = <-conn.closeCtx:
-	case <-time.After(5 * time.Second):
-		t.Fatal("Join never released the conn")
-	}
-	if closeCtx.Err() != nil {
-		t.Errorf("conn.Close got an already-dead context (%v): disgo sends the leave op through the rate limiter, which drops it, so the bot stays in the channel", closeCtx.Err())
-	}
-
-	select {
-	case <-joined:
-	case <-time.After(5 * time.Second):
-		t.Error("Join did not return after the parent was cancelled")
-	}
+		closeCtx := <-conn.closeCtx
+		if closeCtx.Err() != nil {
+			t.Errorf("conn.Close got an already-dead context (%v): disgo sends the leave op through the rate limiter, which drops it, so the bot stays in the channel", closeCtx.Err())
+		}
+		<-joined
+	})
 }
 
-// Guards the values production actually runs with, which the injected
-// timeouts above say nothing about.
+// The tests above check that Join keeps to the timeouts; this one checks the
+// timeouts themselves.
 func TestVoiceTimeoutsStayWithinAUsersPatience(t *testing.T) {
 	t.Parallel()
 	if VoiceJoinCost > 20*time.Second {
@@ -190,48 +180,47 @@ func (m *flakyVoiceManager) GetConn(snowflake.ID) voice.Conn    { return m.conn 
 // raid.
 func TestGuildVoiceJoinRetriesAHandshakeThatHung(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			guildID   = snowflake.ID(701)
+			channelID = snowflake.ID(702)
+		)
+		conn := &flakyConn{hangs: 1}
+		gv := NewGuildVoice(&flakyVoiceManager{conn: conn}, channelID)
 
-	const (
-		guildID   = snowflake.ID(701)
-		channelID = snowflake.ID(702)
-	)
-	conn := &flakyConn{hangs: 1}
-	gv := NewGuildVoice(&flakyVoiceManager{conn: conn}, channelID)
-	gv.joinTimeout = 50 * time.Millisecond
-	gv.cleanupTimeout = 50 * time.Millisecond
+		got, err := gv.Join(context.Background(), guildID)
 
-	got, err := gv.Join(context.Background(), guildID)
-
-	if err != nil {
-		t.Fatalf("Join failed after the first handshake hung (%d handshake(s) tried): %v", conn.opens.Load(), err)
-	}
-	if got != conn {
-		t.Errorf("Join returned %v, want the conn", got)
-	}
-	if n := conn.closes.Load(); n == 0 {
-		t.Error("the hung handshake's conn was not released before asking again: CreateConn would hand back a half-open conn")
-	}
+		if err != nil {
+			t.Fatalf("Join failed after the first handshake hung (%d handshake(s) tried): %v", conn.opens.Load(), err)
+		}
+		if got != conn {
+			t.Errorf("Join returned %v, want the conn", got)
+		}
+		if n := conn.closes.Load(); n == 0 {
+			t.Error("the hung handshake's conn was not released before asking again: CreateConn would hand back a half-open conn")
+		}
+	})
 }
 
 // A /stop during the join cancels it; asking Discord again would only delay
 // the teardown the stop asked for.
 func TestGuildVoiceJoinDoesNotRetryAfterParentCancelled(t *testing.T) {
 	t.Parallel()
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			guildID   = snowflake.ID(711)
+			channelID = snowflake.ID(712)
+		)
+		conn := &flakyConn{hangs: 2}
+		gv := NewGuildVoice(&flakyVoiceManager{conn: conn}, channelID)
 
-	const (
-		guildID   = snowflake.ID(711)
-		channelID = snowflake.ID(712)
-	)
-	conn := &flakyConn{hangs: 2}
-	gv := NewGuildVoice(&flakyVoiceManager{conn: conn}, channelID)
-	gv.cleanupTimeout = 50 * time.Millisecond
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if _, err := gv.Join(ctx, guildID); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Join error = %v, want the parent's deadline", err)
-	}
-	if n := conn.opens.Load(); n != 1 {
-		t.Errorf("handshakes tried = %d after the parent context ended, want 1", n)
-	}
+		ctx, cancel := context.WithTimeout(context.Background(), voiceJoinFirstTimeout/2)
+		defer cancel()
+		if _, err := gv.Join(ctx, guildID); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Join error = %v, want the parent's deadline", err)
+		}
+		if n := conn.opens.Load(); n != 1 {
+			t.Errorf("handshakes tried = %d after the parent context ended, want 1", n)
+		}
+	})
 }

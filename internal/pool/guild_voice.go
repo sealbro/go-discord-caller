@@ -43,12 +43,6 @@ type GuildVoice struct {
 	// botID is the bot this connection belongs to; zero when the caller did
 	// not say, which only costs the region bookkeeping in Leave.
 	botID snowflake.ID
-
-	// zero means the package default
-	joinTimeout         time.Duration
-	retryCleanupTimeout time.Duration
-	retryTimeout        time.Duration
-	cleanupTimeout      time.Duration
 }
 
 // ForBot records which bot this GuildVoice acts for, so Leave can retire the
@@ -57,13 +51,6 @@ type GuildVoice struct {
 func (v GuildVoice) ForBot(botID snowflake.ID) GuildVoice {
 	v.botID = botID
 	return v
-}
-
-func orDefault(d, def time.Duration) time.Duration {
-	if d > 0 {
-		return d
-	}
-	return def
 }
 
 // NewGuildVoice creates a GuildVoice for the given voice manager and channel.
@@ -84,18 +71,18 @@ func (v GuildVoice) Join(ctx context.Context, guildID snowflake.ID) (voice.Conn,
 	}
 	defer defaultJoinTraces.begin(v.botID, guildID, trace.SpanFromContext(ctx))()
 
-	conn, err := v.open(ctx, guildID, orDefault(v.joinTimeout, voiceJoinFirstTimeout))
+	conn, err := v.open(ctx, guildID, voiceJoinFirstTimeout)
 	if err == nil {
 		return conn, nil
 	}
 	if ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
 		trace.SpanFromContext(ctx).AddEvent("voice.join.retry")
-		v.release(ctx, guildID, orDefault(v.retryCleanupTimeout, voiceRetryLeaveTimeout))
-		if conn, err = v.open(ctx, guildID, orDefault(v.retryTimeout, voiceJoinRetryTimeout)); err == nil {
+		v.release(ctx, guildID, voiceRetryLeaveTimeout)
+		if conn, err = v.open(ctx, guildID, voiceJoinRetryTimeout); err == nil {
 			return conn, nil
 		}
 	}
-	v.release(ctx, guildID, orDefault(v.cleanupTimeout, voiceCleanupTimeout))
+	v.release(ctx, guildID, voiceCleanupTimeout)
 	return nil, fmt.Errorf("join channel %s: %w", v.channelID, err)
 }
 

@@ -9,7 +9,6 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
-	"time"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
@@ -308,20 +307,6 @@ func newTestBotMetrics(t *testing.T) *telemetry.BotMetrics {
 	return &m.Bot
 }
 
-// waitFor polls until cond returns true or the deadline elapses. Used to
-// rendezvous with handler goroutines spawned via `go m.X(...)`.
-func waitFor(t *testing.T, cond func() bool, msg string) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatalf("timeout waiting for %s", msg)
-}
-
 func fireGuildJoin(h func(*events.GuildJoin), guildID snowflake.ID) {
 	h(&events.GuildJoin{
 		GenericGuild: &events.GenericGuild{
@@ -333,58 +318,65 @@ func fireGuildJoin(h func(*events.GuildJoin), guildID snowflake.ID) {
 
 func TestOnGuildJoin_SeedsGuild(t *testing.T) {
 	t.Parallel()
-	f := &fakeManager{}
-	h := onGuildJoin(f, nil)
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeManager{}
+		h := onGuildJoin(f, nil)
 
-	guildID := snowflake.ID(42)
-	fireGuildJoin(h, guildID)
+		guildID := snowflake.ID(42)
+		fireGuildJoin(h, guildID)
+		synctest.Wait()
 
-	waitFor(t, func() bool { return len(f.snapshotCalls().seedCalls) == 1 }, "SeedExistingSpeakers")
-	got := f.snapshotCalls().seedCalls[0]
-	if len(got) != 1 || got[0] != guildID {
-		t.Errorf("SeedExistingSpeakers args: want [%s] got %v", guildID, got)
-	}
+		seeds := f.snapshotCalls().seedCalls
+		if len(seeds) != 1 {
+			t.Fatalf("SeedExistingSpeakers called %d times, want 1", len(seeds))
+		}
+		if got := seeds[0]; len(got) != 1 || got[0] != guildID {
+			t.Errorf("SeedExistingSpeakers args: want [%s] got %v", guildID, got)
+		}
+	})
 }
 
 // A guild joined while the bot is running is never covered by the boot-time
 // sync, so its guild copies of the commands are cleared on join.
 func TestOnGuildJoin_SyncsCommands(t *testing.T) {
 	t.Parallel()
-	f := &fakeManager{}
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeManager{}
 
-	var mu sync.Mutex
-	var synced []snowflake.ID
-	h := onGuildJoin(f, func(_ context.Context, gid snowflake.ID) {
-		mu.Lock()
-		synced = append(synced, gid)
-		mu.Unlock()
-	})
+		var mu sync.Mutex
+		var synced []snowflake.ID
+		h := onGuildJoin(f, func(_ context.Context, gid snowflake.ID) {
+			mu.Lock()
+			synced = append(synced, gid)
+			mu.Unlock()
+		})
 
-	guildID := snowflake.ID(42)
-	fireGuildJoin(h, guildID)
+		guildID := snowflake.ID(42)
+		fireGuildJoin(h, guildID)
+		synctest.Wait()
 
-	waitFor(t, func() bool {
 		mu.Lock()
 		defer mu.Unlock()
-		return len(synced) == 1
-	}, "syncGuildCommands")
-
-	mu.Lock()
-	defer mu.Unlock()
-	if synced[0] != guildID {
-		t.Errorf("synced guild: want %s got %s", guildID, synced[0])
-	}
+		if !slices.Equal(synced, []snowflake.ID{guildID}) {
+			t.Errorf("synced guilds: want [%s] got %v", guildID, synced)
+		}
+	})
 }
 
 // The E2E harness passes a nil syncer; seeding must still run.
 func TestOnGuildJoin_NilSyncerStillSeeds(t *testing.T) {
 	t.Parallel()
-	f := &fakeManager{}
-	h := onGuildJoin(f, nil)
+	synctest.Test(t, func(t *testing.T) {
+		f := &fakeManager{}
+		h := onGuildJoin(f, nil)
 
-	fireGuildJoin(h, snowflake.ID(7))
+		fireGuildJoin(h, snowflake.ID(7))
+		synctest.Wait()
 
-	waitFor(t, func() bool { return len(f.snapshotCalls().seedCalls) == 1 }, "SeedExistingSpeakers")
+		if n := len(f.snapshotCalls().seedCalls); n != 1 {
+			t.Errorf("SeedExistingSpeakers called %d times, want 1", n)
+		}
+	})
 }
 
 // READY seeds every guild it lists, until the gateway re-identifies so often

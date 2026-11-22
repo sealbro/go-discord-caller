@@ -4,7 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/discord"
@@ -138,49 +138,47 @@ func TestJoinSpanRecordsEachHandshakeStep(t *testing.T) {
 // The case the events exist for: Discord answers the join but never assigns a
 // voice server, so the handshake hangs until Join's own timeout.
 func TestJoinSpanShowsWhereAHungHandshakeStopped(t *testing.T) {
-	const (
-		botID     = snowflake.ID(711)
-		otherBot  = snowflake.ID(712)
-		guildID   = snowflake.ID(713)
-		channelID = snowflake.ID(714)
-	)
-	listeners := VoiceJoinTraceListeners(botID)
-	ch := channelID
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			botID     = snowflake.ID(711)
+			otherBot  = snowflake.ID(712)
+			guildID   = snowflake.ID(713)
+			channelID = snowflake.ID(714)
+		)
+		listeners := VoiceJoinTraceListeners(botID)
+		ch := channelID
 
-	conn := &scriptedConn{handshake: func() bool {
-		dispatch(listeners, voiceStateUpdate(otherBot, guildID, &ch))
-		dispatch(listeners, voiceStateUpdate(botID, guildID, &ch))
-		dispatch(listeners, voiceServerUpdate(guildID, nil))
-		return false
-	}}
-	gv := NewGuildVoice(&scriptedVoiceManager{conn: conn}, channelID).ForBot(botID)
-	gv.joinTimeout = 50 * time.Millisecond
-	gv.retryCleanupTimeout = 50 * time.Millisecond
-	gv.retryTimeout = 50 * time.Millisecond
-	gv.cleanupTimeout = 50 * time.Millisecond
+		conn := &scriptedConn{handshake: func() bool {
+			dispatch(listeners, voiceStateUpdate(otherBot, guildID, &ch))
+			dispatch(listeners, voiceStateUpdate(botID, guildID, &ch))
+			dispatch(listeners, voiceServerUpdate(guildID, nil))
+			return false
+		}}
+		gv := NewGuildVoice(&scriptedVoiceManager{conn: conn}, channelID).ForBot(botID)
 
-	evs, err := joinWithSpan(t, gv, guildID)
-	if err == nil {
-		t.Fatal("Join succeeded on a handshake that never completed")
-	}
+		evs, err := joinWithSpan(t, gv, guildID)
+		if err == nil {
+			t.Fatal("Join succeeded on a handshake that never completed")
+		}
 
-	want := []string{"voice.state.update", "voice.server.update", "voice.join.retry", "voice.state.update", "voice.server.update"}
-	if got := eventNames(evs); !slices.Equal(got, want) {
-		t.Fatalf("span events = %v, want %v", got, want)
-	}
-	if v, _ := eventAttr(evs, "voice.server.update", "voice.endpoint.assigned"); v.AsBool() {
-		t.Error("voice.endpoint.assigned = true for a null endpoint")
-	}
-	if _, ok := eventAttr(evs, "voice.server.update", "voice.region"); ok {
-		t.Error("voice.region recorded without an endpoint")
-	}
+		want := []string{"voice.state.update", "voice.server.update", "voice.join.retry", "voice.state.update", "voice.server.update"}
+		if got := eventNames(evs); !slices.Equal(got, want) {
+			t.Fatalf("span events = %v, want %v", got, want)
+		}
+		if v, _ := eventAttr(evs, "voice.server.update", "voice.endpoint.assigned"); v.AsBool() {
+			t.Error("voice.endpoint.assigned = true for a null endpoint")
+		}
+		if _, ok := eventAttr(evs, "voice.server.update", "voice.region"); ok {
+			t.Error("voice.region recorded without an endpoint")
+		}
 
-	// A step that lands after Join gave up belongs to no join.
-	defaultJoinTraces.voiceOp(botID, guildID, voice.OpcodeReady)
-	defaultJoinTraces.mu.Lock()
-	_, still := defaultJoinTraces.spans[joinKey{botID, guildID}]
-	defaultJoinTraces.mu.Unlock()
-	if still {
-		t.Error("join trace still registered after Join returned")
-	}
+		// A step that lands after Join gave up belongs to no join.
+		defaultJoinTraces.voiceOp(botID, guildID, voice.OpcodeReady)
+		defaultJoinTraces.mu.Lock()
+		_, still := defaultJoinTraces.spans[joinKey{botID, guildID}]
+		defaultJoinTraces.mu.Unlock()
+		if still {
+			t.Error("join trace still registered after Join returned")
+		}
+	})
 }

@@ -292,8 +292,8 @@ type Router struct {
 }
 
 // New constructs a router from the topology graph. Takes ownership of the
-// slices (does not copy). roleID is captured at session start; if the
-// /bind-role guard is bypassed the value stays stable for the session lifetime.
+// slices (does not copy). roleID is captured at session start and stays fixed
+// for the session, even if the capture role changes before the raid ends.
 func New(guildID, roleID snowflake.ID, enumerator VoiceProbe, sources []*SourceSlot, destinations []*DestSlot) *Router {
 	r := &Router{
 		guildID:        guildID,

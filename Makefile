@@ -70,7 +70,7 @@ test-stress:
 
 test:
 	@start=$$(date +%s); \
-	$(MAKE) --no-print-directory test-unit test-integration && \
+	$(MAKE) --no-print-directory -j2 test-unit test-integration && \
 	echo "mode: atomic" > combined.out && \
 	grep -h -v "^mode:" unit.out coverage.out >> combined.out && \
 	go tool cover -func=combined.out; \

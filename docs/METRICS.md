@@ -44,10 +44,9 @@ All instruments carry the resource attribute `service.name="go-discord-caller"`.
 | `gdc.discord.guild`  | ObservableGauge | `gdc_discord_guild`  | `guild_id`, `guild_name` | One series per guild the owner bot is in; the value is the number of bots (the owner and its registered speakers) in it, so at least `1`. Dashboards join on it for `guild_name`. From `internal/manager/service.go`. |
 | `gdc.voice.callers`  | ObservableUpDownCounter | `gdc_voice_callers`  | `guild_id`, `channel_id` | Non-bot users with the caller role currently in a voice channel the guild's active raid captures — the owner's channel on a host raid or a guest raid in a caller mode, plus the speakers' channels in modes where speakers capture — recounted from the owner bot's cache on each collection; channels with none are absent. From `internal/manager/service.go`. |
 | `gdc.command.started.total` | Counter | `gdc_command_started_total` | `command`, `guild_id` ⚠️ | Slash command invocations **entering** the handler. Recorded before the handler runs, so a handler that never returns is still counted. From `internal/bot/middleware.go`. |
-| `gdc.command.total`  | Counter         | `gdc_command_total`  | `command`, `guild_id` ⚠️ | Slash command invocations that **completed**. A sustained `gdc_command_started_total - gdc_command_total` means handlers went in and never came out. From `internal/bot/middleware.go`. |
-| `gdc.command.duration` | Histogram (`s`) | `gdc_command_duration_seconds` (`_bucket`/`_sum`/`_count`) | `command`, `guild_id` ⚠️ | Slash command execution duration. Buckets (s): 1, 3, 5, with 3 s being Discord's acknowledgement deadline. From `internal/bot/middleware.go`. |
+| `gdc.command.duration` | Histogram (`s`) | `gdc_command_duration_seconds` (`_bucket`/`_sum`/`_count`) | `command`, `guild_id` ⚠️ | Slash command execution duration. Buckets (s): 1, 3, 5, with 3 s being Discord's acknowledgement deadline. `_count` is the number of invocations that **completed**; a sustained `gdc_command_started_total - gdc_command_duration_seconds_count` means handlers went in and never came out. From `internal/bot/middleware.go`. |
 
-> ⚠️ The three `gdc.command.*` instruments label the guild as `guild.id` (dotted)
+> ⚠️ The two `gdc.command.*` instruments label the guild as `guild.id` (dotted)
 > in code — see `RecordCommand`. The OTLP→Prometheus translation rewrites this
 > to `guild_id`, so dashboards still query `guild_id`, but the attribute is
 > inconsistent with the `guild_id` used by every other instrument. Worth

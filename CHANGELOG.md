@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Slash commands registered for the whole app**: the commands are now global instead of per server, so the Discord app directory can list them, and they no longer appear in DMs with the bot. A change to a command's text may take a while to reach every server.
 - **`gdc_bot_online` merged into `gdc_discord_guild`**: the guild metric's value is now the server's bot count instead of `1`, and `gdc_bot_online` is gone; read the count from `gdc_discord_guild`.
+- **`gdc_command_total` removed**: it always equalled `gdc_command_duration_seconds_count`; use that for completed commands.
 - **godave from upstream**: the godave binding now comes from its own master instead of a fork, since the fix the fork carried has been merged there.
 
 ### Fixed

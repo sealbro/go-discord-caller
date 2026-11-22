@@ -1524,7 +1524,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum(rate(gdc_command_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "expr": "sum(rate(gdc_command_duration_seconds_count{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "Cmds/s",
                         "range": true
@@ -3169,174 +3169,6 @@
           }
         }
       },
-      "panel-8": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum(rate(gdc_voice_session_start_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "instant": false,
-                        "legendFormat": "Starts/s",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum(rate(gdc_voice_session_stop_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "instant": false,
-                        "legendFormat": "Stops/s",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "B"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "",
-          "id": 8,
-          "links": [],
-          "title": "Session Start / Stop Rate",
-          "vizConfig": {
-            "group": "timeseries",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "color": {
-                    "mode": "palette-classic"
-                  },
-                  "custom": {
-                    "axisBorderShow": false,
-                    "axisCenteredZero": false,
-                    "axisColorMode": "text",
-                    "axisLabel": "",
-                    "axisPlacement": "auto",
-                    "barAlignment": 0,
-                    "barWidthFactor": 0.6,
-                    "drawStyle": "line",
-                    "fillOpacity": 10,
-                    "gradientMode": "none",
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "insertNulls": false,
-                    "lineInterpolation": "smooth",
-                    "lineWidth": 2,
-                    "pointSize": 5,
-                    "scaleDistribution": {
-                      "type": "linear"
-                    },
-                    "showPoints": "auto",
-                    "showValues": false,
-                    "spanNulls": false,
-                    "stacking": {
-                      "group": "A",
-                      "mode": "none"
-                    },
-                    "thresholdsStyle": {
-                      "mode": "off"
-                    }
-                  },
-                  "min": 0,
-                  "thresholds": {
-                    "mode": "absolute",
-                    "steps": [
-                      {
-                        "color": "green",
-                        "value": 0
-                      },
-                      {
-                        "color": "red",
-                        "value": 80
-                      }
-                    ]
-                  },
-                  "unit": "reqps"
-                },
-                "overrides": [
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "Starts/s"
-                    },
-                    "properties": [
-                      {
-                        "id": "color",
-                        "value": {
-                          "fixedColor": "green",
-                          "mode": "fixed"
-                        }
-                      }
-                    ]
-                  },
-                  {
-                    "matcher": {
-                      "id": "byName",
-                      "options": "Stops/s"
-                    },
-                    "properties": [
-                      {
-                        "id": "color",
-                        "value": {
-                          "fixedColor": "red",
-                          "mode": "fixed"
-                        }
-                      }
-                    ]
-                  }
-                ]
-              },
-              "options": {
-                "annotations": {
-                  "clustering": -1,
-                  "multiLane": false
-                },
-                "legend": {
-                  "calcs": [
-                    "sum"
-                  ],
-                  "displayMode": "list",
-                  "placement": "bottom",
-                  "showLegend": true
-                },
-                "tooltip": {
-                  "hideZeros": false,
-                  "mode": "multi",
-                  "sort": "desc"
-                }
-              }
-            },
-            "version": "13.1.0-24779284961"
-          }
-        }
-      },
       "panel-9": {
         "kind": "Panel",
         "spec": {
@@ -3352,7 +3184,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (command) (rate(gdc_command_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
+                        "expr": "sum by (command) (rate(gdc_command_duration_seconds_count{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
                         "instant": false,
                         "legendFormat": "{{command}}",
                         "range": true
@@ -5392,7 +5224,7 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "sum by (command) (gdc_command_started_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) - sum by (command) (gdc_command_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
+                        "expr": "sum by (command) (gdc_command_started_total{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) - sum by (command) (gdc_command_duration_seconds_count{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
                         "instant": false,
                         "legendFormat": "{{command}}",
                         "range": true
@@ -8355,19 +8187,6 @@
             "spec": {
               "element": {
                 "kind": "ElementReference",
-                "name": "panel-8"
-              },
-              "height": 8,
-              "width": 5,
-              "x": 14,
-              "y": 61
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
                 "name": "panel-12"
               },
               "height": 8,
@@ -8462,7 +8281,7 @@
                 "name": "panel-11"
               },
               "height": 8,
-              "width": 4,
+              "width": 6,
               "x": 0,
               "y": 61
             }
@@ -8475,8 +8294,8 @@
                 "name": "panel-9"
               },
               "height": 8,
-              "width": 5,
-              "x": 4,
+              "width": 6,
+              "x": 6,
               "y": 61
             }
           },
@@ -8488,8 +8307,8 @@
                 "name": "panel-10"
               },
               "height": 8,
-              "width": 5,
-              "x": 9,
+              "width": 6,
+              "x": 12,
               "y": 61
             }
           },
@@ -8990,9 +8809,9 @@
           {
             "kind": "GridLayoutItem",
             "spec": {
-              "x": 19,
+              "x": 18,
               "y": 61,
-              "width": 5,
+              "width": 6,
               "height": 8,
               "element": {
                 "kind": "ElementReference",

@@ -14,7 +14,6 @@ type BotMetrics struct {
 	guild        metric.Int64ObservableGauge
 	voiceCallers metric.Int64ObservableUpDownCounter
 	cmdStarted   metric.Int64Counter
-	cmdCount     metric.Int64Counter
 	cmdDuration  metric.Float64Histogram
 }
 
@@ -31,17 +30,12 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if b.cmdStarted, err = meter.Int64Counter("gdc.command.started.total",
-		metric.WithDescription("Slash command invocations entering the handler; exceeds gdc.command.total by the number still running."),
-	); err != nil {
-		return
-	}
-	if b.cmdCount, err = meter.Int64Counter("gdc.command.total",
-		metric.WithDescription("Slash command invocations that completed"),
+		metric.WithDescription("Slash command invocations entering the handler; exceeds the gdc.command.duration count by the number still running."),
 	); err != nil {
 		return
 	}
 	if b.cmdDuration, err = meter.Float64Histogram("gdc.command.duration",
-		metric.WithDescription("Slash command execution duration in seconds"),
+		metric.WithDescription("Slash command execution duration in seconds; its count is the number of invocations that completed."),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(1, 3, 5),
 	); err != nil {
@@ -96,9 +90,7 @@ func (b *BotMetrics) RecordCommandStart(ctx context.Context, command, guildID st
 
 // RecordCommand records slash command completion and duration for a command/guild pair.
 func (b *BotMetrics) RecordCommand(ctx context.Context, command, guildID string, durationSeconds float64) {
-	attrs := commandAttrs(command, guildID)
-	b.cmdCount.Add(ctx, 1, attrs)
-	b.cmdDuration.Record(ctx, durationSeconds, attrs)
+	b.cmdDuration.Record(ctx, durationSeconds, commandAttrs(command, guildID))
 }
 
 func commandAttrs(command, guildID string) metric.MeasurementOption {

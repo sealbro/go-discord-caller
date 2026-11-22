@@ -17,15 +17,18 @@ import (
 // per-locale Localizations map covers every other supported locale.
 func BuildCommands(bundle *i18n.Bundle) []discord.ApplicationCommandCreate {
 	def := bundle.For("", "")
+	guildOnly := []discord.InteractionContextType{discord.InteractionContextTypeGuild}
 
 	return []discord.ApplicationCommandCreate{
 		discord.SlashCommandCreate{
 			Name:                     "setup",
+			Contexts:                 guildOnly,
 			Description:              def.T("cmd.setup.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.setup.description"),
 		},
 		discord.SlashCommandCreate{
 			Name:                     "start",
+			Contexts:                 guildOnly,
 			Description:              def.T("cmd.start.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.start.description"),
 			Options: []discord.ApplicationCommandOption{
@@ -50,11 +53,13 @@ func BuildCommands(bundle *i18n.Bundle) []discord.ApplicationCommandCreate {
 		},
 		discord.SlashCommandCreate{
 			Name:                     "stop",
+			Contexts:                 guildOnly,
 			Description:              def.T("cmd.stop.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.stop.description"),
 		},
 		discord.SlashCommandCreate{
 			Name:                     "status",
+			Contexts:                 guildOnly,
 			Description:              def.T("cmd.status.description"),
 			DescriptionLocalizations: bundle.DescriptionLocalizations("cmd.status.description"),
 		},

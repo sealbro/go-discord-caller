@@ -65,6 +65,7 @@ type fakeVoiceConn struct {
 	openErr      error
 	open         func(context.Context) error // overrides openErr when set
 	onClose      func()
+	receiver     voice.OpusFrameReceiver
 }
 
 func (c *fakeVoiceConn) Open(ctx context.Context, _ snowflake.ID, _ bool, _ bool) error {
@@ -106,8 +107,18 @@ func (c *fakeVoiceConn) closeCount() int {
 func (c *fakeVoiceConn) ChannelID() *snowflake.ID                               { return &c.channelID }
 func (c *fakeVoiceConn) SetSpeaking(context.Context, voice.SpeakingFlags) error { return c.speakingErr }
 func (c *fakeVoiceConn) SetOpusFrameProvider(voice.OpusFrameProvider)           {}
-func (c *fakeVoiceConn) SetOpusFrameReceiver(voice.OpusFrameReceiver)           {}
-func (c *fakeVoiceConn) Gateway() voice.Gateway                                 { return nil }
+func (c *fakeVoiceConn) SetOpusFrameReceiver(r voice.OpusFrameReceiver) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.receiver = r
+}
+
+func (c *fakeVoiceConn) frameReceiver() voice.OpusFrameReceiver {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.receiver
+}
+func (c *fakeVoiceConn) Gateway() voice.Gateway { return nil }
 
 // fakeVoiceManager hands out one conn per bot, as disgo does: CreateConn for a
 // guild that already has a conn returns that same conn. Two concurrent raids in

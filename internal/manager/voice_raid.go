@@ -85,7 +85,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	defer m.trackStartupFilter(guestGuildID, allowUser)()
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
-	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Check, guestGm, raidStart)
+	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Admit, guestGm, raidStart)
 	if err != nil {
 		return guestMode, err
 	}
@@ -127,7 +127,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceProvider(guestGm.Provider())
 		if guestMode.WithCapture() {
 			m.prefetchChannelMembers(ownerCtx, conn, m.ownerBotID, guestGuildID)
-			ownerSetup.WithVoiceReceiver(allowUser.Check, guestGm.Receiver())
+			ownerSetup.WithVoiceReceiver(allowUser.Admit, guestGm.Receiver())
 		}
 		ownerChOut = make(chan []byte, opus.AudioChanBuf)
 		applyCtx, endApply := startPhase(ownerCtx, "voice.conn.apply", botAttr(m.ownerBotID))
@@ -140,7 +140,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		} else {
 			ownerCleanup = cleanup
 			ownerHandle = handle
-			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, handle, allowUser.Check))
+			m.storeApplier(guestGuildID, m.ownerBotID, m.buildApplier(guestGuildID, m.ownerBotID, ownerChOut, handle, allowUser.Admit))
 			m.watchVoiceReady(guestGuildID, m.ownerBotID, conn)
 			// Reconcile the owner exactly as joinSpeakers does for speakers.
 			// Listener modes build no router (GuestListenerPipeline), so the
@@ -348,7 +348,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	allowUser := m.buildAllowUserFilter(guildID)
 	defer m.trackStartupFilter(guildID, allowUser)()
 	undo.reconnect = func() { m.clearReconnectState(guildID) }
-	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Check, gm, raidStart)
+	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Admit, gm, raidStart)
 	if err != nil {
 		return "", err
 	}
@@ -373,7 +373,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 	undo.leaveOwner = func() { leaveWithoutCancel(ctx, ov, guildID) }
 	m.prefetchChannelMembers(ownerCtx, conn, m.ownerBotID, guildID)
-	ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceReceiver(allowUser.Check, gm.Receiver())
+	ownerSetup := NewVoiceConnSetup(m.ownerBotID).WithVoiceReceiver(allowUser.Admit, gm.Receiver())
 	// In multi-channel capture modes the owner bot must also play back the
 	// mixed audio from other channels into its own channel (mix-minus).
 	var chOwnerOut chan []byte
@@ -389,7 +389,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		return "", fmt.Errorf("start raid: setup owner capture: %w", err)
 	}
 	undo.owner = ownerCleanup
-	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Check))
+	m.storeApplier(guildID, m.ownerBotID, m.buildApplier(guildID, m.ownerBotID, chOwnerOut, ownerHandle, allowUser.Admit))
 	m.watchVoiceReady(guildID, m.ownerBotID, conn)
 	// The host owner bot always captures, so it starts hearing; the controller
 	// deafens it if its channel ever empties of role-bearing callers. Reconcile

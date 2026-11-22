@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -122,33 +123,36 @@ func (m *Service) clearActiveRouter(guildID snowflake.ID) {
 	m.activeRouters.Store(&next)
 }
 
-// SetSessionIdleTimeout configures the duration after which a session with
-// no caller in any of its voice channels is auto-stopped.
+// SetSessionIdleTimeout configures the duration after which a session with no
+// caller speaking to a listener in a speaker channel is auto-stopped.
 // Pass 0 to disable. Call once at startup, before any session is started.
 func (m *Service) SetSessionIdleTimeout(d time.Duration) {
 	m.sessionIdleTimeout = d
 }
 
-// startSessionIdleWatcher launches a goroutine that stops the session once no
-// voice channel involved in it has had a caller continuously for
-// m.sessionIdleTimeout. Safe to call for any session — it no-ops when the
+// startSessionIdleWatcher launches a goroutine that stops the session once it
+// has had no caller speaking to a listener for m.sessionIdleTimeout. Safe to call for any session — it no-ops when the
 // timeout is disabled or the session has no bound channels to watch.
 func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc context.CancelFunc, session *guild.Session) {
 	if m.sessionIdleTimeout <= 0 {
 		return
 	}
-	channels := m.sessionChannels(session)
+	channels, speakerChannels := m.sessionChannels(session)
 	if len(channels) == 0 {
 		return
 	}
 	w := &sessionPresenceWatcher{
-		guildID:     session.GuildID,
-		channels:    channels,
-		probe:       &cacheVoiceProbe{svc: m, guildID: session.GuildID},
-		callerRole:  func() snowflake.ID { return m.callerRoleID(session.GuildID) },
-		stop:        func() { m.stopIdleSession(session, cancelFunc) },
-		idleTimeout: m.sessionIdleTimeout,
-		sharesRelay: func() bool { return m.sharesRelay(session.GuildID) },
+		guildID:          session.GuildID,
+		channels:         channels,
+		listenerChannels: speakerChannels,
+		probe:            &cacheVoiceProbe{svc: m, guildID: session.GuildID},
+		callerRole:       func() snowflake.ID { return m.callerRoleID(session.GuildID) },
+		stop:             func() { m.stopIdleSession(session, cancelFunc) },
+		idleTimeout:      m.sessionIdleTimeout,
+		sharesRelay:      func() bool { return m.sharesRelay(session.GuildID) },
+	}
+	if filter, ok := session.AllowFilter.(*AllowFilter); ok {
+		w.lastHeard = filter.LastAdmitted
 	}
 	go w.Run(ctx)
 }
@@ -182,16 +186,18 @@ func (m *Service) stopIdleSession(session *guild.Session, cancelFunc context.Can
 }
 
 // sessionChannels returns the deduplicated set of voice channels to watch for a
-// session: the owner bot's bound channel plus every session speaker's bound
-// channel. These are the channels users connect to; if all of them are empty,
-// nobody is using the session.
-func (m *Service) sessionChannels(session *guild.Session) []snowflake.ID {
+// session — the owner bot's bound channel plus every session speaker's bound
+// channel — and, among them, the ones a bot plays audio into: every speaker's,
+// and the owner's in capture modes, where it plays the other channels back.
+func (m *Service) sessionChannels(session *guild.Session) (channels, listenerChannels []snowflake.ID) {
 	guildID := session.GuildID
 	seen := make(map[snowflake.ID]struct{})
-	var channels []snowflake.ID
-	add := func(id snowflake.ID, ok bool) {
+	add := func(id snowflake.ID, ok, playedInto bool) {
 		if !ok || id == 0 {
 			return
+		}
+		if playedInto && !slices.Contains(listenerChannels, id) {
+			listenerChannels = append(listenerChannels, id)
 		}
 		if _, dup := seen[id]; dup {
 			return
@@ -200,12 +206,12 @@ func (m *Service) sessionChannels(session *guild.Session) []snowflake.ID {
 		channels = append(channels, id)
 	}
 	ownerCh, ok := m.store.GetBoundChannel(guildID, m.ownerBotID)
-	add(ownerCh, ok)
+	add(ownerCh, ok, session.Mode.WithCapture())
 	for _, sp := range session.Speakers {
 		chID, ok := m.store.GetBoundChannel(guildID, sp.ID)
-		add(chID, ok)
+		add(chID, ok, true)
 	}
-	return channels
+	return channels, listenerChannels
 }
 
 // StartMetrics registers OTel observable metric callbacks.

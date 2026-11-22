@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **`gdc_opus_allow_user_duration_milliseconds` removed**: the caller-role check it timed runs once per member per raid and always took under 1 ms.
 
+### Fixed
+- **Idle raids kept running while callers sat in voice without speaking**: a raid now stops after `SESSION_IDLE_TIMEOUT` when no caller speaks, even if callers stay in the channel.
+- **A raid with nobody in the speaker channels stayed up**: someone sitting in the caller's own channel, or a second caller there, no longer counts as the audience; only people in a channel a bot plays into keep the raid alive.
+
 ## [0.18.0] - 2026-11-22
 
 ### Changed

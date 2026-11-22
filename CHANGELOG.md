@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`gdc_opus_allow_user_duration_milliseconds` removed**: the caller-role check it timed runs once per member per raid and always took under 1 ms.
+
 ## [0.18.0] - 2026-11-22
 
 ### Changed

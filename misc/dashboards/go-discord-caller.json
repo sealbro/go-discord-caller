@@ -1345,9 +1345,9 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max_over_time(gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"})), 1)",
+                        "expr": "(max_over_time(gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]) * on(guild_id, origin_prometheus) group_left(mode) max by (guild_id, origin_prometheus, mode) (gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} == 1)) * on(guild_id, origin_prometheus) group_left(guild_name) clamp_max(topk by (guild_id, origin_prometheus) (1, timestamp(gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\"})), 1)",
                         "instant": false,
-                        "legendFormat": "{{guild_name}}",
+                        "legendFormat": "{{guild_name}} · {{mode}}",
                         "range": true
                       },
                       "version": "v0"
@@ -1360,7 +1360,7 @@
               "transformations": []
             }
           },
-          "description": "Bots (the owner bot and speaker bots) that joined each guild's running raid.",
+          "description": "Bots (the owner bot and speaker bots) that joined each guild's running raid, labelled with the raid's mode.",
           "id": 19,
           "links": [],
           "title": "🤖 Bots in Raid",

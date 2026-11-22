@@ -127,7 +127,7 @@ func TestSessionIdle(t *testing.T) {
 // while staying a caller and a listener.
 func TestCacheVoiceProbe_UnmutedCallersSkipMutedMembers(t *testing.T) {
 	t.Parallel()
-	h := newBotOnlineHarness(t)
+	h := newGuildMetricHarness(t)
 	const channel, role = snowflake.ID(900), snowflake.ID(1)
 	caches := h.client.Caches
 

@@ -613,10 +613,35 @@ A session ends in one of five ways. Only the idle stop is a timeout.
 | Cause | Where | Notes |
 |-------|-------|-------|
 | `/stop` | `bot/handlers_voice.go:handleStopVoiceRaid` → `Service.StopVoiceRaid` | |
-| Idle stop | `manager/session_idle.go:sessionPresenceWatcher.Run` → `Service.stopIdleSession` | Same teardown as `/stop`, so the owner's voice connection is released; logs `session idle: no one speaking to a listener, stopping voice raid` |
+| Idle stop | `manager/session_idle.go:sessionPresenceWatcher.Run` → `Service.stopIdleSession` | Same teardown as `/stop`, so the owner's voice connection is released; logs `session idle: no caller speaking to a listener, stopping voice raid` |
 | Host ended the relay | `manager/voice_raid.go` (guest goroutine waits on `allySession.Done()`) | Guests only |
 | Bot removed from the server | `bot/handlers.go` → `Service.ForgetGuild` → `StopVoiceRaid` | |
 | Service shutdown | `Service.Shutdown` stops every active guild | |
+
+### When a raid ends
+
+A raid ends when a manager runs `/stop`, or by itself in these cases:
+
+| Situation                                                                                   | Result                                                        |
+|---------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| No member with the capture role in any session channel for `SESSION_IDLE_TIMEOUT` (10 min)  | Raid stops                                                    |
+| Members with the capture role are there, but every one of them is muted (self or server)    | Raid stops after the same timeout: a muted caller sends nothing |
+| Callers are there and unmuted, but nobody speaks                                            | Raid stops after the same timeout: Discord sends nothing while a member is quiet |
+| Callers are there, but nobody is in a speaker's channel to hear them                        | Raid stops after the same timeout                             |
+| Only members without the capture role, or only bots, are in the channels                    | Raid stops after the same timeout                             |
+| Someone with the caller role is in a voice channel without any of the bots                 | Not counted; the raid stops after the same timeout            |
+| The host server of a relay runs `/stop`                                                     | Every guest session is torn down                              |
+| The bot is removed from the server                                                          | Its raid is stopped                                           |
+| The service shuts down                                                                      | Every raid is stopped                                         |
+
+What keeps a raid alive is a **caller speaking with at least one human in a speaker's channel** to hear them. A member sitting in the caller's own channel hears the caller without the bot, so they do not count; nor do bots. In modes where speaker channels capture too, a caller in one speaker channel counts as the audience for a caller elsewhere, and the owner's channel counts as well, since the owner plays the other channels back into it.
+
+- **Shared relays use a simpler rule.** While another server is attached (you host with guests, or you joined as a guest), any caller present keeps the raid alive, muted or silent, because the other server's members cannot be seen from here.
+- **Timing.** The bot checks once a minute, so a raid stops 10 to 11 minutes after the last check that found a caller speaking to an audience. A check counts the caller as speaking when their audio arrived in the minute before it. Any check that finds one starts the count over, and someone who joins and leaves between two checks is never seen.
+- **Which channels.** The owner's channel and each speaker's bound channel, as bound when the raid started.
+- **Disabling.** `SESSION_IDLE_TIMEOUT=0` turns the idle stop off; a manager then has to run `/stop`.
+
+Audio pausing is not an end: a channel with no listeners, or one whose mixer gets no audio for 5 seconds, is paused and resumes by itself, and the raid keeps running. [The idle watcher](#the-idle-watcher) below has how the idle stop works.
 
 ### The idle watcher
 
@@ -624,24 +649,32 @@ A session ends in one of five ways. Only the idle stop is a timeout.
 
 | Session | `busy()` is true when |
 |---------|-----------------------|
-| Not shared with another server | an unmuted caller exists in a watched channel **and** at least two humans are in the watched channels (`hasAudience`) |
-| Shared (hosting with guests attached, or a guest; `Service.sharesRelay`) | any caller is in a watched channel, muted or not (`hasCaller`) |
+| Not shared with another server | a caller's audio arrived within the last poll interval (`spokeRecently`) **and** an unmuted caller in a watched channel has a human in a listener channel other than their own (`hasAudience`) |
+| Shared (hosting with guests attached, or a guest; `Service.sharesRelay`) | any caller is in a watched channel, muted or silent (`hasCaller`) |
 
 The first poll that is not busy records the time; a busy poll clears it; the session stops on the first not-busy poll at least `idleTimeout` after that, so 10 to 11 minutes with the default. A caller is a non-bot member holding the bound caller role (none bound means nobody counts), and muted means self-mute or server mute in the voice state. Muted members still count as humans for `hasAudience`: someone muted can still hear.
 
-The humans counted are those in the watched channels only: the owner's bound channel and each speaker's, read once when the session starts. Everything comes from the owner bot's cache (`cacheVoiceProbe.EnumerateCallers`, `EnumerateUnmutedCallers`, `Listeners`), so a member the cache holds without roles does not count as a caller.
+**Speech.** Discord sends no packets while a member is quiet, so presence alone cannot tell a talking raid from callers left sitting in voice. Every capturing receiver filters frames through the session's `AllowFilter.Admit`, which records when it last let a caller's frame through; the watcher reads that as `lastHeard`. A session that never hears a caller stops a timeout after its first poll.
 
-`hasAudience` errs toward keeping a session alive: another human in the caller's own channel counts as an audience even though the relay does not play a channel back to itself.
+**Listener channels** are the channels a bot plays into (`Service.sessionChannels`): every speaker's bound channel, plus the owner's in capture modes (`RaidMode.WithCapture`), where the owner plays the other channels back. A human in the caller's own channel hears the caller directly, so the relay does not play a channel back to itself and they do not count. Callers are looked for in all watched channels: the owner's bound channel and each speaker's, read once when the session starts. Everything comes from the owner bot's cache (`cacheVoiceProbe.EnumerateCallers`, `EnumerateUnmutedCallers`, `Listeners`), so a member the cache holds without roles does not count as a caller.
+
+`hasAudience` still errs toward keeping a session alive in the star mode: a caller in one speaker channel counts a listener in another speaker channel, though star only plays the owner's channel into speakers.
 
 | Case | Stops | Test |
 |------|-------|------|
-| No caller, other members present | yes | `TestSessionIdle_StopsWhenOnlyNonCallersAreInChannel` |
-| One unmuted caller, alone | yes | `TestSessionIdle_StopsWhenTheOnlyCallerHasNobodyToHear` |
-| Unmuted caller with a listener | no | `TestSessionIdle_KeptAliveWhileACallerHasAListener` |
-| Every caller muted | yes | `TestSessionIdle_StopsWhenEveryCallerIsMuted` |
-| One caller unmuted, one muted | no | `TestSessionIdle_KeptAliveWhileOneCallerIsUnmuted` |
-| Shared relay, caller muted and alone | no | `TestSessionIdle_ASharedRelayKeepsTheCallerRule` |
-| Shared relay, no caller | yes | `TestSessionIdle_ASharedRelayStillStopsWithoutACaller` |
+| No caller, other members present | yes | `TestSessionIdle` |
+| Speaking caller with a listener in a speaker channel | no | `TestSessionIdle` |
+| One unmuted caller, alone | yes | `TestSessionIdle` |
+| Callers and others together, speaker channels empty | yes | `TestSessionIdle` |
+| Callers and listeners present, nobody speaks | yes | `TestSessionIdle` |
+| Every caller muted | yes | `TestSessionIdle` |
+| One caller unmuted, one muted | no | `TestSessionIdle` |
+| Callers in two speaker channels hear each other | no | `TestSessionIdle` |
+| Shared relay, caller muted, alone and silent | no | `TestSessionIdle` |
+| Shared relay, no caller | yes | `TestSessionIdle` |
+| The clock starts when callers fall quiet | n/a | `TestSessionIdle_ClockStartsWhenCallersFallQuiet` |
+| A caller's frame through the owner's receiver counts as speech | n/a | `TestStartVoiceRaid_CallerFramesCountAsSpeech` |
+| The owner's channel is a listener channel only in capture modes | n/a | `TestSessionChannels_ListenerChannelsFollowPlayback` |
 | Self- and server-muted members leave the unmuted list | n/a | `TestCacheVoiceProbe_UnmutedCallersSkipMutedMembers` |
 
 Not an end: the 5 second mixer drain and the router's pause for a channel without listeners (next section) only silence a channel; the session keeps running and the idle watcher is unaffected.

@@ -30,15 +30,16 @@ type occupancyProbe interface {
 const idleStopTimeout = 30 * time.Second
 
 // sessionPresenceWatcher stops a voice raid session once it has gone idleTimeout
-// without anything to relay: no unmuted role-bearing caller in a watched voice
-// channel, or no one but that caller there to hear them.
+// without anything to relay: no caller speaking, or no one in a speaker channel
+// to hear them.
 //
 // Without a caller nothing is captured, so every speaker is deafened and nobody
-// is relayed; a muted caller sends nothing; and a caller alone in the channels is
-// heard by no one. Other members do not keep a session alive by themselves.
+// is relayed; a muted or silent caller sends nothing; and only people in the
+// speakers' channels hear the bot — anyone in the caller's own channel hears the
+// caller directly. Other members do not keep a session alive by themselves.
 //
 // A session that shares its audio with other servers is judged on callers alone,
-// muted or not: their members are out of this bot's sight, so who is speaking and
+// muted or silent: their members are out of this bot's sight, so who is speaking and
 // who is listening there cannot be told from here.
 type sessionPresenceWatcher struct {
 	guildID  snowflake.ID
@@ -54,6 +55,11 @@ type sessionPresenceWatcher struct {
 	// sharesRelay reports whether other servers are attached to this session.
 	// Nil means none.
 	sharesRelay func() bool
+	// listenerChannels are the channels a bot plays audio into.
+	listenerChannels []snowflake.ID
+	// lastHeard returns when a caller's audio last reached the session. Nil
+	// means unknown, and speech is assumed.
+	lastHeard func() time.Time
 }
 
 // hasCaller reports whether a role-bearing caller is in any watched channel.
@@ -64,30 +70,46 @@ func (w *sessionPresenceWatcher) hasCaller() bool {
 	})
 }
 
-// hasAudience reports whether an unmuted caller has someone else to be heard by
-// in the watched channels. The someone is any other human: one in the caller's
-// own channel counts too, so the answer errs toward keeping a session alive.
+// hasAudience reports whether an unmuted caller has someone in a listener
+// channel other than their own to hear them through the bot. A caller in a
+// speaker channel counts for the callers elsewhere.
 func (w *sessionPresenceWatcher) hasAudience() bool {
 	role := w.callerRole()
-	var speakers, humans int
 	for _, ch := range w.channels {
-		speakers += len(w.probe.EnumerateUnmutedCallers(ch, role))
-		humans += len(w.probe.Listeners(ch))
+		if len(w.probe.EnumerateUnmutedCallers(ch, role)) == 0 {
+			continue
+		}
+		heard := slices.ContainsFunc(w.listenerChannels, func(lc snowflake.ID) bool {
+			return lc != ch && len(w.probe.Listeners(lc)) > 0
+		})
+		if heard {
+			return true
+		}
 	}
-	return speakers > 0 && humans > 1
+	return false
+}
+
+// spokeRecently reports whether a caller's audio arrived within the last poll
+// interval. Discord sends nothing while a member is quiet, so callers who stay
+// in voice without speaking show up only here.
+func (w *sessionPresenceWatcher) spokeRecently(interval time.Duration) bool {
+	if w.lastHeard == nil {
+		return true
+	}
+	return time.Since(w.lastHeard()) < interval
 }
 
 // busy reports whether the session still has something to relay.
-func (w *sessionPresenceWatcher) busy() bool {
+func (w *sessionPresenceWatcher) busy(interval time.Duration) bool {
 	if w.sharesRelay != nil && w.sharesRelay() {
 		return w.hasCaller()
 	}
-	return w.hasAudience()
+	return w.spokeRecently(interval) && w.hasAudience()
 }
 
-// Run polls every sessionPresenceInterval until ctx is cancelled or until no
-// watched channel has had a caller continuously for w.idleTimeout — in which case
-// it stops the session and returns. No-op when idleTimeout <= 0 or no channels
+// Run polls every sessionPresenceInterval until ctx is cancelled or until the
+// session has had nothing to relay continuously for w.idleTimeout — in which
+// case it stops the session and returns. No-op when idleTimeout <= 0 or no channels
 // are provided.
 func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 	if w.idleTimeout <= 0 || len(w.channels) == 0 {
@@ -103,7 +125,7 @@ func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if w.busy() {
+			if w.busy(interval) {
 				emptySince = time.Time{}
 				continue
 			}
@@ -112,7 +134,7 @@ func (w *sessionPresenceWatcher) Run(ctx context.Context) {
 				continue
 			}
 			if time.Since(emptySince) >= w.idleTimeout {
-				slog.Info("session idle: no one speaking to a listener, stopping voice raid",
+				slog.Info("session idle: no caller speaking to a listener, stopping voice raid",
 					slog.String("guildID", w.guildID.String()),
 					slog.Duration("idleTimeout", w.idleTimeout),
 				)

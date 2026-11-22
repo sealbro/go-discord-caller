@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
@@ -24,6 +26,8 @@ type AllowFilter struct {
 	// nobody). Exposed via RoleID() so the auto-router can capture it at
 	// session start without a second store lookup.
 	roleID snowflake.ID
+	// lastAdmitted is the unix-nano time of the last frame Admit let through.
+	lastAdmitted atomic.Int64
 }
 
 // RoleID returns the caller role ID this filter was built for. Returns 0 when
@@ -42,6 +46,24 @@ func (f *AllowFilter) Check(userID snowflake.ID) bool {
 	result := f.fallback(userID)
 	f.allowed.Store(userID, result)
 	return result
+}
+
+// Admit is Check for a frame that has arrived: it also records the arrival.
+func (f *AllowFilter) Admit(userID snowflake.ID) bool {
+	if !f.Check(userID) {
+		return false
+	}
+	f.lastAdmitted.Store(time.Now().UnixNano())
+	return true
+}
+
+// LastAdmitted returns when Admit last let a frame through, or the zero time.
+func (f *AllowFilter) LastAdmitted() time.Time {
+	n := f.lastAdmitted.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }
 
 // Set stores an explicit allow decision for userID.

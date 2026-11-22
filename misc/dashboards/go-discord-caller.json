@@ -3461,25 +3461,6 @@
                       "group": "",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "max by (guild_id, origin_prometheus) (gdc_discord_guild{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
-                        "format": "table",
-                        "instant": true,
-                        "legendFormat": "Bots Active",
-                        "range": false
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "C"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
                         "expr": "label_replace(clamp_max(sum without (mode) (gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}), 1) * on(guild_id, origin_prometheus) group_left(session_mode_src) label_replace(gdc_session_mode{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"} == 1, \"session_mode_src\", \"$1\", \"mode\", \"(.*)\"), \"session_label\", \"Active ($1)\", \"session_mode_src\", \"(.*)\")",
                         "format": "table",
                         "instant": true,
@@ -3547,7 +3528,7 @@
                         "Time 3": true,
                         "Time 4": true,
                         "Time 5": true,
-                        "Value #A": true,
+                        "Value #A": false,
                         "Value #D": true,
                         "__name__ 1": true,
                         "__name__ 2": true,
@@ -3570,22 +3551,22 @@
                       "indexByName": {
                         "Time 1": 6,
                         "Value #B": 2,
-                        "Value #C": 3,
                         "Value #F": 4,
                         "guild_id": 7,
                         "guild_name": 0,
                         "origin_prometheus": 1,
-                        "session_label": 5
+                        "session_label": 5,
+                        "Value #A": 3
                       },
                       "renameByName": {
                         "Time 1": "Time",
                         "Value #B": "Speakers",
-                        "Value #C": "Bots Active",
                         "Value #F": "Callers",
                         "guild_id": "Guild ID",
                         "guild_name": "Guild",
                         "origin_prometheus": "Source",
-                        "session_label": "Active Session"
+                        "session_label": "Active Session",
+                        "Value #A": "Bots Active"
                       }
                     }
                   }

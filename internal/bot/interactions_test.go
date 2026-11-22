@@ -9,12 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/disgoorg/disgo/bot"
@@ -68,7 +68,7 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 	t.Helper()
 	followups := make(chan string, 4)
 	buttons := make(chan []string, 4)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	followUpAPI := roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Errorf("read follow-up: %v", err)
@@ -96,10 +96,13 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 		default:
 		}
 		followups <- msg.Content
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"id":"1","channel_id":"1"}`)
-	}))
-	t.Cleanup(srv.Close)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"id":"1","channel_id":"1"}`)),
+			Request:    r,
+		}, nil
+	})
 
 	h := NewCommandHandlers(m, newTestBotMetrics(t), i18n.MustBundle())
 	r := handler.New()
@@ -110,11 +113,32 @@ func newInteractionHarness(t *testing.T, m *fakeManager) *interactionHarness {
 		client: &bot.Client{
 			Caches: cache.New(cache.WithCaches(cache.FlagsAll)),
 			Logger: slog.New(slog.DiscardHandler),
-			Rest:   rest.New(rest.NewClient("", rest.WithURL(srv.URL))),
+			Rest: rest.New(rest.NewClient("",
+				rest.WithHTTPClient(&http.Client{Transport: followUpAPI}),
+				rest.WithRateLimiter(noRateLimit{}),
+			)),
 		},
 		followups: followups,
 		buttons:   buttons,
 	}
+}
+
+// roundTripFunc answers REST calls in memory, so a harness can run inside a
+// synctest bubble, where a real socket is never durably blocked.
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// noRateLimit stands in for disgo's rate limiter, whose cleanup goroutine
+// never exits and would outlive any bubble it was started in.
+type noRateLimit struct{}
+
+func (noRateLimit) MaxRetries() int                                    { return 0 }
+func (noRateLimit) Close(context.Context)                              {}
+func (noRateLimit) Reset()                                             {}
+func (noRateLimit) Wait(context.Context, *rest.CompiledEndpoint) error { return nil }
+func (noRateLimit) Unlock(*rest.CompiledEndpoint, *http.Response) error {
+	return nil
 }
 
 func (h *interactionHarness) dispatch(payload string) interactionResponse {
@@ -149,12 +173,17 @@ func (h *interactionHarness) followUp() string {
 	}
 }
 
+// noFollowUp fails if a follow-up was sent within a minute of the bubble's
+// clock, once every handler goroutine has settled. Call it only from inside a
+// synctest bubble.
 func (h *interactionHarness) noFollowUp() {
 	h.t.Helper()
+	time.Sleep(time.Minute)
+	synctest.Wait()
 	select {
 	case msg := <-h.followups:
 		h.t.Fatalf("unexpected follow-up: %q", msg)
-	case <-time.After(50 * time.Millisecond):
+	default:
 	}
 }
 
@@ -631,13 +660,15 @@ func failJoin(err error) func(guild.RaidMode, ally.Code) (guild.RaidMode, error)
 
 func TestStartCommandWhileRaidActive(t *testing.T) {
 	t.Parallel()
-	m := &fakeManager{statusFn: activeStatus}
-	h := newInteractionHarness(t, m)
-	wantEphemeral(t, h.dispatch(slashPayload(memberJSON(permManage), "start")), en.T("raid.already_active"))
-	h.noFollowUp()
-	if len(m.startModes) != 0 {
-		t.Errorf("StartVoiceRaid called %d times, want 0", len(m.startModes))
-	}
+	synctest.Test(t, func(t *testing.T) {
+		m := &fakeManager{statusFn: activeStatus}
+		h := newInteractionHarness(t, m)
+		wantEphemeral(t, h.dispatch(slashPayload(memberJSON(permManage), "start")), en.T("raid.already_active"))
+		h.noFollowUp()
+		if len(m.startModes) != 0 {
+			t.Errorf("StartVoiceRaid called %d times, want 0", len(m.startModes))
+		}
+	})
 }
 
 func TestStopCommandFollowUps(t *testing.T) {

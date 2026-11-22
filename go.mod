@@ -4,8 +4,8 @@ go 1.27.0
 
 require (
 	github.com/disgoorg/disgo v0.20.0
-	github.com/disgoorg/godave v0.3.1-0.20261118215854-c06abab601e2
-	github.com/disgoorg/godave/golibdave v0.3.1-0.20261118215854-c06abab601e2
+	github.com/disgoorg/godave v0.3.1-0.20261121145628-b817bbd1f6ca
+	github.com/disgoorg/godave/golibdave v0.3.1-0.20261121145628-b817bbd1f6ca
 	github.com/disgoorg/omit v1.0.0
 	github.com/disgoorg/snowflake/v2 v2.0.3
 	github.com/gorilla/websocket v1.5.3
@@ -33,17 +33,18 @@ require (
 require (
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/disgoorg/godave/libdave v0.3.1-0.20261118215854-c06abab601e2 // indirect
+	github.com/disgoorg/godave/libdave v0.3.1-0.20261121145628-b817bbd1f6ca // indirect
 	github.com/disgoorg/json/v2 v2.0.0 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/grafana/pyroscope-go/godeltaprof v0.1.12 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.34.0 // indirect
-	github.com/klauspost/compress v1.20.4 // indirect
+	github.com/klauspost/compress v1.20.5 // indirect
 	github.com/kr/text v0.2.0 // indirect
+	github.com/rogpeppe/go-internal v1.16.0 // indirect
 	github.com/sasha-s/go-csync v0.0.0-20240107134140-fcbab37b09ad // indirect
-	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
+	go.opentelemetry.io/auto/sdk v1.2.2 // indirect
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.1 // indirect
 	golang.org/x/crypto v0.59.0 // indirect
@@ -52,12 +53,4 @@ require (
 	google.golang.org/genproto/googleapis/api v0.0.0-20261118221215-c8830f628b3f // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20261118221215-c8830f628b3f // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
-)
-
-// Fork of c06abab whose passthrough copies into the output's capacity; drop once
-// https://github.com/disgoorg/godave/pull/15 is released.
-replace (
-	github.com/disgoorg/godave => github.com/sealbro/godave v0.0.0-20261119162233-ebf7bfbf4a75
-	github.com/disgoorg/godave/golibdave => github.com/sealbro/godave/golibdave v0.0.0-20261119162233-ebf7bfbf4a75
-	github.com/disgoorg/godave/libdave => github.com/sealbro/godave/libdave v0.0.0-20261119162233-ebf7bfbf4a75
 )

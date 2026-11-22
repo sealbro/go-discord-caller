@@ -15,15 +15,12 @@ func (nopDaveCallbacks) SendMLSCommitWelcome([]byte) error     { return nil }
 func (nopDaveCallbacks) SendReadyForTransition(uint16) error   { return nil }
 func (nopDaveCallbacks) SendInvalidCommitWelcome(uint16) error { return nil }
 
-// TestGolibdavePassthroughFillsCapacity guards the go.mod replace. disgo grows
-// the decrypt buffer's capacity to fit the frame but leaves its length at 512,
-// and dave.countingSession hands that buffer to golibdave unchanged. Upstream
-// c06abab copies a passthrough frame into the length, cutting anything over
-// 512 bytes short without an error; the fork pinned by the replace copies into
-// the capacity. When this fails, the replace was dropped before the fix shipped.
-//
-// UPSTREAM-TRIPWIRE(golibdave ebf7bfb): keep the replace until
-// https://github.com/disgoorg/godave/pull/15 is released.
+// TestGolibdavePassthroughFillsCapacity guards the golibdave version. disgo
+// grows the decrypt buffer's capacity to fit the frame but leaves its length at
+// 512, and dave.countingSession hands that buffer to golibdave unchanged.
+// golibdave before b817bbd (godave PR #15) copies a passthrough frame into the
+// length, cutting anything over 512 bytes short without an error. When this
+// fails, go.mod moved to a godave without that fix.
 func TestGolibdavePassthroughFillsCapacity(t *testing.T) {
 	s := golibdave.NewSession(slog.New(slog.DiscardHandler), "1", nopDaveCallbacks{})
 

@@ -7,21 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-22
+
 ### Changed
 - **Slash commands registered for the whole app**: the commands are now global instead of per server, so the Discord app directory can list them, and they no longer appear in DMs with the bot. A change to a command's text may take a while to reach every server.
+- **godave from upstream**: the godave binding now comes from its own master instead of a fork, since the fix the fork carried has been merged there.
 - **`gdc_bot_online` merged into `gdc_discord_guild`**: the guild metric's value is now the server's bot count instead of `1`, and `gdc_bot_online` is gone; read the count from `gdc_discord_guild`.
-- **`gdc_command_total` removed**: it always equalled `gdc_command_duration_seconds_count`; use that for completed commands.
 - **Bot verification metrics merged into `gdc_discord_bot`**: its value is now the bot's server count, and the verification state is carried as the `verified`, `verification_blocked` and `members_intent` labels; `gdc_bot_verified`, `gdc_bot_guilds`, `gdc_bot_members_intent` and `gdc_bot_verification_blocked` are gone.
+- **`gdc_command_total` removed**: it always equalled `gdc_command_duration_seconds_count`; use that for completed commands.
 - **`gdc_voice_sessions_active` removed**: `gdc_session_mode` summed over `mode` gives the same count.
 - **Fewer DAVE decrypt metrics**: `gdc_dave_decrypt_position_total` is gone, and `gdc_dave_decrypt_duration_milliseconds` has 5 buckets instead of 12.
-- **godave from upstream**: the godave binding now comes from its own master instead of a fork, since the fix the fork carried has been merged there.
 
 ### Fixed
 - **Joining a relay before the host started gave no reason**: `/start` with a code that has no running raid now says so and asks the host to `/start` first, instead of a bare "Failed to join".
-- **Caller count included channels nobody relays**: the callers metric now counts only the channels a raid captures, so a one-caller raid no longer counts listeners with the caller role in the speaker channels.
 - **`/setup` could change a raid that was still starting**: channels, the caller role and the relay code are now locked from `/start` on, not only once every bot has joined.
 - **Choppy audio from callers on a distant voice server**: when a caller's audio arrives in bursts, their mixer input now grows to hold them instead of dropping a frame per burst, and shrinks back once the bursts stop. One guild lost about 10% of its callers' audio this way.
 - **Garbage collection ran every 15 seconds regardless of `GOGC`**: the profiler forced a collection before each heap profile upload. It no longer does, so collections and their pauses are now about 8× rarer.
+- **Caller count included channels nobody relays**: the callers metric now counts only the channels a raid captures, so a one-caller raid no longer counts listeners with the caller role in the speaker channels.
 
 ## [0.17.0] - 2026-11-20
 

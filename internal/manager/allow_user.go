@@ -5,13 +5,11 @@ import (
 	"log/slog"
 	"slices"
 	"sync"
-	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/store"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -21,7 +19,6 @@ import (
 type AllowFilter struct {
 	allowed  sync.Map // snowflake.ID → bool
 	fallback func(snowflake.ID) bool
-	metrics  telemetry.OpusRecorder
 	// roleID is the configured caller role for the guild this filter belongs
 	// to. Zero when no caller role is configured (the filter then allows
 	// nobody). Exposed via RoleID() so the auto-router can capture it at
@@ -37,14 +34,12 @@ func (f *AllowFilter) RoleID() snowflake.ID { return f.roleID }
 
 // Check returns true if userID is allowed to send audio.
 // Uses the local map when a decision is cached, otherwise falls back to the
-// disgo member cache, records the lookup duration, and memoises the result.
+// disgo member cache and memoises the result.
 func (f *AllowFilter) Check(userID snowflake.ID) bool {
 	if v, ok := f.allowed.Load(userID); ok {
 		return v.(bool)
 	}
-	start := time.Now()
 	result := f.fallback(userID)
-	f.metrics.RecordAllowUser(float64(time.Since(start).Microseconds()) / 1000.0)
 	f.allowed.Store(userID, result)
 	return result
 }
@@ -62,12 +57,9 @@ func (f *AllowFilter) Set(userID snowflake.ID, allowed bool) {
 // member cache before the first frame arrives.
 func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
 	caches := m.ownerClient.Caches
-	rec := m.metrics.Opus.For(guildID.String())
-
 	roleID, hasRole := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
 	if !hasRole {
 		return &AllowFilter{
-			metrics:  rec,
 			fallback: func(snowflake.ID) bool { return false },
 		}
 	}
@@ -75,8 +67,7 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
 	slog.Info("role filter active", slog.String("guildID", guildID.String()), slog.String("roleID", roleID.String()))
 
 	return &AllowFilter{
-		metrics: rec,
-		roleID:  roleID,
+		roleID: roleID,
 		fallback: func(userID snowflake.ID) bool {
 			member, ok := caches.Member(guildID, userID)
 			if !ok || m.IsBot(member.User) {

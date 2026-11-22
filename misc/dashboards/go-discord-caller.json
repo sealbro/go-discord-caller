@@ -1054,10 +1054,10 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Speaker bots in the pool, and how many have a live gateway connection. The owner bot is not counted.",
           "id": 16,
           "links": [],
-          "title": "Pool Bots",
+          "title": "🤖 Speaker Bots",
           "vizConfig": {
             "group": "stat",
             "kind": "VizConfig",
@@ -1158,10 +1158,10 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Speaker bots in the pool, and how many have a live gateway connection. The owner bot is not counted.",
           "id": 17,
           "links": [],
-          "title": "Pool Bots Over Time",
+          "title": "🤖 Speaker Bots Over Time",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -1360,10 +1360,10 @@
               "transformations": []
             }
           },
-          "description": "",
+          "description": "Bots (the owner bot and speaker bots) that joined each guild's running raid.",
           "id": 19,
           "links": [],
-          "title": "Session Speakers",
+          "title": "🤖 Bots in Raid",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -1840,7 +1840,7 @@
               "transformations": []
             }
           },
-          "description": "Speaker watchdog reconnects and failures, plus the owner bot's gateway READY events (each one is an IDENTIFY; Discord resets the token after 1000 a day). Counts per interval.",
+          "description": "Speaker bot watchdog reconnects and failures, plus the owner bot's gateway READY events (each one is an IDENTIFY; Discord resets the token after 1000 a day). Counts per interval.",
           "id": 21,
           "links": [],
           "title": "Gateway Reconnects",
@@ -1948,7 +1948,7 @@
                       "spec": {
                         "expr": "sum(gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}) or vector(0)",
                         "instant": true,
-                        "legendFormat": "Callers",
+                        "legendFormat": "👤 Callers",
                         "range": false
                       },
                       "version": "v0"
@@ -1961,10 +1961,10 @@
               "transformations": []
             }
           },
-          "description": "Users with the caller role currently in a voice channel of a guild with an active raid; 0 when no raid is running",
+          "description": "Callers (members with the caller role) in the voice channels an active raid captures; 0 when no raid is running.",
           "id": 22,
           "links": [],
-          "title": "Active Voice Callers",
+          "title": "👤 Active Voice Callers",
           "vizConfig": {
             "group": "stat",
             "kind": "VizConfig",
@@ -2047,10 +2047,10 @@
               "transformations": []
             }
           },
-          "description": "Users with the caller role in a voice channel, per guild",
+          "description": "Callers (members with the caller role) in the voice channels an active raid captures, per guild.",
           "id": 23,
           "links": [],
-          "title": "Voice Callers Over Time",
+          "title": "👤 Voice Callers Over Time",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -2277,7 +2277,7 @@
           "description": "Discord gateway WebSocket heartbeat RTT per bot",
           "id": 25,
           "links": [],
-          "title": "Bot Gateway Latency",
+          "title": "🤖 Bot Gateway Latency",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -2428,27 +2428,6 @@
                       "group": "prometheus",
                       "kind": "DataQuery",
                       "spec": {
-                        "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_opus_allow_user_duration_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
-                        "instant": false,
-                        "legendFormat": "allow_user p99",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "C"
-                  }
-                },
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "datasource": {
-                        "name": "grafanacloud-prom"
-                      },
-                      "group": "prometheus",
-                      "kind": "DataQuery",
-                      "spec": {
                         "expr": "histogram_quantile(0.99, sum by (le) (rate(gdc_mixer_tick_duration_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval])))",
                         "instant": false,
                         "legendFormat": "mixer tick p99",
@@ -2485,10 +2464,10 @@
               "transformations": []
             }
           },
-          "description": "99th-percentile execution time for ReceiveOpusFrame, ProvideOpusFrame, and the allowUser filter. All three exclude time blocked waiting for channels.",
+          "description": "99th-percentile execution time for ReceiveOpusFrame and ProvideOpusFrame. Both exclude time blocked waiting for channels.",
           "id": 27,
           "links": [],
-          "title": "Audio Pipeline P99 (Receive / Provide / AllowUser / Mixer Tick / Latency)",
+          "title": "Audio Pipeline P99 (Receive / Provide / Mixer Tick / Latency)",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -2769,105 +2748,6 @@
                 "yAxis": {
                   "axisPlacement": "left",
                   "decimals": 2,
-                  "reverse": false,
-                  "unit": "ms"
-                }
-              }
-            },
-            "version": "13.1.0-24779284961"
-          }
-        }
-      },
-      "panel-30": {
-        "kind": "Panel",
-        "spec": {
-          "data": {
-            "kind": "QueryGroup",
-            "spec": {
-              "queries": [
-                {
-                  "kind": "PanelQuery",
-                  "spec": {
-                    "hidden": false,
-                    "query": {
-                      "group": "",
-                      "kind": "DataQuery",
-                      "spec": {
-                        "expr": "sum by (le) (increase(gdc_opus_allow_user_duration_milliseconds_bucket{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}[$__rate_interval]))",
-                        "format": "heatmap",
-                        "instant": false,
-                        "legendFormat": "{{le}}",
-                        "range": true
-                      },
-                      "version": "v0"
-                    },
-                    "refId": "A"
-                  }
-                }
-              ],
-              "queryOptions": {},
-              "transformations": []
-            }
-          },
-          "description": "Distribution of allowUser filter execution time per evaluated frame",
-          "id": 30,
-          "links": [],
-          "title": "Opus AllowUser Filter Duration Heatmap",
-          "vizConfig": {
-            "group": "heatmap",
-            "kind": "VizConfig",
-            "spec": {
-              "fieldConfig": {
-                "defaults": {
-                  "custom": {
-                    "hideFrom": {
-                      "legend": false,
-                      "tooltip": false,
-                      "viz": false
-                    },
-                    "scaleDistribution": {
-                      "type": "linear"
-                    }
-                  }
-                },
-                "overrides": []
-              },
-              "options": {
-                "annotations": {
-                  "clustering": -1,
-                  "multiLane": false
-                },
-                "calculate": false,
-                "cellGap": 2,
-                "color": {
-                  "exponent": 0.5,
-                  "fill": "dark-orange",
-                  "mode": "scheme",
-                  "reverse": false,
-                  "scale": "exponential",
-                  "scheme": "RdPu",
-                  "steps": 64
-                },
-                "exemplars": {
-                  "color": "rgba(255,0,255,0.7)"
-                },
-                "filterValues": {
-                  "le": 1E-9
-                },
-                "legend": {
-                  "show": true
-                },
-                "rowsFrame": {
-                  "layout": "auto"
-                },
-                "tooltip": {
-                  "mode": "single",
-                  "showColorScale": false,
-                  "yHistogram": false
-                },
-                "yAxis": {
-                  "axisPlacement": "left",
-                  "decimals": 3,
                   "reverse": false,
                   "unit": "ms"
                 }
@@ -3445,7 +3325,7 @@
                         "expr": "gdc_session_speakers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"}",
                         "format": "table",
                         "instant": true,
-                        "legendFormat": "Speakers",
+                        "legendFormat": "🤖 Bots in Raid",
                         "range": false
                       },
                       "version": "v0"
@@ -3483,7 +3363,7 @@
                         "expr": "sum by (guild_id, origin_prometheus) (gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})",
                         "format": "table",
                         "instant": true,
-                        "legendFormat": "Callers",
+                        "legendFormat": "👤 Callers",
                         "range": false
                       },
                       "version": "v0"
@@ -3560,13 +3440,13 @@
                       },
                       "renameByName": {
                         "Time 1": "Time",
-                        "Value #B": "Speakers",
-                        "Value #F": "Callers",
+                        "Value #B": "🤖 Bots in Raid",
+                        "Value #F": "👤 Callers",
                         "guild_id": "Guild ID",
                         "guild_name": "Guild",
                         "origin_prometheus": "Source",
                         "session_label": "Active Session",
-                        "Value #A": "Bots Active"
+                        "Value #A": "🤖 Bots in Guild"
                       }
                     }
                   }
@@ -3574,7 +3454,7 @@
               ]
             }
           },
-          "description": "Per-guild overview: bots connected, speakers bound to the active session, and whether a raid session is currently active (with its raid mode shown inline, e.g. \"Active (guild_caller)\").",
+          "description": "Per guild: bots in the guild (owner bot and registered speaker bots), bots in the running raid, callers, and whether a raid is active, with its mode inline (e.g. \"Active (guild_caller)\").",
           "id": 32,
           "links": [],
           "title": "Guild Overview",
@@ -4156,7 +4036,7 @@
                       "spec": {
                         "expr": "max_over_time(sum(gdc_voice_callers{origin_prometheus=~\"$origin_prometheus\", guild_id=~\"$guild_id\"})[1h:1m])",
                         "instant": false,
-                        "legendFormat": "Peak callers",
+                        "legendFormat": "👤 Peak callers",
                         "range": true,
                         "interval": "1h"
                       },
@@ -4175,7 +4055,7 @@
           "description": "Peak live voice callers per hour across all guilds over the last 7 days, independent of the dashboard time range. Bars appear only in hours with an active raid.",
           "id": 37,
           "links": [],
-          "title": "Voice Callers Trend (7d)",
+          "title": "👤 Voice Callers Trend (7d)",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -5727,7 +5607,7 @@
               "transformations": []
             }
           },
-          "description": "Single-caller (copy mode) frames that waited behind others in a speaker's output queue; each frame ahead is ~20 ms. Copy mode bypasses the mixer, so the pipeline-latency panels never see it.",
+          "description": "Single-caller (copy mode) frames that waited behind others in a speaker bot's output queue; each frame ahead is ~20 ms. Copy mode bypasses the mixer, so the pipeline-latency panels never see it.",
           "id": 50,
           "links": [],
           "title": "Copy-Mode Queue Wait",
@@ -5929,7 +5809,7 @@
                         "Value #D": 4
                       },
                       "renameByName": {
-                        "bot_name": "Bot",
+                        "bot_name": "🤖 Bot",
                         "Value #A": "Verified",
                         "Value #B": "Servers (approx.)",
                         "state": "Members Intent",
@@ -5944,7 +5824,7 @@
           "description": "Discord verification state per bot, checked hourly. An unverified bot cannot join more than 100 servers; verification can be requested from 75. Servers is Discord's own approximate count, which can lag behind the live number. Members Intent matters for the owner bot only: \"On, not reviewed\" is fine until the bot reaches 10,000 users, when Discord asks for an application.",
           "id": 52,
           "links": [],
-          "title": "Bot Verification",
+          "title": "🤖 Bot Verification",
           "vizConfig": {
             "group": "table",
             "kind": "VizConfig",
@@ -6126,7 +6006,7 @@
                 "showHeader": true,
                 "sortBy": [
                   {
-                    "displayName": "Bot",
+                    "displayName": "🤖 Bot",
                     "desc": false
                   }
                 ],
@@ -6191,7 +6071,7 @@
               "transformations": []
             }
           },
-          "description": "Consecutive frames from one user, by how far apart they reached the receiver. Even delivery is ~20 ms. Clumped frames arrive in a burst and fill the mixer input; held-back frames arrived late. With Mixer Tick Lateness clean, both come from delivery rather than our own scheduling.",
+          "description": "Consecutive frames from one caller, by how far apart they reached the receiver. Even delivery is ~20 ms. Clumped frames arrive in a burst and fill the mixer input; held-back frames arrived late. With Mixer Tick Lateness clean, both come from delivery rather than our own scheduling.",
           "id": 53,
           "links": [],
           "title": "Frame Arrival Spacing",
@@ -6343,7 +6223,7 @@
               "transformations": []
             }
           },
-          "description": "Mix mode: frames already waiting in a user's mixer input when a new one is fed. A backlog that holds steady does not drain while the user talks; a full input evicts its oldest frame (the mixer drop).",
+          "description": "Mix mode: frames already waiting in a caller's mixer input when a new one is fed. A backlog that holds steady does not drain while the caller talks; a full input evicts its oldest frame (the mixer drop).",
           "id": 54,
           "links": [],
           "title": "Mixer Input Backlog",
@@ -6776,7 +6656,7 @@
               "transformations": []
             }
           },
-          "description": "Share of 5m samples in 14d where the owner bot and at least one speaker were connected. Missing samples count as down. Target 99%.",
+          "description": "Share of 5m samples in 14d where the owner bot and at least one speaker bot were connected. Missing samples count as down. Target 99%.",
           "id": 57,
           "links": [],
           "title": "SLO Availability (14d)",
@@ -7289,7 +7169,7 @@
           "description": "Time from the start of a raid until each bot is in its voice channel, or until its join gave up. A slow tail is joins that needed a retry.",
           "id": 61,
           "links": [],
-          "title": "Bot Join Duration P50 / P95 / P99",
+          "title": "🤖 Bot Join Duration P50 / P95 / P99",
           "vizConfig": {
             "group": "timeseries",
             "kind": "VizConfig",
@@ -7437,7 +7317,7 @@
               "transformations": []
             }
           },
-          "description": "Time one inbound DAVE frame took to decrypt. Every speaker is decrypted in turn on one receive goroutine, so a slow decrypt delays them all.",
+          "description": "Time one inbound DAVE frame took to decrypt. Frames from every member talking in the channel are decrypted in turn on one receive goroutine, so a slow decrypt delays them all.",
           "id": 62,
           "links": [],
           "title": "DAVE Decrypt Duration P50 / P95 / P99",
@@ -8108,7 +7988,7 @@
                 "name": "panel-28"
               },
               "height": 8,
-              "width": 8,
+              "width": 12,
               "x": 0,
               "y": 53
             }
@@ -8121,21 +8001,8 @@
                 "name": "panel-29"
               },
               "height": 8,
-              "width": 8,
-              "x": 8,
-              "y": 53
-            }
-          },
-          {
-            "kind": "GridLayoutItem",
-            "spec": {
-              "element": {
-                "kind": "ElementReference",
-                "name": "panel-30"
-              },
-              "height": 8,
-              "width": 8,
-              "x": 16,
+              "width": 12,
+              "x": 12,
               "y": 53
             }
           },

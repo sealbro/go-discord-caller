@@ -9,16 +9,15 @@ import (
 
 // OpusMetrics tracks per-frame timing for the voice pipeline and mixer.
 type OpusMetrics struct {
-	receiveDuration   metric.Float64Histogram
-	provideDuration   metric.Float64Histogram
-	allowUserDuration metric.Float64Histogram
-	tickDuration      metric.Float64Histogram
-	tickLateness      metric.Float64Histogram
-	pipelineLatency   metric.Float64Histogram
-	copyQueueDepth    metric.Int64Histogram
-	receiveInterval   metric.Float64Histogram
-	sourceDepth       metric.Int64Histogram
-	sourceFramesLost  metric.Int64Counter
+	receiveDuration  metric.Float64Histogram
+	provideDuration  metric.Float64Histogram
+	tickDuration     metric.Float64Histogram
+	tickLateness     metric.Float64Histogram
+	pipelineLatency  metric.Float64Histogram
+	copyQueueDepth   metric.Int64Histogram
+	receiveInterval  metric.Float64Histogram
+	sourceDepth      metric.Int64Histogram
+	sourceFramesLost metric.Int64Counter
 }
 
 func (o *OpusMetrics) init(meter metric.Meter) (err error) {
@@ -33,13 +32,6 @@ func (o *OpusMetrics) init(meter metric.Meter) (err error) {
 		metric.WithDescription("ProvideOpusFrame execution duration (excluding time blocked waiting for a frame)"),
 		metric.WithUnit("ms"),
 		metric.WithExplicitBucketBoundaries(0.5, 1, 2, 5, 12, 20),
-	); err != nil {
-		return
-	}
-	if o.allowUserDuration, err = meter.Float64Histogram("gdc.opus.allow_user.duration",
-		metric.WithDescription("allowUser lookup duration on a per-session cache miss (once per user, not per frame)"),
-		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(1, 2, 5, 12, 20),
 	); err != nil {
 		return
 	}
@@ -159,14 +151,6 @@ func (r OpusRecorder) RecordProvide(ms float64) {
 		return
 	}
 	r.m.provideDuration.Record(context.Background(), ms, r.record...)
-}
-
-// RecordAllowUser records the execution duration of one allowUser filter call.
-func (r OpusRecorder) RecordAllowUser(ms float64) {
-	if r.m == nil {
-		return
-	}
-	r.m.allowUserDuration.Record(context.Background(), ms, r.record...)
 }
 
 // RecordTick records a mixer tick duration in milliseconds.

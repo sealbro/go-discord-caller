@@ -265,67 +265,39 @@ func (b *Bot) Run(ctx context.Context) error {
 	return nil
 }
 
-// syncCommands refreshes the owner bot's slash commands: any command edited in
-// BuildCommands is overwritten and any removed one is deleted, because each
-// per-guild sync fully replaces that guild's command set.
-//
-// Commands are registered per guild (instant propagation, unlike the ~1h global
-// cache). Because we never register globally, the global set must stay empty:
-// a global command left over from an earlier build shows up as a ghost duplicate
-// that survives guild re-syncs and only clears with a manual delete + restart.
-// Overwriting the global set with an empty list on every boot prevents that.
+// syncCommands registers the owner bot's slash commands globally — the app
+// directory's "Popular Slash Commands" lists only global commands — and empties
+// every guild's own set. Guild copies from builds that registered per guild
+// would otherwise show each command twice in that guild.
 func (b *Bot) syncCommands(ctx context.Context, guildIDs []snowflake.ID) {
 	commands := BuildCommands(b.bundle)
-
-	appID := b.client.ApplicationID
-
-	if _, err := b.client.Rest.SetGlobalCommands(appID, nil); err != nil {
-		slog.WarnContext(ctx, "failed to clear global commands", slog.Any("err", err))
+	if _, err := b.client.Rest.SetGlobalCommands(b.client.ApplicationID, commands); err != nil {
+		slog.ErrorContext(ctx, "failed to sync global commands", slog.Any("err", err))
+	} else {
+		names := make([]string, 0, len(commands))
+		for _, c := range commands {
+			names = append(names, c.CommandName())
+		}
+		slices.Sort(names)
+		slog.InfoContext(ctx, "synced global commands", slog.String("commands", strings.Join(names, ", ")))
 	}
 
-	if len(guildIDs) == 0 {
-		slog.WarnContext(ctx, "no guilds discovered, skipping guild command sync")
-		return
-	}
-
-	slog.InfoContext(ctx, "syncing slash commands", slog.Int("guilds", len(guildIDs)))
 	for _, gid := range guildIDs {
-		b.setGuildCommands(ctx, gid, commands)
+		b.syncGuildCommands(ctx, gid)
 	}
 }
 
-// syncGuildCommands registers the full command set for a single guild.
-//
-// syncCommands only covers the guilds present in the Ready payload at boot, and
-// because nothing is ever registered globally there is no fallback: a guild the
-// bot joins while running would otherwise show no commands at all until the next
-// restart. Wired into onGuildJoin so a fresh invite is usable immediately.
+// syncGuildCommands empties one guild's own command set. A guild joined while
+// running already sees the global commands; this only matters for a guild that
+// removed the bot while commands were registered per guild, whose copies
+// outlive the bot's membership.
 func (b *Bot) syncGuildCommands(ctx context.Context, guildID snowflake.ID) {
-	b.setGuildCommands(ctx, guildID, BuildCommands(b.bundle))
-}
-
-// setGuildCommands replaces one guild's command set. Guild-scoped registration
-// propagates instantly, unlike the ~1h global command cache.
-func (b *Bot) setGuildCommands(ctx context.Context, guildID snowflake.ID, commands []discord.ApplicationCommandCreate) {
-	if _, err := b.client.Rest.SetGuildCommands(b.client.ApplicationID, guildID, commands); err != nil {
-		slog.ErrorContext(ctx, "failed to sync guild commands",
+	if _, err := b.client.Rest.SetGuildCommands(b.client.ApplicationID, guildID, nil); err != nil {
+		slog.ErrorContext(ctx, "failed to clear guild commands",
 			slog.String("guild_id", guildID.String()),
 			slog.Any("err", err),
 		)
-		return
 	}
-
-	names := make([]string, 0, len(commands))
-	for _, c := range commands {
-		names = append(names, c.CommandName())
-	}
-	slices.Sort(names)
-
-	slog.InfoContext(ctx, "synced guild commands",
-		slog.String("guild_id", guildID.String()),
-		slog.Int("count", len(commands)),
-		slog.String("commands", strings.Join(names, ", ")),
-	)
 }
 
 // NewOwnerClient builds a disgo client for the owner (manager) bot.

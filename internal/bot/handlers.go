@@ -9,7 +9,8 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// GuildCommandSyncer registers the owner bot's slash commands for one guild.
+// GuildCommandSyncer empties one guild's own slash-command set, leaving the
+// global commands.
 // Implemented by Bot.syncGuildCommands; may be nil when command registration is
 // out of scope for the caller (the E2E harness drives handlers directly and
 // never invites the bot to a new guild).
@@ -59,17 +60,15 @@ func onReady(m ManagerService, guard *readyGuard) func(*events.Ready) {
 }
 
 // onGuildJoin is called when the owner bot is added to a new guild.
-// It registers the guild's slash commands, seeds speakers, and ensures the guild
-// has a persistent relay code.
+// It clears any guild copies of the slash commands, seeds speakers, and ensures
+// the guild has a persistent relay code.
 //
 // GuildJoin fires only for genuinely new guilds. GuildAvailable, by contrast,
 // fires for every guild on every gateway reconnect, so syncing there would
-// re-register the whole command set against the REST API on each reconnect.
+// call the REST API for every guild on each reconnect.
 func onGuildJoin(m ManagerService, syncGuild GuildCommandSyncer) func(*events.GuildJoin) {
 	return func(e *events.GuildJoin) {
 		if syncGuild != nil {
-			// Commands first: until they are registered the guild sees a bot that
-			// appears to do nothing at all.
 			go syncGuild(context.Background(), e.GuildID)
 		}
 		go m.SeedExistingSpeakers([]snowflake.ID{e.GuildID})

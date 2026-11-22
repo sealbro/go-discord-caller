@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Slash commands registered for the whole app**: the commands are now global instead of per server, so the Discord app directory can list them, and they no longer appear in DMs with the bot. A change to a command's text may take a while to reach every server.
 - **godave from upstream**: the godave binding now comes from its own master instead of a fork, since the fix the fork carried has been merged there.
 
 ### Fixed

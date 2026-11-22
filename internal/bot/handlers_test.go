@@ -347,8 +347,7 @@ func TestOnGuildJoin_SeedsGuild(t *testing.T) {
 }
 
 // A guild joined while the bot is running is never covered by the boot-time
-// sync, and nothing is registered globally — without this call it would show no
-// slash commands at all until the next restart (issue #46).
+// sync, so its guild copies of the commands are cleared on join.
 func TestOnGuildJoin_SyncsCommands(t *testing.T) {
 	t.Parallel()
 	f := &fakeManager{}

@@ -103,6 +103,10 @@ func (h *CommandHandlers) handleStartVoiceRaid(guildID snowflake.ID, loc *i18n.L
 					h.followUp(e, loc.T("raid.join_locked_out"))
 					return
 				}
+				if errors.Is(err, manager.ErrNoRelaySession) {
+					h.followUp(e, loc.T("raid.join_no_session", "Code", code))
+					return
+				}
 				// A raid that came up between the command's pre-check and here,
 				// including one this very command raced with.
 				if errors.Is(err, manager.ErrSessionExists) {

@@ -568,6 +568,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 	boom := errors.New("boom")
 	warning := []manager.ChannelAccessWarning{{BotID: speakerA, ChannelID: boundChannel}}
 	withCode := []string{stringOption("code", "CODE2345")}
+	_, unknownCode := ally.NewManager().Join("CODE2345", 701)
 
 	tests := []struct {
 		name    string
@@ -599,6 +600,7 @@ func TestStartCommandFollowUps(t *testing.T) {
 		{name: "join no deafen permission", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrNoDeafenPermission)}, want: en.T("raid.no_deafen_permission"), started: true},
 		{name: "join session exists", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrSessionExists)}, want: en.T("raid.already_active"), started: true},
 		{name: "join locked out", opts: withCode, m: &fakeManager{joinFn: failJoin(manager.ErrJoinLockedOut)}, want: en.T("raid.join_locked_out"), started: true},
+		{name: "join code with no running raid", opts: withCode, m: &fakeManager{joinFn: failJoin(unknownCode)}, want: en.T("raid.join_no_session", "Code", "CODE2345"), started: true},
 		{name: "join other error", opts: withCode, m: &fakeManager{joinFn: failJoin(boom)}, want: en.T("raid.join_failed", "Code", "CODE2345"), started: true},
 		{name: "join stopped while starting", opts: withCode, m: &fakeManager{joinFn: failJoin(fmt.Errorf("join session: %w", context.Canceled))}, want: en.T("raid.stopped"), started: true},
 	}

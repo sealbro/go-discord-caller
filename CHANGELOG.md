@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **godave from upstream**: the godave binding now comes from its own master instead of a fork, since the fix the fork carried has been merged there.
 
 ### Fixed
+- **Joining a relay before the host started gave no reason**: `/start` with a code that has no running raid now says so and asks the host to `/start` first, instead of a bare "Failed to join".
 - **Caller count included channels nobody relays**: the callers metric now counts only the channels a raid captures, so a one-caller raid no longer counts listeners with the caller role in the speaker channels.
 - **`/setup` could change a raid that was still starting**: channels, the caller role and the relay code are now locked from `/start` on, not only once every bot has joined.
 - **Choppy audio from callers on a distant voice server**: when a caller's audio arrives in bursts, their mixer input now grows to hold them instead of dropping a frame per burst, and shrinks back once the bursts stop. One guild lost about 10% of its callers' audio this way.

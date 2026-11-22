@@ -275,6 +275,10 @@ const (
 // be used to tell a right guess from a wrong one.
 var ErrJoinLockedOut = errors.New("too many wrong relay codes: try again later")
 
+// ErrNoSession is returned by Join when no running session has the code: it
+// is wrong, or the host has not started its raid yet.
+var ErrNoSession = errors.New("no relay session matches this code")
+
 // Manager is the global registry of active ally sessions.
 type Manager struct {
 	mu       sync.RWMutex
@@ -343,7 +347,7 @@ func (m *Manager) Join(code Code, guildID snowflake.ID) (*Session, error) {
 	s, ok := m.sessions[code]
 	if !ok {
 		m.recordFailureLocked(guildID)
-		return nil, errors.New("no relay session matches this code")
+		return nil, ErrNoSession
 	}
 	if s.HostGuildID == guildID {
 		return nil, fmt.Errorf("cannot join your own session")

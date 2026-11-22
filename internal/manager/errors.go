@@ -23,6 +23,10 @@ var (
 	// codes and must wait before joining a session again.
 	ErrJoinLockedOut = ally.ErrJoinLockedOut
 
+	// ErrNoRelaySession is returned when no running relay session has the
+	// code: it is wrong, or the host has not started its raid yet.
+	ErrNoRelaySession = ally.ErrNoSession
+
 	// ErrNoGuildStatus is returned when operating on a guild that has not been
 	// seeded yet.
 	ErrNoGuildStatus = errors.New("no guild status found — seed the guild first")

@@ -24,7 +24,6 @@ type DaveMetrics struct {
 	decryptTotal metric.Int64ObservableCounter
 	senders      metric.Int64ObservableGauge
 	encryptTotal metric.Int64ObservableCounter
-	positions    metric.Int64ObservableCounter
 
 	decryptDuration metric.Float64Histogram
 	durationAttrs   sync.Map // bot user ID -> []metric.RecordOption
@@ -35,7 +34,9 @@ func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 	if d.decryptDuration, err = meter.Float64Histogram("gdc.dave.decrypt.duration",
 		metric.WithDescription("Time one DAVE frame decryption took. Frames from every speaker are decrypted in turn on one receive goroutine, so a slow decrypt delays them all. Labels: bot_user_id."),
 		metric.WithUnit("ms"),
-		metric.WithExplicitBucketBoundaries(0.1, 0.25, 0.5, 1, 2, 5, 10, 25, 50, 100, 250),
+		// Almost every decrypt takes under 0.1 ms; the upper bounds only need to
+		// show how far into the 20 ms frame budget the rare slow one reached.
+		metric.WithExplicitBucketBoundaries(0.1, 0.5, 2, 10),
 	); err != nil {
 		return
 	}
@@ -51,11 +52,6 @@ func (d *DaveMetrics) init(meter metric.Meter) (err error) {
 	}
 	if d.encryptTotal, err = meter.Int64ObservableCounter("gdc.dave.encrypt.total",
 		metric.WithDescription("DAVE outbound frame encryption outcomes. Labels: bot_user_id, outcome (success|failure|unsent_alone), reason (failure detail, else none)."),
-	); err != nil {
-		return
-	}
-	if d.positions, err = meter.Int64ObservableCounter("gdc.dave.decrypt.position.total",
-		metric.WithDescription("DAVE frame decryptions by position in the sender's talk spurt. Labels: bot_user_id, outcome (success|failure), position (first|early = frames 1-9|mid)."),
 	); err != nil {
 		return
 	}
@@ -76,7 +72,7 @@ func (d *DaveMetrics) RecordDecryptDuration(botUserID string, took time.Duration
 // RegisterObservers registers cb as the observable callback for every DAVE
 // instrument.
 func (d *DaveMetrics) RegisterObservers(cb metric.Callback) error {
-	_, err := d.meter.RegisterCallback(cb, d.decryptTotal, d.senders, d.encryptTotal, d.positions)
+	_, err := d.meter.RegisterCallback(cb, d.decryptTotal, d.senders, d.encryptTotal)
 	return err
 }
 
@@ -111,18 +107,6 @@ func (d *DaveMetrics) ObserveEncrypt(o metric.Observer, botUserID, outcome, reas
 			attribute.String("bot_user_id", botUserID),
 			attribute.String("outcome", outcome),
 			attribute.String("reason", reason),
-		),
-	)
-}
-
-// ObserveDecryptPosition emits one decrypt-position counter sample. Call
-// inside the callback registered with RegisterObservers.
-func (d *DaveMetrics) ObserveDecryptPosition(o metric.Observer, botUserID, outcome, position string, count int64) {
-	o.ObserveInt64(d.positions, count,
-		metric.WithAttributes(
-			attribute.String("bot_user_id", botUserID),
-			attribute.String("outcome", outcome),
-			attribute.String("position", position),
 		),
 	)
 }

@@ -2,13 +2,31 @@ package dave
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/disgoorg/godave"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
+
+type fakeClock struct{ t time.Time }
+
+func (c *fakeClock) now() time.Time          { return c.t }
+func (c *fakeClock) advance(d time.Duration) { c.t = c.t.Add(d) }
+
+// clockedSession returns a session that already knows user-a, reading time
+// from clock.
+func clockedSession(t *testing.T, stats *Stats, clock *fakeClock) (godave.Session, *fakeSession) {
+	t.Helper()
+	backend := &fakeSession{known: make(map[godave.UserID]struct{})}
+	inner := func(*slog.Logger, godave.UserID, godave.Callbacks) godave.Session { return backend }
+	session := Instrument(inner, stats, withClock(clock.now))(slog.Default(), "bot-1", nil)
+	session.AddUser("user-a")
+	return session, backend
+}
 
 func decryptDurationPoints(t *testing.T, reader *metric.ManualReader) []metricdata.HistogramDataPoint[float64] {
 	t.Helper()

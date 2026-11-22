@@ -39,7 +39,7 @@ func Instrument(inner godave.SessionCreateFunc, stats *Stats, opts ...Option) go
 			callbacks:   callbacks,
 			stallFrames: int64(o.stallFrames),
 			onStall:     o.onStall,
-			known:       make(map[godave.UserID]*talkSpurt),
+			known:       make(map[godave.UserID]struct{}),
 		}
 	}
 }
@@ -53,7 +53,7 @@ type options struct {
 	clock       func() time.Time
 }
 
-// withClock replaces time.Now for talk-spurt and decrypt timing in tests.
+// withClock replaces time.Now for decrypt timing in tests.
 func withClock(now func() time.Time) Option {
 	return func(o *options) { o.clock = now }
 }
@@ -155,50 +155,10 @@ type countingSession struct {
 	pending       map[uint16]bool // transition ID → whether it disables
 
 	mu    sync.RWMutex
-	known map[godave.UserID]*talkSpurt
+	known map[godave.UserID]struct{}
 
 	closeOnce sync.Once
 	closeErr  error
-}
-
-// A sender's frames stop arriving when they go quiet, so a pause of
-// talkSpurtGap — five missed 20 ms frames — starts a new talk spurt. Shorter
-// gaps are packet loss or jitter.
-const (
-	talkSpurtGap = 100 * time.Millisecond
-	earlyFrames  = 10 // frames 1–9 of a spurt, its first 200 ms
-)
-
-// Frame position within a talk spurt, reported as the position label.
-const (
-	positionFirst = "first"
-	positionEarly = "early"
-	positionMid   = "mid"
-)
-
-// talkSpurt tracks where a sender is within their current stretch of speech.
-// Only Decrypt touches it, on disgo's receive goroutine; the atomics keep it
-// race-free should that ever change.
-type talkSpurt struct {
-	lastAt atomic.Int64 // unix nanos of the previous frame; 0 before the first
-	index  atomic.Int64 // frames seen in the current spurt
-}
-
-// next records a frame arriving at now and returns its position.
-func (t *talkSpurt) next(now time.Time) string {
-	at := now.UnixNano()
-	prev := t.lastAt.Swap(at)
-	if prev == 0 || at-prev >= int64(talkSpurtGap) {
-		t.index.Store(0)
-	}
-	switch i := t.index.Add(1) - 1; {
-	case i == 0:
-		return positionFirst
-	case i < earlyFrames:
-		return positionEarly
-	default:
-		return positionMid
-	}
 }
 
 // Decrypt counts the outcome and decides the no-decryptor case itself.
@@ -218,8 +178,7 @@ func (t *talkSpurt) next(now time.Time) string {
 // UPSTREAM(golibdave c06abab): the unknown-user passthrough forwards ciphertext
 // while an epoch is active.
 func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedFrame []byte) (int, error) {
-	spurt := s.sender(userID)
-	if spurt == nil {
+	if !s.knows(userID) {
 		if !s.disabled.Load() && s.Session.Ready() {
 			s.stats.RecordDropped(s.botUserID)
 			return 0, nil
@@ -235,11 +194,9 @@ func (s *countingSession) Decrypt(userID godave.UserID, frame []byte, decryptedF
 	}
 
 	started := s.now()
-	position := spurt.next(started)
 	n, err := s.Session.Decrypt(userID, frame, decryptedFrame)
 	s.stats.RecordDecryptDuration(s.botUserID, s.now().Sub(started))
 	s.stats.Record(s.botUserID, string(userID), err)
-	s.stats.RecordPosition(s.botUserID, position, err)
 	return n, err
 }
 
@@ -429,13 +386,12 @@ func (s *countingSession) Close() error {
 	return s.closeErr
 }
 
-// sender returns the talk-spurt state of a user the backend has a decryptor
-// for, or nil for anyone else.
-func (s *countingSession) sender(userID godave.UserID) *talkSpurt {
+// knows reports whether the backend has a decryptor for userID.
+func (s *countingSession) knows(userID godave.UserID) bool {
 	s.mu.RLock()
-	spurt := s.known[userID]
-	s.mu.RUnlock()
-	return spurt
+	defer s.mu.RUnlock()
+	_, ok := s.known[userID]
+	return ok
 }
 
 // alone reports whether no one else is in the channel: disgo adds every other
@@ -455,7 +411,7 @@ func (s *countingSession) remember(userID godave.UserID) bool {
 	if _, ok := s.known[userID]; ok {
 		return false
 	}
-	s.known[userID] = &talkSpurt{}
+	s.known[userID] = struct{}{}
 	return true
 }
 

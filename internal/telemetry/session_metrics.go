@@ -12,7 +12,6 @@ import (
 
 // SessionMetrics tracks voice raid session lifecycle and fanout health.
 type SessionMetrics struct {
-	active           metric.Int64UpDownCounter
 	starts           metric.Int64Counter
 	stops            metric.Int64Counter
 	speakers         metric.Int64Gauge
@@ -25,11 +24,6 @@ type SessionMetrics struct {
 }
 
 func (s *SessionMetrics) init(meter metric.Meter) (err error) {
-	if s.active, err = meter.Int64UpDownCounter("gdc.voice.sessions.active",
-		metric.WithDescription("Currently active voice raid sessions"),
-	); err != nil {
-		return
-	}
 	if s.starts, err = meter.Int64Counter("gdc.voice.session.start.total",
 		metric.WithDescription("Voice raid starts"),
 	); err != nil {
@@ -46,7 +40,7 @@ func (s *SessionMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if s.mode, err = meter.Int64Gauge("gdc.session.mode",
-		metric.WithDescription("1 while a guild's active voice raid session is using the labelled mode, 0 once that session ends. Labels: guild_id, mode."),
+		metric.WithDescription("1 while a guild's active voice raid session is using the labelled mode, 0 once that session ends; summed over mode it is the guild's active session count. Labels: guild_id, mode."),
 	); err != nil {
 		return
 	}
@@ -83,12 +77,11 @@ func (s *SessionMetrics) PrimeGuild(ctx context.Context, guildID snowflake.ID) {
 	s.stops.Add(ctx, 0, attrs)
 }
 
-// SessionStarted records the start of a voice raid: increments active counter,
-// start total, sets the speaker gauge for guildID, and flags mode as the
-// session's active mode.
+// SessionStarted records the start of a voice raid: increments the start total,
+// sets the speaker gauge for guildID, and flags mode as the session's active
+// mode.
 func (s *SessionMetrics) SessionStarted(ctx context.Context, guildID snowflake.ID, speakerCount int, mode string) {
 	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
-	s.active.Add(ctx, 1, attrs)
 	s.starts.Add(ctx, 1, attrs)
 	s.speakers.Record(ctx, int64(speakerCount), attrs)
 	s.mode.Record(ctx, 1, metric.WithAttributes(
@@ -99,11 +92,10 @@ func (s *SessionMetrics) SessionStarted(ctx context.Context, guildID snowflake.I
 
 // SessionStopped records the end of a voice raid: resets speaker gauge to 0,
 // clears the mode gauge for mode (the mode the ending session was started
-// with), decrements active counter, and increments stop total.
+// with), and increments the stop total.
 func (s *SessionMetrics) SessionStopped(ctx context.Context, guildID snowflake.ID, mode string) {
 	attrs := metric.WithAttributes(attribute.String("guild_id", guildID.String()))
 	s.speakers.Record(ctx, 0, attrs)
-	s.active.Add(ctx, -1, attrs)
 	s.stops.Add(ctx, 1, attrs)
 	s.mode.Record(ctx, 0, metric.WithAttributes(
 		attribute.String("guild_id", guildID.String()),

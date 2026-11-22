@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Slash commands registered for the whole app**: the commands are now global instead of per server, so the Discord app directory can list them, and they no longer appear in DMs with the bot. A change to a command's text may take a while to reach every server.
 - **`gdc_bot_online` merged into `gdc_discord_guild`**: the guild metric's value is now the server's bot count instead of `1`, and `gdc_bot_online` is gone; read the count from `gdc_discord_guild`.
 - **`gdc_command_total` removed**: it always equalled `gdc_command_duration_seconds_count`; use that for completed commands.
+- **Bot verification metrics merged into `gdc_discord_bot`**: its value is now the bot's server count, and the verification state is carried as the `verified`, `verification_blocked` and `members_intent` labels; `gdc_bot_verified`, `gdc_bot_guilds`, `gdc_bot_members_intent` and `gdc_bot_verification_blocked` are gone.
+- **`gdc_voice_sessions_active` removed**: `gdc_session_mode` summed over `mode` gives the same count.
+- **Fewer DAVE decrypt metrics**: `gdc_dave_decrypt_position_total` is gone, and `gdc_dave_decrypt_duration_milliseconds` has 5 buckets instead of 12.
 - **godave from upstream**: the godave binding now comes from its own master instead of a fork, since the fix the fork carried has been merged there.
 
 ### Fixed

@@ -7,6 +7,12 @@ github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XL
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=
 github.com/disgoorg/disgo v0.20.0 h1:T81/p3heD3DNydk5Jc2/BPivxNmQInv1anSOU+hCEMQ=
 github.com/disgoorg/disgo v0.20.0/go.mod h1:ZMGQXsHdnrc7rIgcugi6Ht8sSPOKXwy7WKeNlDGfgKg=
+github.com/disgoorg/godave v0.3.1-0.20261121145628-b817bbd1f6ca h1:24Bfbx84Ft/aGLfsrSNwoWjoceCeS8saP7uYpM/9PdU=
+github.com/disgoorg/godave v0.3.1-0.20261121145628-b817bbd1f6ca/go.mod h1:OreAC3hpabr39bMVA+jwOVDq1EUPXH5A0XUBiZaDI1Y=
+github.com/disgoorg/godave/golibdave v0.3.1-0.20261121145628-b817bbd1f6ca h1:028G6kghUaQCrukw4sAEiijdhnv14vg4IqudJLu1cZs=
+github.com/disgoorg/godave/golibdave v0.3.1-0.20261121145628-b817bbd1f6ca/go.mod h1:X5N0QoCLqX7wmrSMDa2nGoMna47Svv5phmllHYnjMvM=
+github.com/disgoorg/godave/libdave v0.3.1-0.20261121145628-b817bbd1f6ca h1:wcFChAgqEUEa8SOodpDX4cdNE1ZWuukDtbkER1gbc0Y=
+github.com/disgoorg/godave/libdave v0.3.1-0.20261121145628-b817bbd1f6ca/go.mod h1:CxundbQ722MpK3vD31kaOAxbu1+cFnnEKQDqQ7rpxEM=
 github.com/disgoorg/json/v2 v2.0.0 h1:U16yy/ARK7/aEpzjjqK1b/KaqqGHozUdeVw/DViEzQI=
 github.com/disgoorg/json/v2 v2.0.0/go.mod h1:jZTBC0nIE1WeetSEI3/Dka8g+qglb4FPVmp5I5HpEfI=
 github.com/disgoorg/omit v1.0.0 h1:y0LkVUOyUHT8ZlnhIAeOZEA22UYykeysK8bLJ0SfT78=
@@ -48,12 +54,6 @@ github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0t
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/sasha-s/go-csync v0.0.0-20240107134140-fcbab37b09ad h1:qIQkSlF5vAUHxEmTbaqt1hkJ/t6skqEGYiMag343ucI=
 github.com/sasha-s/go-csync v0.0.0-20240107134140-fcbab37b09ad/go.mod h1:/pA7k3zsXKdjjAiUhB5CjuKib9KJGCaLvZwtxGC8U0s=
-github.com/sealbro/godave v0.0.0-20261119162233-ebf7bfbf4a75 h1:OuX9Kjw/cxiicCyaaK5PY/B5LRKZH0bcY5KNMsjuz8A=
-github.com/sealbro/godave v0.0.0-20261119162233-ebf7bfbf4a75/go.mod h1:OreAC3hpabr39bMVA+jwOVDq1EUPXH5A0XUBiZaDI1Y=
-github.com/sealbro/godave/golibdave v0.0.0-20261119162233-ebf7bfbf4a75 h1:nRKh/0PRm01Pu8Kek0wZI6uH9HHEBa49RxQUPdfKou8=
-github.com/sealbro/godave/golibdave v0.0.0-20261119162233-ebf7bfbf4a75/go.mod h1:X5N0QoCLqX7wmrSMDa2nGoMna47Svv5phmllHYnjMvM=
-github.com/sealbro/godave/libdave v0.0.0-20261119162233-ebf7bfbf4a75 h1:9yGbXb+j0eVEdGjVy/8gF/9Utq03+I78gNx1KDszvgM=
-github.com/sealbro/godave/libdave v0.0.0-20261119162233-ebf7bfbf4a75/go.mod h1:CxundbQ722MpK3vD31kaOAxbu1+cFnnEKQDqQ7rpxEM=
 github.com/stretchr/objx v0.5.3 h1:jmXUvGomnU1o3W/V5h2VEradbpJDwGrzugQQvL0POH4=
 github.com/stretchr/objx v0.5.3/go.mod h1:rDQraq+vQZU7Fde9LOZLr8Tax6zZvy4kuNKF+QYS+U0=
 github.com/stretchr/testify v1.12.1 h1:EuwCh5fleGS7H32xRwO3wRGT7DxrDhLAT6FF8MpWDWE=

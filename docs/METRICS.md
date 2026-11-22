@@ -41,14 +41,12 @@ All instruments carry the resource attribute `service.name="go-discord-caller"`.
 
 | OTel instrument | Type | Prometheus series | Attributes | Description |
 |-----------------|------|-------------------|------------|-------------|
-| `gdc.discord.guild`  | ObservableGauge | `gdc_discord_guild`  | `guild_id`, `guild_name` | Info gauge (always `1`) for known guilds. Emitted from `internal/manager/service.go`. |
-| `gdc.bot.online`     | ObservableGauge | `gdc_bot_online`     | `guild_id`               | Number of bots (the owner and its speakers) that are registered members of the guild; absent when the guild is unknown. One series per guild. From `internal/manager/service.go`. |
+| `gdc.discord.guild`  | ObservableGauge | `gdc_discord_guild`  | `guild_id`, `guild_name` | One series per guild the owner bot is in; the value is the number of bots (the owner and its registered speakers) in it, so at least `1`. Dashboards join on it for `guild_name`. From `internal/manager/service.go`. |
 | `gdc.voice.callers`  | ObservableUpDownCounter | `gdc_voice_callers`  | `guild_id`, `channel_id` | Non-bot users with the caller role currently in a voice channel the guild's active raid captures — the owner's channel on a host raid or a guest raid in a caller mode, plus the speakers' channels in modes where speakers capture — recounted from the owner bot's cache on each collection; channels with none are absent. From `internal/manager/service.go`. |
 | `gdc.command.started.total` | Counter | `gdc_command_started_total` | `command`, `guild_id` ⚠️ | Slash command invocations **entering** the handler. Recorded before the handler runs, so a handler that never returns is still counted. From `internal/bot/middleware.go`. |
-| `gdc.command.total`  | Counter         | `gdc_command_total`  | `command`, `guild_id` ⚠️ | Slash command invocations that **completed**. A sustained `gdc_command_started_total - gdc_command_total` means handlers went in and never came out. From `internal/bot/middleware.go`. |
-| `gdc.command.duration` | Histogram (`s`) | `gdc_command_duration_seconds` (`_bucket`/`_sum`/`_count`) | `command`, `guild_id` ⚠️ | Slash command execution duration. Buckets (s): 1, 3, 5, with 3 s being Discord's acknowledgement deadline. From `internal/bot/middleware.go`. |
+| `gdc.command.duration` | Histogram (`s`) | `gdc_command_duration_seconds` (`_bucket`/`_sum`/`_count`) | `command`, `guild_id` ⚠️ | Slash command execution duration. Buckets (s): 1, 3, 5, with 3 s being Discord's acknowledgement deadline. `_count` is the number of invocations that **completed**; a sustained `gdc_command_started_total - gdc_command_duration_seconds_count` means handlers went in and never came out. From `internal/bot/middleware.go`. |
 
-> ⚠️ The three `gdc.command.*` instruments label the guild as `guild.id` (dotted)
+> ⚠️ The two `gdc.command.*` instruments label the guild as `guild.id` (dotted)
 > in code — see `RecordCommand`. The OTLP→Prometheus translation rewrites this
 > to `guild_id`, so dashboards still query `guild_id`, but the attribute is
 > inconsistent with the `guild_id` used by every other instrument. Worth
@@ -59,23 +57,18 @@ All instruments carry the resource attribute `service.name="go-discord-caller"`.
 ## 🛰️ Speaker pool (`internal/telemetry/pool_metrics.go`)
 
 Emitted from `internal/pool/service.go` (observable gauges via a registered
-callback; counters inline in the watchdog). The `gdc.bot.verified` /
-`guilds` / `members_intent` / `verification_blocked` gauges come from each
-bot's own application, fetched at startup and then hourly; a failed fetch keeps
-the last known value.
+callback; counters inline in the watchdog). The verification labels and the
+server count on `gdc.discord.bot` come from each bot's own application, fetched
+at startup and then hourly; a failed fetch keeps the last known value.
 
 | OTel instrument | Type | Prometheus series | Attributes | Description |
 |-----------------|------|-------------------|------------|-------------|
-| `gdc.discord.bot`                | ObservableGauge | `gdc_discord_bot`                | `bot_id`, `bot_name` | Info gauge (always `1`) for known speaker bots. |
+| `gdc.discord.bot`                | ObservableGauge | `gdc_discord_bot`                | `bot_id`, `bot_name`, `verified`, `verification_blocked`, `members_intent` | One series per bot, owner and speakers. The value is the approximate server count, as Discord counts it against the 100-server limit an unverified bot cannot pass; `0` until Discord reports one. `verified` and `verification_blocked` (blocked because of unusual growth) are `true`/`false`; `members_intent` is `approved`, `limited` (switched on without review, allowed until the bot reaches 10,000 users) or `off`. The three are absent until the first fetch. |
 | `gdc.pool.bots.total`            | ObservableGauge | `gdc_pool_bots_total`            | —        | Total speaker bots registered in the pool. (Gauge — *not* a counter despite the `total` suffix.) |
 | `gdc.pool.bots.connected`        | ObservableGauge | `gdc_pool_bots_connected`        | —        | Speaker bots with a healthy gateway connection. |
 | `gdc.bot.gateway.latency`        | ObservableGauge (`ms`) | `gdc_bot_gateway_latency_milliseconds` | `bot_id` | Gateway WebSocket heartbeat RTT per bot. `0` until first ACK. See `docs/LATENCY.md` — this is the **control channel**, not audio latency. |
 | `gdc.voice.server.region`        | ObservableGauge | `gdc_voice_server_region`        | `guild_id`, `bot_id`, `region` | Info gauge (always `1`) for the Discord voice region a bot's connection landed on. Present only while the bot is in voice. |
 | `gdc.voice.server.latency`       | ObservableGauge (`ms`) | `gdc_voice_server_latency_milliseconds` | `guild_id`, `bot_id`, `region` | Voice websocket heartbeat RTT to that voice server — the network leg audio takes, unlike `gdc.bot.gateway.latency`. Absent until the first heartbeat ACK. |
-| `gdc.bot.verified`               | ObservableGauge | `gdc_bot_verified`               | `bot_id` | `1` when Discord shows the bot as verified, `0` otherwise. An unverified bot cannot join more than 100 servers. Owner and speakers. |
-| `gdc.bot.guilds`                 | ObservableGauge | `gdc_bot_guilds`                 | `bot_id` | Approximate server count per bot, as Discord counts it against that limit. Absent when Discord reports no count. |
-| `gdc.bot.members_intent`         | ObservableGauge | `gdc_bot_members_intent`         | `bot_id`, `state` | Always `1`; `state` is `approved`, `limited` (switched on without review, allowed until the bot reaches 10,000 users) or `off`. |
-| `gdc.bot.verification_blocked`   | ObservableGauge | `gdc_bot_verification_blocked`   | `bot_id` | `1` when Discord has blocked verification because of unusual growth. |
 | `gdc.pool.reconnect.attempts.total` | Counter | `gdc_pool_reconnect_attempts_total` | `bot_id` | Watchdog gateway reconnect attempts. |
 | `gdc.pool.reconnect.failures.total` | Counter | `gdc_pool_reconnect_failures_total` | `bot_id` | Watchdog gateway reconnect failures. |
 | `gdc.gateway.ready.total` | Counter | `gdc_gateway_ready_total` | `bot_id` | Gateway READY events of the owner bot. Each follows an IDENTIFY, and Discord resets a bot's token after 1000 in a day: alert on `increase(gdc_gateway_ready_total[10m]) > 10`. |
@@ -90,12 +83,11 @@ the opus pipeline via `FrameDropper`.
 
 | OTel instrument | Type | Prometheus series | Attributes | Description |
 |-----------------|------|-------------------|------------|-------------|
-| `gdc.voice.sessions.active`         | UpDownCounter | `gdc_voice_sessions_active`         | `guild_id` | Currently active voice raid sessions. |
 | `gdc.voice.session.start.total`     | Counter       | `gdc_voice_session_start_total`     | `guild_id` | Voice raid starts. |
 | `gdc.voice.bot.join.duration` | Histogram (`s`) | `gdc_voice_bot_join_duration_seconds` (`_bucket`/`_sum`/`_count`) | `guild_id`, `bot_kind`, `outcome` | Time from the start of a raid (`/start`, or joining one by code) until each bot is in its voice channel — `outcome="joined"` — or until its join gave up (`"failed"`). `bot_kind` is `owner` or `speaker`. The owner joins after the speakers, so its time includes theirs. Buckets (s): 1, 3, 5, 10, 15. |
 | `gdc.voice.session.stop.total`      | Counter       | `gdc_voice_session_stop_total`      | `guild_id` | Voice raid stops. |
 | `gdc.session.speakers`              | Gauge         | `gdc_session_speakers`              | `guild_id` | Speakers (pool speaker bots plus the owner bot, if it joined) in the active raid; reset to `0` on stop. |
-| `gdc.session.mode`                  | Gauge         | `gdc_session_mode`                  | `guild_id`, `mode` | `1` while the guild's active raid runs in the labelled mode, `0` once it ends. `mode`: `one_caller` / `guild_caller` / `ally_listener` / `ally_caller` / `one_many_guild_caller` / `one_many_ally_caller`. |
+| `gdc.session.mode`                  | Gauge         | `gdc_session_mode`                  | `guild_id`, `mode` | `1` while the guild's active raid runs in the labelled mode, `0` once it ends. `mode`: `one_caller` / `guild_caller` / `ally_listener` / `ally_caller` / `one_many_guild_caller` / `one_many_ally_caller`. Summed over `mode` it is the guild's number of active raids. |
 | `gdc.fanout.frames.dropped.total`   | Counter       | `gdc_fanout_frames_dropped_total`   | `guild_id`, `path`, `bot_id` | Opus frames dropped on full channels, per destination buffer. `path`: `mixer` / `direct` / `channel_mixer` / `relay_bridge` / `provider` / `receiver`. `bot_id` is the bot whose output queue was full; set on `direct` and `channel_mixer` only. |
 | `gdc.opus.source.frames.lost.total` | Counter       | `gdc_opus_source_frames_lost_total` | `guild_id` | Frames fed through the voice receiver that evicted an older frame from at least one mixer input, counted once per frame; relay-fed inputs are not included. `path="mixer"` above counts each destination's eviction separately, so with several destination channels it overstates how much speech was lost; use this one for that. |
 | `gdc.session.route_transitions.total` | Counter     | `gdc_session_route_transitions_total` | `guild_id`, `from`, `to` | Auto-router source-mode transitions. `from`/`to`: `off` / `copy` / `mix`. |
@@ -132,8 +124,7 @@ decrypt health is reported as a count of senders per bucket.
 | `gdc.dave.decrypt.total`   | ObservableCounter | `gdc_dave_decrypt_total`   | `bot_user_id`, `outcome` (`success`/`passthrough`/`dropped`/`failure`), `reason` | Inbound frame decryption outcomes, summed over senders. |
 | `gdc.dave.decrypt.senders` | ObservableGauge   | `gdc_dave_decrypt_senders` | `bot_user_id`, `health` (`clean`/`partial`/`failing`) | Distinct senders per decrypt-health bucket. One `failing` sender among `clean` ones points at that sender; `partial` everywhere points at the session. |
 | `gdc.dave.encrypt.total`   | ObservableCounter | `gdc_dave_encrypt_total`   | `bot_user_id`, `outcome` (`success`/`failure`/`unsent_alone`), `reason` | Outbound frame encryption outcomes. `unsent_alone` counts frames discarded because the bot is alone in its channel (never ready, nobody listening); it is not a failure and does not count toward a rejoin. A bot whose encryptor lost its key ratchet fails every frame (`reason="missing_key_ratchet"`) and is silent in its channel while looking connected; after ~10 s of failures it rejoins its channel. |
-| `gdc.dave.decrypt.position.total` | ObservableCounter | `gdc_dave_decrypt_position_total` | `bot_user_id`, `outcome` (`success`/`failure`), `position` (`first`/`early`/`mid`) | Decryptions that reached the backend, by where the frame fell in its sender's talk spurt: the first frame after ≥100 ms of silence, frames 1–9 (the first 200 ms), or later. Compare failure rates across positions to tell losses at the start of speech from losses spread through it. |
-| `gdc.dave.decrypt.duration` | Histogram | `gdc_dave_decrypt_duration_milliseconds` | `bot_user_id` | How long one frame decryption took. Frames from every speaker are decrypted in turn on one receive goroutine, so a slow decrypt delays them all. Compare its tail with `gdc_opus_receive_interval_milliseconds` to tell a stall in decryption from frames that were already late when they arrived. |
+| `gdc.dave.decrypt.duration` | Histogram | `gdc_dave_decrypt_duration_milliseconds` | `bot_user_id` | How long one frame decryption took. Frames from every speaker are decrypted in turn on one receive goroutine, so a slow decrypt delays them all. Buckets (ms): 0.1, 0.5, 2, 10. Compare its tail with `gdc_opus_receive_interval_milliseconds` to tell a stall in decryption from frames that were already late when they arrived. |
 
 `reason` is `none` on success, otherwise one of `missing_key_ratchet`,
 `invalid_nonce`, `missing_cryptor`, `decrypt_failure`, `encrypt_failure`,
@@ -187,12 +178,8 @@ gdc_pool_bots_connected / gdc_pool_bots_total
 # bots that cannot encrypt outbound audio (silent while connected)
 sum by (bot_user_id) (rate(gdc_dave_encrypt_total{outcome="failure"}[5m])) > 0
 
-# DAVE decrypt failure rate by position in the talk spurt
-sum by (position) (rate(gdc_dave_decrypt_position_total{outcome="failure"}[1h]))
-  / sum by (position) (rate(gdc_dave_decrypt_position_total[1h]))
-
 # active voice raids
-sum(gdc_voice_sessions_active)
+sum(gdc_session_mode)
 ```
 
 ---

@@ -11,23 +11,16 @@ import (
 // and slash command observability.
 type BotMetrics struct {
 	meter        metric.Meter // retained for the Register* callbacks
-	guildInfo    metric.Int64ObservableGauge
-	botOnline    metric.Int64ObservableGauge
+	guild        metric.Int64ObservableGauge
 	voiceCallers metric.Int64ObservableUpDownCounter
 	cmdStarted   metric.Int64Counter
-	cmdCount     metric.Int64Counter
 	cmdDuration  metric.Float64Histogram
 }
 
 func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	b.meter = meter
-	if b.guildInfo, err = meter.Int64ObservableGauge("gdc.discord.guild",
-		metric.WithDescription("Info gauge for known guilds; value is always 1. Labels: guild_id, guild_name."),
-	); err != nil {
-		return
-	}
-	if b.botOnline, err = meter.Int64ObservableGauge("gdc.bot.online",
-		metric.WithDescription("Number of bots, the owner and its speakers, that are registered members of the guild; absent when the guild is unknown."),
+	if b.guild, err = meter.Int64ObservableGauge("gdc.discord.guild",
+		metric.WithDescription("One series per guild the owner bot is in; value is the number of bots, the owner and its speakers, registered in it. Labels: guild_id, guild_name."),
 	); err != nil {
 		return
 	}
@@ -37,17 +30,12 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 		return
 	}
 	if b.cmdStarted, err = meter.Int64Counter("gdc.command.started.total",
-		metric.WithDescription("Slash command invocations entering the handler; exceeds gdc.command.total by the number still running."),
-	); err != nil {
-		return
-	}
-	if b.cmdCount, err = meter.Int64Counter("gdc.command.total",
-		metric.WithDescription("Slash command invocations that completed"),
+		metric.WithDescription("Slash command invocations entering the handler; exceeds the gdc.command.duration count by the number still running."),
 	); err != nil {
 		return
 	}
 	if b.cmdDuration, err = meter.Float64Histogram("gdc.command.duration",
-		metric.WithDescription("Slash command execution duration in seconds"),
+		metric.WithDescription("Slash command execution duration in seconds; its count is the number of invocations that completed."),
 		metric.WithUnit("s"),
 		metric.WithExplicitBucketBoundaries(1, 3, 5),
 	); err != nil {
@@ -56,32 +44,18 @@ func (b *BotMetrics) init(meter metric.Meter) (err error) {
 	return nil
 }
 
-// RegisterBotOnline registers cb as the observable callback for the bot online gauge.
-func (b *BotMetrics) RegisterBotOnline(cb metric.Callback) error {
-	_, err := b.meter.RegisterCallback(cb, b.botOnline)
-	return err
-}
-
-// ObserveBotOnline emits the number of bots that are members of guildID via o.
-// Call inside the callback registered with RegisterBotOnline.
-func (b *BotMetrics) ObserveBotOnline(o metric.Observer, guildID string, bots int) {
-	o.ObserveInt64(b.botOnline, int64(bots),
-		metric.WithAttributes(attribute.String("guild_id", guildID)),
-	)
-}
-
-// RegisterGuildInfo registers cb as the observable callback for the guild info gauge.
+// RegisterGuilds registers cb as the observable callback for the guild gauge.
 // Call once after guilds are available (e.g. from StartMetrics) so the first
 // collection cycle has data to emit.
-func (b *BotMetrics) RegisterGuildInfo(cb metric.Callback) error {
-	_, err := b.meter.RegisterCallback(cb, b.guildInfo)
+func (b *BotMetrics) RegisterGuilds(cb metric.Callback) error {
+	_, err := b.meter.RegisterCallback(cb, b.guild)
 	return err
 }
 
-// ObserveGuildInfo emits a value of 1 for the given guildID/guildName pair via o.
-// Call inside the callback registered with RegisterGuildInfo.
-func (b *BotMetrics) ObserveGuildInfo(o metric.Observer, guildID, guildName string) {
-	o.ObserveInt64(b.guildInfo, 1,
+// ObserveGuild emits the number of bots registered in guildID via o.
+// Call inside the callback registered with RegisterGuilds.
+func (b *BotMetrics) ObserveGuild(o metric.Observer, guildID, guildName string, bots int) {
+	o.ObserveInt64(b.guild, int64(bots),
 		metric.WithAttributes(
 			attribute.String("guild_id", guildID),
 			attribute.String("guild_name", guildName),
@@ -116,9 +90,7 @@ func (b *BotMetrics) RecordCommandStart(ctx context.Context, command, guildID st
 
 // RecordCommand records slash command completion and duration for a command/guild pair.
 func (b *BotMetrics) RecordCommand(ctx context.Context, command, guildID string, durationSeconds float64) {
-	attrs := commandAttrs(command, guildID)
-	b.cmdCount.Add(ctx, 1, attrs)
-	b.cmdDuration.Record(ctx, durationSeconds, attrs)
+	b.cmdDuration.Record(ctx, durationSeconds, commandAttrs(command, guildID))
 }
 
 func commandAttrs(command, guildID string) metric.MeasurementOption {

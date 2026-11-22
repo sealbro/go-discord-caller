@@ -11,6 +11,7 @@ import (
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
@@ -76,26 +77,34 @@ func (r *applicationRest) GetCurrentApplication(...rest.RequestOpt) (*discord.Ap
 	return &app, nil
 }
 
-// gaugeByBot collects the named Int64 gauge keyed by its bot_id attribute.
-func gaugeByBot(t *testing.T, reader *sdkmetric.ManualReader, name string) map[string]int64 {
+// botSeries collects gdc.discord.bot keyed by its bot_id attribute.
+func botSeries(t *testing.T, reader *sdkmetric.ManualReader) map[string]metricdata.DataPoint[int64] {
 	t.Helper()
 	var rm metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &rm); err != nil {
 		t.Fatalf("collect: %v", err)
 	}
-	values := map[string]int64{}
+	points := map[string]metricdata.DataPoint[int64]{}
 	for _, scope := range rm.ScopeMetrics {
 		for _, m := range scope.Metrics {
-			if m.Name != name {
+			if m.Name != "gdc.discord.bot" {
 				continue
 			}
 			for _, dp := range m.Data.(metricdata.Gauge[int64]).DataPoints {
 				id, _ := dp.Attributes.Value("bot_id")
-				values[id.AsString()] = dp.Value
+				if _, dup := points[id.AsString()]; dup {
+					t.Fatalf("gdc.discord.bot: more than one series for bot %s", id.AsString())
+				}
+				points[id.AsString()] = dp
 			}
 		}
 	}
-	return values
+	return points
+}
+
+func label(dp metricdata.DataPoint[int64], key attribute.Key) string {
+	v, _ := dp.Attributes.Value(key)
+	return v.Emit()
 }
 
 // Every bot — speakers and the owner — is polled with its own token, and a
@@ -120,20 +129,31 @@ func TestPollVerificationReportsEveryBot(t *testing.T) {
 	s.RegisterBot(ownerID, "owner", &bot.Client{Rest: ownerRest, Caches: cache.New()})
 	s.StartMetrics()
 
+	if before := botSeries(t, reader)[speakerID.String()]; before.Attributes.HasValue("verified") {
+		t.Error("speaker carries a verified label before the first poll")
+	}
+
 	s.pollVerification(context.Background())
 
-	verified := gaugeByBot(t, reader, "gdc.bot.verified")
-	if verified[speakerID.String()] != 0 || verified[ownerID.String()] != 1 {
-		t.Errorf("gdc.bot.verified = %v, want speaker 0 and owner 1", verified)
+	bots := botSeries(t, reader)
+	speaker, owner := bots[speakerID.String()], bots[ownerID.String()]
+	if label(speaker, "verified") != "false" || label(owner, "verified") != "true" {
+		t.Errorf("verified = speaker %q, owner %q; want false and true", label(speaker, "verified"), label(owner, "verified"))
 	}
-	if got := gaugeByBot(t, reader, "gdc.bot.guilds")[speakerID.String()]; got != 76 {
-		t.Errorf("gdc.bot.guilds for the speaker = %d, want 76", got)
+	if speaker.Value != 76 {
+		t.Errorf("server count for the speaker = %d, want 76", speaker.Value)
+	}
+	if label(speaker, "members_intent") != telemetry.MembersIntentOff || label(owner, "members_intent") != telemetry.MembersIntentApproved {
+		t.Errorf("members_intent = speaker %q, owner %q; want off and approved", label(speaker, "members_intent"), label(owner, "members_intent"))
+	}
+	if label(owner, "verification_blocked") != "false" {
+		t.Errorf("verification_blocked for the owner = %q, want false", label(owner, "verification_blocked"))
 	}
 
 	speakerRest.err = errors.New("discord unavailable")
 	s.pollVerification(context.Background())
 
-	if got, ok := gaugeByBot(t, reader, "gdc.bot.guilds")[speakerID.String()]; !ok || got != 76 {
-		t.Errorf("after a failed poll gdc.bot.guilds for the speaker = %d (present %v), want the last known 76", got, ok)
+	if got := botSeries(t, reader)[speakerID.String()]; got.Value != 76 || label(got, "verified") != "false" {
+		t.Errorf("after a failed poll the speaker reports %d servers, verified %q; want the last known 76, false", got.Value, label(got, "verified"))
 	}
 }

@@ -211,26 +211,43 @@ func (m *Service) sessionChannels(session *guild.Session) []snowflake.ID {
 // StartMetrics registers OTel observable metric callbacks.
 // Call once after the speaker pool is connected, alongside StartWatchdog.
 func (m *Service) StartMetrics() {
-	if err := m.metrics.Bot.RegisterBotOnline(m.observeBotOnline); err != nil {
-		slog.Error("manager: failed to register bot_online metric callback", slog.Any("err", err))
-	}
-	if err := m.metrics.Bot.RegisterGuildInfo(m.observeGuildInfo); err != nil {
-		slog.Error("manager: failed to register guild_info metric callback", slog.Any("err", err))
+	if err := m.metrics.Bot.RegisterGuilds(m.observeGuilds); err != nil {
+		slog.Error("manager: failed to register guild metric callback", slog.Any("err", err))
 	}
 	if err := m.metrics.Bot.RegisterVoiceCallers(m.observeVoiceCallers); err != nil {
 		slog.Error("manager: failed to register voice_callers metric callback", slog.Any("err", err))
 	}
 }
 
-// observeGuildInfo is an OTel observable callback that emits gdc_discord_guild
-// for every guild the owner bot is currently a member of.
-// Reads directly from the disgo cache — no duplicate state needed.
-func (m *Service) observeGuildInfo(ctx context.Context, o metric.Observer) error {
+// observeGuilds is an OTel observable callback that emits gdc_discord_guild for
+// every guild the owner bot is currently a member of, valued with how many bots
+// (the owner and its registered speakers) it has there. It is one series per
+// guild, not per bot, so cardinality does not grow with the pool.
+func (m *Service) observeGuilds(ctx context.Context, o metric.Observer) error {
+	speakers := m.registeredSpeakerCounts()
 	for g := range m.ownerClient.Caches.Guilds() {
-		m.metrics.Bot.ObserveGuildInfo(o, g.ID.String(), g.Name)
+		m.metrics.Bot.ObserveGuild(o, g.ID.String(), g.Name, 1+speakers[g.ID])
 		m.metrics.Session.PrimeGuild(ctx, g.ID)
 	}
 	return nil
+}
+
+// registeredSpeakerCounts counts, per guild, the pool bots registered as its
+// speakers. Taken under the read lock so that metric emission, which calls into
+// the OTel SDK, does not hold m.mu and block voice raid writes.
+func (m *Service) registeredSpeakerCounts() map[snowflake.ID]int {
+	poolIDs := m.poolSvc.GetIDs()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	counts := make(map[snowflake.ID]int, len(m.statuses))
+	for guildID, st := range m.statuses {
+		for _, botID := range poolIDs {
+			if _, ok := st.Speakers[botID]; ok {
+				counts[guildID]++
+			}
+		}
+	}
+	return counts
 }
 
 // observeVoiceCallers is an OTel observable callback that emits gdc_voice_callers
@@ -312,43 +329,6 @@ func (m *Service) capturedChannels(guildID snowflake.ID) map[snowflake.ID]struct
 		}
 	}
 	return channels
-}
-
-// observeBotOnline is an OTel observable callback that emits gdc_bot_online:
-// for every guild, how many bots (the owner and its speakers) are registered
-// members at metric collection time. It is one series per guild, not per bot, so
-// cardinality does not grow with the pool.
-func (m *Service) observeBotOnline(_ context.Context, o metric.Observer) error {
-	speakerIDs := m.poolSvc.GetIDs()
-
-	// Snapshot the per-guild speaker sets under the read lock so that metric
-	// emission (which calls into the OTel SDK and may itself acquire locks)
-	// does not hold m.mu and block voice raid write operations.
-	type guildEntry struct {
-		guildID    snowflake.ID
-		speakerIDs []snowflake.ID
-	}
-	m.mu.RLock()
-	snap := make([]guildEntry, 0, len(m.statuses))
-	for guildID, st := range m.statuses {
-		if _, joined := m.ownerClient.Caches.Guild(guildID); !joined {
-			continue
-		}
-		var inGuild []snowflake.ID
-		for _, botID := range speakerIDs {
-			if _, ok := st.Speakers[botID]; ok {
-				inGuild = append(inGuild, botID)
-			}
-		}
-		snap = append(snap, guildEntry{guildID, inGuild})
-	}
-	m.mu.RUnlock()
-
-	for _, e := range snap {
-		// Owner bot is always a member of every guild it manages.
-		m.metrics.Bot.ObserveBotOnline(o, e.guildID.String(), 1+len(e.speakerIDs))
-	}
-	return nil
 }
 
 // ownerVoice returns a GuildVoice for the owner bot in guildID, bound to its

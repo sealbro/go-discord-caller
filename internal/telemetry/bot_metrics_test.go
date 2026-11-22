@@ -33,7 +33,7 @@ func collectSum(t *testing.T, reader *sdkmetric.ManualReader, name string) (int6
 }
 
 // A slash command whose handler blocks forever must still be visible in the
-// metrics. gdc.command.total is recorded after the handler returns, so on its
+// metrics. gdc.command.duration is recorded after the handler returns, so on its
 // own it cannot distinguish "wedged handler" from "nobody ran the command" —
 // the 2026-09-22 outage, where /start and /stop hung for a day behind a held
 // manager lock and produced neither a metric nor a log line.
@@ -58,8 +58,8 @@ func TestRecordCommandStart_MakesWedgedHandlerVisible(t *testing.T) {
 	if started != 1 {
 		t.Errorf("want 1 started, got %d", started)
 	}
-	if _, ok := collectSum(t, reader, "gdc.command.total"); ok {
-		t.Error("gdc.command.total must stay absent while the handler is still running")
+	if _, ok := commandDuration(t, reader); ok {
+		t.Error("gdc.command.duration must stay absent while the handler is still running")
 	}
 
 	// Once it completes the two agree, so the difference is a live gauge of
@@ -67,16 +67,24 @@ func TestRecordCommandStart_MakesWedgedHandlerVisible(t *testing.T) {
 	b.RecordCommand(ctx, "start", "100", 0.5)
 
 	started, _ = collectSum(t, reader, "gdc.command.started.total")
-	completed, ok := collectSum(t, reader, "gdc.command.total")
-	if !ok {
-		t.Fatal("gdc.command.total must be emitted on completion")
-	}
-	if started != completed {
+	completed := commandDurationPoint(t, reader).Count
+	if uint64(started) != completed {
 		t.Errorf("started (%d) and completed (%d) must agree after the handler returns", started, completed)
 	}
 }
 
 func commandDurationPoint(t *testing.T, reader *sdkmetric.ManualReader) metricdata.HistogramDataPoint[float64] {
+	t.Helper()
+	point, ok := commandDuration(t, reader)
+	if !ok {
+		t.Fatal("gdc.command.duration was not emitted")
+	}
+	return point
+}
+
+// commandDuration returns the single gdc.command.duration point, and whether
+// the instrument produced one.
+func commandDuration(t *testing.T, reader *sdkmetric.ManualReader) (metricdata.HistogramDataPoint[float64], bool) {
 	t.Helper()
 
 	var rm metricdata.ResourceMetrics
@@ -89,14 +97,16 @@ func commandDurationPoint(t *testing.T, reader *sdkmetric.ManualReader) metricda
 				continue
 			}
 			hist, ok := m.Data.(metricdata.Histogram[float64])
-			if !ok || len(hist.DataPoints) != 1 {
+			if !ok || len(hist.DataPoints) > 1 {
 				t.Fatalf("gdc.command.duration: want one histogram point, got %T %+v", m.Data, m.Data)
 			}
-			return hist.DataPoints[0]
+			if len(hist.DataPoints) == 0 {
+				return metricdata.HistogramDataPoint[float64]{}, false
+			}
+			return hist.DataPoints[0], true
 		}
 	}
-	t.Fatal("gdc.command.duration was not emitted")
-	return metricdata.HistogramDataPoint[float64]{}
+	return metricdata.HistogramDataPoint[float64]{}, false
 }
 
 func bucketOf(bounds []float64, seconds float64) int {

@@ -246,7 +246,7 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 				botName = self.Username
 			}
 		}
-		s.metrics.ObserveBotInfo(o, id.String(), botName)
+		s.observeBot(o, id, botName)
 
 		if c == nil || !isConnected(c) {
 			continue
@@ -261,7 +261,7 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 				name = self.Username
 			}
 		}
-		s.metrics.ObserveBotInfo(o, id.String(), name)
+		s.observeBot(o, id, name)
 		// Report the owner bot's gateway RTT too, so it appears in the latency
 		// panels alongside the pool bots (it is not part of poolClients).
 		if eb.client == nil || !isConnected(eb.client) {
@@ -269,12 +269,19 @@ func (s *Service) observePoolBots(_ context.Context, o metric.Observer) error {
 		}
 		s.observeGatewayLatency(o, id, eb.client)
 	}
-	for id, v := range s.verification {
-		s.metrics.ObserveBotVerification(o, id.String(), v)
-	}
 	s.mu.RUnlock()
 	s.metrics.ObservePoolBots(o, total, connected)
 	return nil
+}
+
+// observeBot reports a bot with its verification state, once polled. Call with
+// s.mu held.
+func (s *Service) observeBot(o metric.Observer, id snowflake.ID, name string) {
+	var verification *telemetry.BotVerification
+	if v, ok := s.verification[id]; ok {
+		verification = &v
+	}
+	s.metrics.ObserveBot(o, id.String(), name, verification)
 }
 
 // observeGatewayLatency reports the heartbeat RTT unless a beat is in flight.

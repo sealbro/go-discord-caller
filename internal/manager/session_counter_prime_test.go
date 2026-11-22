@@ -45,10 +45,7 @@ func counterByGuild(t *testing.T, reader *sdkmetric.ManualReader, name string) m
 // no sessions. The series has to be exported at 0 before any raid starts.
 func TestSessionCounters_ExistAtZeroBeforeFirstRaid(t *testing.T) {
 	t.Parallel()
-	h := newBotOnlineHarness(t)
-	if err := h.svc.metrics.Bot.RegisterGuildInfo(h.svc.observeGuildInfo); err != nil {
-		t.Fatalf("RegisterGuildInfo: %v", err)
-	}
+	h := newGuildMetricHarness(t)
 
 	h.joinGuild(testGuildID)
 	if _, cached := h.client.Caches.Guild(testGuildID); !cached {

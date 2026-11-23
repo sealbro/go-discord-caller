@@ -31,6 +31,8 @@ description: >-
 
 One **owner / caller bot** listens in a voice channel and captures audio from users with a configured role, then fans it out to a pool of **speaker bots**, each playing back in its own channel — in the same server or in allied servers via a relay code.
 
+![A raid in progress: the owner bot in the main channel and one speaker bot in each party channel](assets/screenshots/01-raid-voice-channels.png){ width="300" loading=lazy }
+
 ```mermaid
 ---
 config:
@@ -125,6 +127,24 @@ docker run -d \
 ```
 
 Then run `/setup` in your server to bind the capture role, manager role, owner channel, and speaker bots — no config files needed. Full instructions are in the [README on GitHub](https://github.com/sealbro/go-discord-caller#discord-app-setup).
+
+### What setup looks like
+
+`/setup` shows every bot and the channel it plays in, the roles, and the server language:
+
+![The /setup panel: capture and manager roles, each bot bound to a voice channel, language and buttons](assets/screenshots/03-setup-overview.png){ width="480" loading=lazy }
+
+**Bind Roles** picks who is relayed (capture role) and who may start and stop raids (manager role):
+
+![Bind Roles: capture and manager role pickers](assets/screenshots/04-setup-bind-roles.png){ width="480" loading=lazy }
+
+**Bind Speakers** turns each speaker bot on or off and gives it a voice channel:
+
+![Bind Speakers: enable or disable each speaker and pick its voice channel](assets/screenshots/05-setup-bind-speakers.png){ width="560" loading=lazy }
+
+`/start` then sends every speaker to its channel:
+
+![The /start reply: voice raid started, 10 of 10 speakers joined their channels](assets/screenshots/02-raid-started.png){ width="560" loading=lazy }
 
 ## Built for gaming guilds
 

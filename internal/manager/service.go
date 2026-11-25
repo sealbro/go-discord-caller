@@ -41,6 +41,7 @@ type Service struct {
 	poolSvc            pool.PoolService
 	ownerClient        *bot.Client
 	ownerBotID         snowflake.ID
+	voices             VoiceHost // nil runs voice on the bots' own clients; see voiceHost
 	bindMu             sync.Mutex
 	toggleMu           sync.Mutex // orders speaker toggles so the store write follows the in-memory change
 	test               config.TestConfig
@@ -342,7 +343,8 @@ func (m *Service) capturedChannels(guildID snowflake.ID) map[snowflake.ID]struct
 // Join/Leave on the result to manage the connection.
 func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
 	channelID, _ := m.liveBoundChannel(guildID, m.ownerBotID)
-	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID).ForBot(m.ownerBotID)
+	vm, _ := m.voiceHost().VoiceManager(m.ownerBotID)
+	return pool.NewGuildVoice(vm, channelID).ForBot(m.ownerBotID)
 }
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
@@ -566,12 +568,12 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 // configured channel. Use Join/Leave on the result to manage the connection.
 // Returns false if the bot is not in the pool or its gateway is not connected.
 func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice, bool) {
-	client, ok := m.poolSvc.GetClientByID(botUserID)
+	vm, ok := m.voiceHost().VoiceManager(botUserID)
 	if !ok {
 		return pool.GuildVoice{}, false
 	}
 	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
-	return pool.NewGuildVoice(client.VoiceManager, channelID).ForBot(botUserID), true
+	return pool.NewGuildVoice(vm, channelID).ForBot(botUserID), true
 }
 
 // CheckGuildChannelAccess checks Connect+Speak permissions for the owner bot and

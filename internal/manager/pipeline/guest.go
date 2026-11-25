@@ -30,7 +30,7 @@ func (GuestListenerPipeline) Build(ctx context.Context, p GuestParams) (*guild.S
 		outs = append(outs, p.OwnerChOut)
 	}
 	var listenMixer *opus.Mixer
-	if p.AllySession.HostMode == guild.RaidModeGuildCaller {
+	if p.AllySession.HostRaidMode() == guild.RaidModeGuildCaller {
 		mx, err := opus.NewMixer(p.GuestGM.Opus)
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("guest listener: create mixer: %w", err)

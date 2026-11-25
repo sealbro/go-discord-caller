@@ -27,7 +27,7 @@ type Params struct {
 	CancelFunc   context.CancelFunc
 	Mode         guild.RaidMode
 	AllyCode     ally.Code
-	AllySession  *ally.Session
+	AllySession  ally.Relay
 	Setup        *Setup
 	OwnerHandle  *opus.FanoutHandle // owner FanoutHandle; non-nil when owner capture is enabled
 	ChOwnerOut   chan []byte        // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
@@ -47,7 +47,7 @@ type GuestParams struct {
 	CancelFunc     context.CancelFunc
 	Code           ally.Code
 	GuestMode      guild.RaidMode
-	AllySession    *ally.Session
+	AllySession    ally.Relay
 	Setup          *Setup
 	OwnerChOut     chan []byte
 	OwnerHandle    *opus.FanoutHandle // non-nil iff the guest owner bot has an inline-capture VoiceReceiver wired up

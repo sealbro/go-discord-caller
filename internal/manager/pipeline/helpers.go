@@ -86,7 +86,7 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 // produced frame directly to all guest guilds. EndSession runs after Run
 // returns, by which time tick (and therefore the sink) is no longer invoked,
 // so cleanup is ordered after the last broadcast.
-func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func(), mode string) {
+func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession ally.Relay, ownerCleanup func(), mode string) {
 	guildID := gm.GuildID()
 	relayMixer.SetSink(func(pkt []byte) {
 		relaySession.BroadcastFromGuild(guildID, pkt)
@@ -100,7 +100,7 @@ func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMi
 // StartGuestRelayBroadcast runs the guest relay mixer with a sink that
 // broadcasts each produced frame directly to all OTHER guilds via
 // BroadcastFromGuild, excluding the guest itself.
-func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, session *ally.Session, guestGuildID snowflake.ID) {
+func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, session ally.Relay, guestGuildID snowflake.ID) {
 	relayMixer.SetSink(func(pkt []byte) {
 		session.BroadcastFromGuild(guestGuildID, pkt)
 	})
@@ -111,7 +111,7 @@ func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, sessi
 // true while some OTHER guild in the ally session may broadcast audio in.
 // Attach it to every destination that RegisterRelayInputs feeds, so the router
 // keeps that destination's mixer running even when the local guild is silent.
-func RelayFeedFor(session *ally.Session, guildID snowflake.ID) func() bool {
+func RelayFeedFor(session ally.Relay, guildID snowflake.ID) func() bool {
 	return func() bool { return session.HasCapturingPeers(guildID) }
 }
 
@@ -120,7 +120,7 @@ func RelayFeedFor(session *ally.Session, guildID snowflake.ID) func() bool {
 // soon as a peer guild joins (and fall back to copy mode when it leaves).
 // When capturing is true, guildID is also registered as a guild that may
 // broadcast into the session, which is what flips its peers' RelayFeed.
-func WatchRelayMembership(session *ally.Session, guildID snowflake.ID, r *router.Router, capturing bool) {
+func WatchRelayMembership(session ally.Relay, guildID snowflake.ID, r *router.Router, capturing bool) {
 	session.SetRouteObserver(guildID, r.Recompute)
 	if capturing {
 		session.SetCapturing(guildID)

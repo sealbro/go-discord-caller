@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-25
+
 ### Changed
+- **Dependencies**: Go dependencies updated to their latest versions.
 - **`gdc_opus_allow_user_duration_milliseconds` removed**: the caller-role check it timed runs once per member per raid and always took under 1 ms.
 
 ### Fixed

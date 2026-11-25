@@ -56,11 +56,11 @@ func (StarCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, 
 		})
 	}
 
-	hubMixer, err := opus.NewMixer(p.GM.Opus)
+	hubMixer, err := opus.NewMixer(p.GM.OpusMetrics())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create hub mixer: %w", err)
 	}
-	relayMixer, err := opus.NewMixer(p.GM.Opus)
+	relayMixer, err := opus.NewMixer(p.GM.OpusMetrics())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}

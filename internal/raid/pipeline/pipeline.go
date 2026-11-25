@@ -18,6 +18,19 @@ import (
 // *AllowFilter satisfies it; pipeline tests provide a stub.
 type AllowSource = guild.CaptureFilter
 
+// Metrics is what a raid's audio records about itself. Satisfied by
+// telemetry.GuildMetrics.
+type Metrics interface {
+	GuildID() snowflake.ID
+	OpusMetrics() telemetry.OpusRecorder
+	Drop(path telemetry.DropPath) func()
+	DropFor(path telemetry.DropPath, botID snowflake.ID) func()
+	RouteTransition(from, to string)
+	SessionStopped(mode string)
+}
+
+var _ Metrics = telemetry.GuildMetrics{}
+
 // Params holds all inputs the three host pipeline topologies need.
 // Built once by manager.Service.StartVoiceRaid after the common owner/speaker setup;
 // passed verbatim to HostPipeline.Build.
@@ -33,7 +46,7 @@ type Params struct {
 	ChOwnerOut   chan []byte        // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
 	OwnerCleanup func()             // closes owner provider/receiver; called on teardown or build error
 	OV           pool.GuildVoice
-	GM           telemetry.GuildMetrics
+	GM           Metrics
 	AllowFilter  AllowSource
 	VoiceProbe   router.VoiceProbe // production: *manager.cacheVoiceProbe
 }
@@ -51,7 +64,7 @@ type GuestParams struct {
 	Setup          *Setup
 	OwnerChOut     chan []byte
 	OwnerHandle    *opus.FanoutHandle // non-nil iff the guest owner bot has an inline-capture VoiceReceiver wired up
-	GuestGM        telemetry.GuildMetrics
+	GuestGM        Metrics
 	AllowFilter    AllowSource
 	VoiceProbe     router.VoiceProbe
 }

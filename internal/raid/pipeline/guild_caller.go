@@ -41,13 +41,13 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 	// One mixer per destination channel.
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.GM.Opus)
+		mx, err := opus.NewMixer(p.GM.OpusMetrics())
 		if err != nil {
 			return nil, nil, fmt.Errorf("create channel mixer: %w", err)
 		}
 		channelMixers[dest.ChannelID] = mx
 	}
-	relayMixer, err := opus.NewMixer(p.GM.Opus)
+	relayMixer, err := opus.NewMixer(p.GM.OpusMetrics())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}

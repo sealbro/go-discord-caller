@@ -68,7 +68,7 @@ type relayBridge struct {
 // feeding every destination's mixer. It returns nil when there is nothing to
 // feed or the decoder cannot be created; otherwise the caller must detach the
 // guild from the session and then stop the bridge on teardown.
-func registerRelayInputs(gm telemetry.GuildMetrics, session ally.Relay, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
+func registerRelayInputs(gm Metrics, session ally.Relay, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
 	b := newRelayBridge(gm, session, dests, chanMixers, newDecoder)
 	if b == nil {
 		return nil
@@ -78,7 +78,7 @@ func registerRelayInputs(gm telemetry.GuildMetrics, session ally.Relay, dests []
 	return b
 }
 
-func newRelayBridge(gm telemetry.GuildMetrics, session ally.Relay, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
+func newRelayBridge(gm Metrics, session ally.Relay, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
 	if len(dests) == 0 {
 		return nil
 	}

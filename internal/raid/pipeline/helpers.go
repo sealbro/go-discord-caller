@@ -16,7 +16,7 @@ import (
 // EndSession runs the common host session teardown: invokes ownerCleanup, records
 // the stop metric, ends the tracing span, and logs the session end.
 // Intended to be called as a deferred statement inside session goroutines.
-func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetrics, mode string) {
+func EndSession(ctx context.Context, ownerCleanup func(), gm Metrics, mode string) {
 	ownerCleanup()
 	gm.SessionStopped(mode)
 	trace.SpanFromContext(ctx).End()
@@ -46,7 +46,7 @@ func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 // the DrainWatcher from auto-pausing a mixer that a peer guild may feed at any
 // moment (see DrainWatcher.WithKeepAlive). Pass nil for mixers no relay input
 // reaches.
-func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayFeed func() bool, bots OutputBots) {
+func StartChannelMixers(ctx context.Context, gm Metrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayFeed func() bool, bots OutputBots) {
 	drop := bots.Dropper(gm, telemetry.DropPathChannelMixer)
 	for _, dest := range dests {
 		mx := chanMixers[dest.ChannelID]
@@ -86,7 +86,7 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 // produced frame directly to all guest guilds. EndSession runs after Run
 // returns, by which time tick (and therefore the sink) is no longer invoked,
 // so cleanup is ordered after the last broadcast.
-func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession ally.Relay, ownerCleanup func(), mode string) {
+func StartRelayBroadcast(ctx context.Context, gm Metrics, relayMixer *opus.Mixer, relaySession ally.Relay, ownerCleanup func(), mode string) {
 	guildID := gm.GuildID()
 	relayMixer.SetSink(func(pkt []byte) {
 		relaySession.BroadcastFromGuild(guildID, pkt)
@@ -180,7 +180,7 @@ func SpeakerOutputs(joined []SpeakerResult) OutputBots {
 // Dropper returns a drop counter for path that labels each drop with the bot
 // whose queue was full. The per-bot counters are built up front so a drop
 // costs one map lookup; a queue missing from b is counted without a bot.
-func (b OutputBots) Dropper(gm telemetry.GuildMetrics, path telemetry.DropPath) func(chan<- []byte) {
+func (b OutputBots) Dropper(gm Metrics, path telemetry.DropPath) func(chan<- []byte) {
 	perQueue := make(map[chan<- []byte]func(), len(b))
 	for out, botID := range b {
 		perQueue[out] = gm.DropFor(path, botID)

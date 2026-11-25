@@ -31,7 +31,7 @@ func (GuestListenerPipeline) Build(ctx context.Context, p GuestParams) (*guild.S
 	}
 	var listenMixer *opus.Mixer
 	if p.AllySession.HostRaidMode() == guild.RaidModeGuildCaller {
-		mx, err := opus.NewMixer(p.GuestGM.Opus)
+		mx, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("guest listener: create mixer: %w", err)
 		}
@@ -90,7 +90,7 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 		allOuts = append(allOuts, p.OwnerChOut)
 	}
 
-	relayMixer, err := opus.NewMixer(p.GuestGM.Opus)
+	relayMixer, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("guest star: create relay mixer: %w", err)
 	}
@@ -186,13 +186,13 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.GuestGM.Opus)
+		mx, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("guest caller: create channel mixer: %w", err)
 		}
 		channelMixers[dest.ChannelID] = mx
 	}
-	relayMixer, err := opus.NewMixer(p.GuestGM.Opus)
+	relayMixer, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("guest caller: create relay mixer: %w", err)
 	}

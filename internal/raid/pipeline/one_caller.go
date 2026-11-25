@@ -32,7 +32,7 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 	// channel's speaker Outs.
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.GM.Opus)
+		mx, err := opus.NewMixer(p.GM.OpusMetrics())
 		if err != nil {
 			return nil, nil, fmt.Errorf("create channel mixer: %w", err)
 		}
@@ -41,7 +41,7 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 	// Relay mixer: produces the host's broadcast for ally guests when the
 	// owner is in mix mode. In copy mode it stays paused and the ally feed
 	// comes from the source's OpusCallback instead.
-	relayMixer, err := opus.NewMixer(p.GM.Opus)
+	relayMixer, err := opus.NewMixer(p.GM.OpusMetrics())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}

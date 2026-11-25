@@ -154,8 +154,8 @@ func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc contex
 		idleTimeout:      m.sessionIdleTimeout,
 		sharesRelay:      func() bool { return m.sharesRelay(session.GuildID) },
 	}
-	if filter, ok := session.AllowFilter.(*AllowFilter); ok {
-		w.lastHeard = filter.LastAdmitted
+	if session.AllowFilter != nil {
+		w.lastHeard = session.AllowFilter.LastAdmitted
 	}
 	go w.Run(ctx)
 }

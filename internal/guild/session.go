@@ -2,6 +2,7 @@ package guild
 
 import (
 	"context"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 )
@@ -11,6 +12,9 @@ import (
 type CaptureFilter interface {
 	// RoleID is the caller role the filter admits; zero when none is bound.
 	RoleID() snowflake.ID
+	// LastAdmitted is when the filter last let a caller's frame through, or
+	// the zero time.
+	LastAdmitted() time.Time
 }
 
 // MixerPauser is the subset of opus.Mixer used for pause/resume.

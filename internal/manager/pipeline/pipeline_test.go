@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -19,7 +20,8 @@ import (
 // stubAllowFilter is an AllowSource with no caller role bound.
 type stubAllowFilter struct{}
 
-func (stubAllowFilter) RoleID() snowflake.ID { return 0 }
+func (stubAllowFilter) RoleID() snowflake.ID    { return 0 }
+func (stubAllowFilter) LastAdmitted() time.Time { return time.Time{} }
 
 // hostFixture bundles the inputs every host pipeline test needs.
 type hostFixture struct {

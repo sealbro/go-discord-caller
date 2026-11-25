@@ -371,3 +371,31 @@ func TestSessionChannels_ListenerChannelsFollowPlayback(t *testing.T) {
 		})
 	}
 }
+
+// The watcher hears about speech only through the session's allow filter. A raid
+// whose caller sits unmuted next to an audience but never sends a frame has
+// nothing to relay and must be stopped, which only works if the watcher is
+// actually reading the filter.
+func TestStartVoiceRaid_SilentCallerIsStoppedAsIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := withCallerRole(newCallerRoleFixture(t))
+		f.m.SetSessionIdleTimeout(productionIdleTimeout)
+		putInVoice(f, 766, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
+		putInVoice(f, 767, roleTestChannels[testGuildID][1], false, viewTestOtherRole)
+
+		_, cancel, err := startHostRaid(t, f)
+		if err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		defer cancel()
+
+		time.Sleep(sessionPresenceInterval + productionIdleTimeout + sessionPresenceInterval)
+		synctest.Wait()
+
+		if f.m.HasActiveSession(testGuildID) {
+			_ = f.m.StopVoiceRaid(context.Background(), testGuildID)
+			synctest.Wait()
+			t.Fatal("a raid whose caller never spoke was kept alive: the idle watcher is not reading speech from the allow filter")
+		}
+	})
+}

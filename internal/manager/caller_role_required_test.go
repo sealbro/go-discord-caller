@@ -106,9 +106,9 @@ func TestHasCallerRoleFalseWhenNoRoleBound(t *testing.T) {
 func TestAllowFilterWithoutCallerRoleRelaysNobody(t *testing.T) {
 	const userID = snowflake.ID(42)
 	f := newCallerRoleFixture(t)
-	f.addMember(testGuildID, userID)
+	putInVoice(f, userID, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
 
-	if f.m.buildAllowUserFilter(testGuildID).Check(userID) {
+	if f.m.buildAllowUserFilter(testGuildID, f.m.openGuildView(testGuildID)).Check(userID) {
 		t.Error("allow filter with no caller role relays a member; it must relay nobody")
 	}
 }
@@ -121,10 +121,10 @@ func TestAllowFilterRelaysOnlyCallerRoleHolders(t *testing.T) {
 	)
 	f := newCallerRoleFixture(t)
 	f.st.BindRole(testGuildID, store.RoleTypeCaller, roleTestCallerRoleID)
-	f.addMember(testGuildID, callerID, roleTestCallerRoleID)
-	f.addMember(testGuildID, bystanderID)
+	putInVoice(f, callerID, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
+	putInVoice(f, bystanderID, roleTestChannels[testGuildID][0], false, viewTestOtherRole)
 
-	filter := f.m.buildAllowUserFilter(testGuildID)
+	filter := f.m.buildAllowUserFilter(testGuildID, f.m.openGuildView(testGuildID))
 	if !filter.Check(callerID) {
 		t.Error("member holding the caller role is not relayed")
 	}

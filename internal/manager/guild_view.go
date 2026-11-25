@@ -8,11 +8,12 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// guildView is one guild's voice occupancy as the router sees it: the non-bot
+// guildView is one guild's voice occupancy as a raid sees it: the non-bot
 // members the owner bot's caches place in each channel, with their roles.
 // Published whole and never changed afterwards.
 type guildView struct {
 	channels map[snowflake.ID][]viewMember
+	roles    map[snowflake.ID][]snowflake.ID // member in voice → their roles
 }
 
 type viewMember struct {
@@ -20,8 +21,9 @@ type viewMember struct {
 	roles []snowflake.ID
 }
 
-// viewProbe is the router's VoiceProbe. It answers from the last guildView
-// the service published, so the router never reads the caches itself.
+// viewProbe is the router's VoiceProbe and the capture filter's source. It
+// answers from the last guildView the service published, so neither reads
+// the caches itself.
 type viewProbe struct {
 	refreshMu sync.Mutex // orders build+publish, so an older build never replaces a newer one
 	view      atomic.Pointer[guildView]
@@ -43,8 +45,13 @@ func (p *viewProbe) EnumerateCallers(channelID, roleID snowflake.ID) []snowflake
 	return users
 }
 
-// openGuildView publishes a first view of guildID for a raid's router and
-// keeps it current through RefreshVoiceView until closeGuildView.
+// holdsRole reports whether userID is in voice holding roleID.
+func (p *viewProbe) holdsRole(userID, roleID snowflake.ID) bool {
+	return slices.Contains(p.view.Load().roles[userID], roleID)
+}
+
+// openGuildView publishes a first view of guildID for a raid and keeps it
+// current through RefreshVoiceView until closeGuildView.
 func (m *Service) openGuildView(guildID snowflake.ID) *viewProbe {
 	p := &viewProbe{}
 	p.view.Store(m.buildGuildView(guildID))
@@ -72,7 +79,7 @@ func (m *Service) RefreshVoiceView(guildID snowflake.ID) {
 
 func (m *Service) buildGuildView(guildID snowflake.ID) *guildView {
 	caches := m.ownerClient.Caches
-	view := &guildView{channels: map[snowflake.ID][]viewMember{}}
+	view := &guildView{channels: map[snowflake.ID][]viewMember{}, roles: map[snowflake.ID][]snowflake.ID{}}
 	for vs := range caches.VoiceStates(guildID) {
 		if vs.ChannelID == nil {
 			continue
@@ -81,10 +88,9 @@ func (m *Service) buildGuildView(guildID snowflake.ID) *guildView {
 		if !ok || m.IsBot(member.User) {
 			continue
 		}
-		view.channels[*vs.ChannelID] = append(view.channels[*vs.ChannelID], viewMember{
-			id:    vs.UserID,
-			roles: slices.Clone(member.RoleIDs),
-		})
+		roles := slices.Clone(member.RoleIDs)
+		view.roles[vs.UserID] = roles
+		view.channels[*vs.ChannelID] = append(view.channels[*vs.ChannelID], viewMember{id: vs.UserID, roles: roles})
 	}
 	return view
 }

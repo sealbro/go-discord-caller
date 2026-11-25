@@ -51,7 +51,6 @@ type Service struct {
 	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
 	rejoinStalled      func(guildID, botUserID snowflake.ID)
 	starting           startGuard    // one raid start per guild at a time
-	startupFilters     sync.Map      // guild ID → *AllowFilter of the raid still starting
 	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
 	reportedCallers    reportedCallers
 	seeding            seedGroup

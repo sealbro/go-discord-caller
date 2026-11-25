@@ -8,13 +8,12 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// A caller whose role is taken away mid-raid must stop being relayed at once.
-// The allow filter memoises its first decision per user, so only the member
-// update can overturn it — otherwise the ex-caller stays live until the raid ends.
+// A caller whose role is taken away mid-raid must stop being relayed at once,
+// not when they next leave or rejoin voice.
 func TestRoleRevokedDuringRaidStopsCapture(t *testing.T) {
 	const callerID = snowflake.ID(42)
 	f := withCallerRole(newCallerRoleFixture(t))
-	f.addMember(testGuildID, callerID, roleTestCallerRoleID)
+	putInVoice(f, callerID, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
 
 	_, cancel, err := startHostRaid(t, f)
 	if err != nil {

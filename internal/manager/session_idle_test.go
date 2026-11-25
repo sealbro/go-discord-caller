@@ -319,7 +319,7 @@ func TestIdleStop_LeavesANewerSessionAlone(t *testing.T) {
 func TestStartVoiceRaid_CallerFramesCountAsSpeech(t *testing.T) {
 	const callerID = snowflake.ID(42)
 	f := withCallerRole(newCallerRoleFixture(t))
-	f.addMember(testGuildID, callerID, roleTestCallerRoleID)
+	putInVoice(f, callerID, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
 
 	_, cancel, err := startHostRaid(t, f)
 	if err != nil {

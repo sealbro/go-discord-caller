@@ -12,15 +12,11 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
-// AllowSource binds a capture role to a per-user allow decision updater.
-// Holding both behind one interface prevents Params.RoleID drifting out of
-// sync with Params.AllowFilter (the router would then route on one role and
-// the receiver would filter on another, silently). The manager's
-// *AllowFilter satisfies this interface; pipeline tests provide a stub.
-type AllowSource interface {
-	guild.AllowUpdater
-	RoleID() snowflake.ID
-}
+// AllowSource is the session's capture filter. The router takes its caller
+// role from it rather than from a separate parameter, so the router cannot
+// route on one role while the receivers filter on another. The manager's
+// *AllowFilter satisfies it; pipeline tests provide a stub.
+type AllowSource = guild.CaptureFilter
 
 // Params holds all inputs the three host pipeline topologies need.
 // Built once by manager.Service.StartVoiceRaid after the common owner/speaker setup;

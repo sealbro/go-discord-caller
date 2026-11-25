@@ -81,8 +81,9 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if guestMode.WithCapture() && !m.hasBoundCallerRole(guestGuildID) {
 		return guestMode, ErrNoCallerRole
 	}
-	allowUser := m.buildAllowUserFilter(guestGuildID)
-	defer m.trackStartupFilter(guestGuildID, allowUser)()
+	view := m.openGuildView(guestGuildID)
+	undo.view = func() { m.closeGuildView(guestGuildID) }
+	allowUser := m.buildAllowUserFilter(guestGuildID, view)
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
 	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Admit, guestGm, raidStart)
@@ -164,8 +165,6 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, fmt.Errorf("join session: %w", err)
 	}
 
-	view := m.openGuildView(guestGuildID)
-	undo.view = func() { m.closeGuildView(guestGuildID) }
 	params := pipeline.GuestParams{
 		GuestGuildID:   guestGuildID,
 		OwnerBotID:     m.ownerBotID,
@@ -347,8 +346,9 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 
 	gm := m.metrics.ForGuild(ctx, guildID)
-	allowUser := m.buildAllowUserFilter(guildID)
-	defer m.trackStartupFilter(guildID, allowUser)()
+	view := m.openGuildView(guildID)
+	undo.view = func() { m.closeGuildView(guildID) }
+	allowUser := m.buildAllowUserFilter(guildID, view)
 	undo.reconnect = func() { m.clearReconnectState(guildID) }
 	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Admit, gm, raidStart)
 	if err != nil {
@@ -414,8 +414,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// it counts as a speaker alongside the pool bots in setup.Joined.
 	speakerCount := countSpeakers(len(setup.Joined), true)
 	span.SetAttributes(attribute.Int("speaker.count", speakerCount))
-	view := m.openGuildView(guildID)
-	undo.view = func() { m.closeGuildView(guildID) }
 	p := pipeline.Params{
 		GuildID:      guildID,
 		OwnerBotID:   m.ownerBotID,

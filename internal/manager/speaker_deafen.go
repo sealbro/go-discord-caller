@@ -144,17 +144,22 @@ const deafenDelay = 5 * time.Second
 // deafController owns the server-deaf flag of every bot in one session for as
 // long as that session lives.
 //
-// The router reports which capture sources are live after each recomputation
-// (router.WithCaptureObserver). A bot should hear Discord exactly while it is
-// a live capture source; everything else — non-capture modes, and the second
-// and later speakers sharing a channel, whose FanoutHandles are never
-// installed (see pipeline.IterDeduplicatedCaptures) — is decrypting audio it
-// discards, and gets deafened.
+// A capture source is live while someone holding the caller role is in its
+// channel — exactly when the router routes it anywhere but off, since the
+// router's cascade never revives a source with no caller. The controller
+// reads that from the raid's voice view after every refresh (Watch). A bot
+// should hear Discord exactly while it is a live capture source; everything
+// else — non-capture modes, and the second and later speakers sharing a
+// channel, whose FanoutHandles are never installed (see
+// pipeline.IterDeduplicatedCaptures) — is decrypting audio it discards, and
+// gets deafened.
 //
-// Every registered bot is driven, not just the ones the router knows about: a
-// bot absent from the capturing map is by definition not a live source.
+// Every registered bot is driven, not just the capture sources: a bot absent
+// from the capturing map is by definition not a live source.
 type deafController struct {
 	guildID snowflake.ID
+	view    *viewProbe
+	roleID  snowflake.ID
 	// setDeaf performs the actual change. Injected so the controller's timing
 	// rules can be unit-tested without a Discord client.
 	setDeaf func(ctx context.Context, guildID, botID snowflake.ID, deaf bool) error
@@ -216,13 +221,33 @@ func (m *deafMember) stopTimer() {
 	}
 }
 
-func newDeafController(m *Service, guildID snowflake.ID) *deafController {
-	return &deafController{
+func newDeafController(m *Service, guildID snowflake.ID, filter *AllowFilter) *deafController {
+	c := &deafController{
 		guildID: guildID,
 		setDeaf: m.ensureSpeakerDeaf,
 		delay:   deafenDelay,
 		members: map[snowflake.ID]*deafMember{},
 	}
+	if filter != nil {
+		c.view, c.roleID = filter.view, filter.roleID
+	}
+	return c
+}
+
+// Watch starts following the raid's voice view for sources (source ID → its
+// channel). The first report comes with the next refresh of the view.
+func (c *deafController) Watch(sources map[snowflake.ID]snowflake.ID) {
+	if c == nil || c.view == nil {
+		return
+	}
+	report := func(view *viewProbe) {
+		capturing := make(map[snowflake.ID]bool, len(sources))
+		for sourceID, channelID := range sources {
+			capturing[sourceID] = len(view.EnumerateCallers(channelID, c.roleID)) > 0
+		}
+		c.Observe(capturing)
+	}
+	c.view.watcher.Store(&report)
 }
 
 // Register enrols a bot with the state reconcileSpeakerDeaf already applied at
@@ -239,7 +264,7 @@ func (c *deafController) Register(botID snowflake.ID, deaf bool) {
 	c.members[botID] = &deafMember{deaf: deaf, want: deaf}
 }
 
-// Observe is the router.WithCaptureObserver callback.
+// Observe drives every registered bot from the source → "is capturing" map.
 func (c *deafController) Observe(capturing map[snowflake.ID]bool) {
 	if c == nil {
 		return
@@ -252,7 +277,7 @@ func (c *deafController) Observe(capturing map[snowflake.ID]bool) {
 	var undeafen []snowflake.ID
 	for botID, mem := range c.members {
 		want := !capturing[botID]
-		// Every recompute restores the retry budget, because the router is
+		// Every report restores the retry budget, because the raid is
 		// still asking for this state — the limit exists to stop a chain that
 		// has gone quiet, not one being re-requested.
 		//

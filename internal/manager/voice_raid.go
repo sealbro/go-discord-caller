@@ -86,7 +86,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	allowUser := m.buildAllowUserFilter(guestGuildID, view)
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
-	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Admit, guestGm, raidStart)
+	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser, guestGm, raidStart)
 	if err != nil {
 		return guestMode, err
 	}
@@ -202,6 +202,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	// router's Recompute inside start(); no separate sync pass needed.
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	start()
+	m.RefreshVoiceView(guestGuildID) // first capture report to the deaf state, as start() routed for the first time
 
 	speakerCount := countSpeakers(len(setup.Joined), ownerCleanup != nil)
 	guestGm.SessionStarted(speakerCount, string(guestMode))
@@ -350,7 +351,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	undo.view = func() { m.closeGuildView(guildID) }
 	allowUser := m.buildAllowUserFilter(guildID, view)
 	undo.reconnect = func() { m.clearReconnectState(guildID) }
-	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Admit, gm, raidStart)
+	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser, gm, raidStart)
 	if err != nil {
 		return "", err
 	}
@@ -471,5 +472,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		slog.Int("speakersCandidates", setup.Candidates),
 	)
 	start()
+	m.RefreshVoiceView(guildID) // first capture report to the deaf state, as start() routed for the first time
 	return allyCode, nil
 }

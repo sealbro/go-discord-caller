@@ -85,10 +85,10 @@ func (OneCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session, f
 	// the post-join voice states.
 	gm := p.GM
 	r := router.New(p.GuildID, p.AllowFilter.RoleID(), p.VoiceProbe, []*router.SourceSlot{ownerSlot}, dests).
-		WithCaptureObserver(p.Setup.CaptureObserver()).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
+	p.Setup.WatchCapture([]*router.SourceSlot{ownerSlot})
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {

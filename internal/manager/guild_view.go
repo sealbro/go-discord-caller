@@ -27,6 +27,8 @@ type viewMember struct {
 type viewProbe struct {
 	refreshMu sync.Mutex // orders build+publish, so an older build never replaces a newer one
 	view      atomic.Pointer[guildView]
+	// watcher, when set, is told of every published view, in publish order.
+	watcher atomic.Pointer[func(*viewProbe)]
 }
 
 func (p *viewProbe) HasListeners(channelID snowflake.ID) bool {
@@ -75,6 +77,9 @@ func (m *Service) RefreshVoiceView(guildID snowflake.ID) {
 	p.refreshMu.Lock()
 	defer p.refreshMu.Unlock()
 	p.view.Store(m.buildGuildView(guildID))
+	if w := p.watcher.Load(); w != nil {
+		(*w)(p)
+	}
 }
 
 func (m *Service) buildGuildView(guildID snowflake.ID) *guildView {

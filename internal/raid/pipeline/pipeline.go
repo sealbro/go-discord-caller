@@ -6,9 +6,9 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 

@@ -9,9 +9,9 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -183,7 +183,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	// Build gets the session context, not the phase context: the goroutines it
 	// starts outlive every span here.
 	_, endBuild := startPhase(setupCtx, "voice.pipeline.build")
-	session, start, pipelineCleanup, err := pipeline.GuestFor(guestMode).Build(ctx, params)
+	session, start, pipelineCleanup, err := m.raidRuntime().BuildGuest(ctx, params)
 	endBuild(err)
 	if err != nil {
 		return guestMode, err
@@ -434,7 +434,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// Build gets the session context, not the phase context: the mixer and
 	// router goroutines it starts outlive every span here.
 	_, endBuild := startPhase(setupCtx, "voice.pipeline.build")
-	session, start, err := pipeline.HostFor(mode).Build(ctx, p)
+	session, start, err := m.raidRuntime().BuildHost(ctx, p)
 	endBuild(err)
 	if err != nil {
 		return "", err

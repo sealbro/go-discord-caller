@@ -18,6 +18,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/metric"
@@ -41,8 +42,9 @@ type Service struct {
 	poolSvc            pool.PoolService
 	ownerClient        *bot.Client
 	ownerBotID         snowflake.ID
-	voices             VoiceHost // nil runs voice on the bots' own clients; see voiceHost
-	views              sync.Map  // guild ID → *viewProbe of the guild's raid; see RefreshVoiceView
+	voices             VoiceHost    // nil runs voice on the bots' own clients; see voiceHost
+	audio              raid.Runtime // nil builds raid audio in this process; see raidRuntime
+	views              sync.Map     // guild ID → *viewProbe of the guild's raid; see RefreshVoiceView
 	bindMu             sync.Mutex
 	toggleMu           sync.Mutex // orders speaker toggles so the store write follows the in-memory change
 	test               config.TestConfig

@@ -11,8 +11,8 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 

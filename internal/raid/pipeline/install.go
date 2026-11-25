@@ -2,8 +2,8 @@ package pipeline
 
 import (
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 )
 
 // installBuildOpts parameterises the unified routerInstallBuilder. The three

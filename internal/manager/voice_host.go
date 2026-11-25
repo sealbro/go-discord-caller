@@ -5,6 +5,7 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid"
 )
 
 // VoiceHost carries the voice connections of the owner and speaker bots. The
@@ -31,6 +32,13 @@ func (h localVoiceHost) VoiceManager(botID snowflake.ID) (voice.Manager, bool) {
 		return nil, false
 	}
 	return client.VoiceManager, true
+}
+
+func (m *Service) raidRuntime() raid.Runtime {
+	if m.audio != nil {
+		return m.audio
+	}
+	return raid.Local{}
 }
 
 func (m *Service) voiceHost() VoiceHost {

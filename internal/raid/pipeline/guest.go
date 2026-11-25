@@ -8,7 +8,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 
 	"github.com/sealbro/go-discord-caller/internal/opus"

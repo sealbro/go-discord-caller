@@ -42,19 +42,7 @@ func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks
 	if !ok {
 		return
 	}
-	if !m.reconnect.stallRejoinDue(guildID, botUserID, time.Now()) {
-		slog.Debug("voice: outbound encryption still stalled, rejoin backing off",
-			slog.String("guildID", guildID.String()),
-			slog.String("botUserID", botUserID.String()),
-		)
-		return
-	}
-	slog.Warn("voice: outbound encryption stalled, rejoining",
-		slog.String("guildID", guildID.String()),
-		slog.String("botUserID", botUserID.String()),
-		slog.Any("daveTrace", trace),
-	)
-	m.rejoinStalled(guildID, botUserID)
+	m.HandleVoiceRequest(EncryptStallRequest{GuildID: guildID, BotID: botUserID, Trace: trace})
 }
 
 // encryptStallTarget resolves a stall report to the bot and guild it concerns.

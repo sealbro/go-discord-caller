@@ -11,7 +11,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// mapHost is a VoiceHost serving fixed voice managers, so a test can tell the
+// mapHost is a voiceHost serving fixed voice managers, so a test can tell the
 // connections the service opens through the host from the bots' own clients.
 type mapHost map[snowflake.ID]voice.Manager
 
@@ -43,16 +43,16 @@ func TestRaid_JoinsAndLeavesOnlyThroughTheVoiceHost(t *testing.T) {
 			}
 
 			if got := f.joins.Load(); got != 0 {
-				t.Errorf("the bots' own voice managers were joined %d times; every join must go through the VoiceHost", got)
+				t.Errorf("the bots' own voice managers were joined %d times; every join must go through the voiceHost", got)
 			}
 			if got := hostJoins.Load(); got != 2 {
-				t.Errorf("VoiceHost joins = %d, want 2 (owner and speaker)", got)
+				t.Errorf("voiceHost joins = %d, want 2 (owner and speaker)", got)
 			}
 			if ownerConn.closeCount() == 0 {
-				t.Error("owner never left through the VoiceHost's connection")
+				t.Error("owner never left through the voiceHost's connection")
 			}
 			if speakerConn.closeCount() == 0 {
-				t.Error("speaker never left through the VoiceHost's connection")
+				t.Error("speaker never left through the voiceHost's connection")
 			}
 		})
 	}
@@ -60,7 +60,7 @@ func TestRaid_JoinsAndLeavesOnlyThroughTheVoiceHost(t *testing.T) {
 
 // The owner reaches the drain wait on every owner reconnect. It is not a pool
 // bot, so the wait used to find no conn and return at once; serving the owner
-// through the VoiceHost must not turn that into a 500 ms poll.
+// through the voiceHost must not turn that into a 500 ms poll.
 func TestWaitSpeakerConnDrained_DoesNotWaitForTheOwner(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		f := newCallerRoleFixture(t)
@@ -78,7 +78,7 @@ func TestWaitSpeakerConnDrained_DoesNotWaitForTheOwner(t *testing.T) {
 
 func TestLocalVoiceHost_ServesEachBotFromItsOwnClient(t *testing.T) {
 	f := newCallerRoleFixture(t)
-	host := f.m.voiceHost()
+	host := f.m.voiceManagers()
 
 	if vm, ok := host.VoiceManager(testBotID); !ok || vm != f.ownerVM {
 		t.Errorf("owner: got (%v, %v), want the owner client's voice manager", vm, ok)

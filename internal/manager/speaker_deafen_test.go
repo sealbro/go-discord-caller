@@ -562,7 +562,7 @@ func TestDeafControllerFollowsCallerPresence(t *testing.T) {
 		const userA, userB = snowflake.ID(762), snowflake.ID(763)
 		f := withCallerRole(newCallerRoleFixture(t))
 		channel := roleTestChannels[testGuildID][1]
-		view := f.m.openGuildView(testGuildID)
+		view := openView(t, f.m, testGuildID)
 		rec := &deafRecorder{}
 		c := newDeafController(f.m, testGuildID, f.m.buildAllowUserFilter(testGuildID, view))
 		c.setDeaf = rec.set

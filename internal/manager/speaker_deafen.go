@@ -185,8 +185,8 @@ type deafController struct {
 
 type deafMember struct {
 	deaf bool // last state Discord confirmed for this member
-	// want is the state the router last asked for. It is recorded on every
-	// Observe, including ones that arrive mid-PATCH, because recomputes are
+	// want is the state the last capture report asked for. It is recorded on
+	// every Observe, including ones that arrive mid-PATCH, because reports are
 	// event-driven: a desired state dropped while a change was in flight would
 	// not be revisited until some unrelated voice event fired, leaving a
 	// capture bot deafened with a caller in its channel for the rest of the
@@ -203,14 +203,14 @@ type deafMember struct {
 	// every delay for the whole session.
 	failures int
 	// rejected records that the last attempt at want was refused, and unlike
-	// failures it survives the budget refill a recompute brings. It is what
+	// failures it survives the budget refill a report brings. It is what
 	// tells a re-request of a rejected state apart from a new one, so the
 	// former waits out the delay instead of issuing an unpaced PATCH.
 	rejected bool
 }
 
 // deafRetryLimit caps consecutive retries of one change. Past it the member
-// waits for the next recompute rather than retrying on a timer.
+// waits for the next capture report rather than retrying on a timer.
 const deafRetryLimit = 3
 
 // stopTimer cancels a pending delayed change. Caller must hold c.mu.
@@ -281,10 +281,10 @@ func (c *deafController) Observe(capturing map[snowflake.ID]bool) {
 		// still asking for this state — the limit exists to stop a chain that
 		// has gone quiet, not one being re-requested.
 		//
-		// What a recompute must not do is issue the PATCH unpaced. Re-asking
+		// What a report must not do is issue the PATCH unpaced. Re-asking
 		// for a state Discord has already rejected is a retry, however the
-		// request arrived, and the router recomputes on every join, leave and
-		// role change: taking the immediate path each time turns one stuck
+		// request arrived, and a report comes with every voice-state and
+		// member event: taking the immediate path each time turns one stuck
 		// member into a burst of rejected moderation requests. Only a genuinely
 		// new desired state skips the delay, which is what keeps undeafening a
 		// new speaker immediate.
@@ -340,8 +340,8 @@ func (c *deafController) reconcileLocked(botID snowflake.ID, mem *deafMember, im
 
 // applyAfterDelay fires when a change has waited out c.delay: a bot idle for
 // deafenDelay, or a retry of a change Discord rejected. It applies whatever
-// the router last asked for rather than a value captured when the timer was
-// armed, so an Observe that landed mid-PATCH is honoured here.
+// the last capture report asked for rather than a value captured when the
+// timer was armed, so an Observe that landed mid-PATCH is honoured here.
 func (c *deafController) applyAfterDelay(botID snowflake.ID) {
 	c.mu.Lock()
 	mem, ok := c.members[botID]
@@ -361,8 +361,9 @@ func (c *deafController) applyAfterDelay(botID snowflake.ID) {
 	c.apply(botID, want)
 }
 
-// apply issues the REST change off the caller's goroutine. The router invokes
-// Observe from its debounce timer, and a PATCH must never stall routing.
+// apply issues the REST change off the caller's goroutine. Observe runs on the
+// gateway event goroutine that refreshed the raid's voice view, and a PATCH
+// must never stall event handling.
 // The caller must have counted it in c.applying while still holding c.mu, so
 // Close cannot miss a change it has already admitted.
 //

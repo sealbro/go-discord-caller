@@ -53,12 +53,16 @@ func (p *viewProbe) holdsRole(userID, roleID snowflake.ID) bool {
 }
 
 // openGuildView publishes a first view of guildID for a raid and keeps it
-// current through RefreshVoiceView until closeGuildView.
-func (m *Service) openGuildView(guildID snowflake.ID) *viewProbe {
+// current through RefreshVoiceView until closeGuildView. It refuses while
+// another raid's view is open: replacing it would leave that raid reading a
+// view nothing refreshes.
+func (m *Service) openGuildView(guildID snowflake.ID) (*viewProbe, error) {
 	p := &viewProbe{}
 	p.view.Store(m.buildGuildView(guildID))
-	m.views.Store(guildID, p)
-	return p
+	if _, taken := m.views.LoadOrStore(guildID, p); taken {
+		return nil, ErrSessionExists
+	}
+	return p, nil
 }
 
 func (m *Service) closeGuildView(guildID snowflake.ID) {

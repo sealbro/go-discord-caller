@@ -42,7 +42,7 @@ func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks
 	if !ok {
 		return
 	}
-	m.HandleVoiceRequest(EncryptStallRequest{GuildID: guildID, BotID: botUserID, Trace: trace})
+	m.handleVoiceRequest(encryptStallRequest{GuildID: guildID, BotID: botUserID, Trace: trace})
 }
 
 // encryptStallTarget resolves a stall report to the bot and guild it concerns.
@@ -274,7 +274,7 @@ func (m *Service) waitSpeakerConnDrained(guildID, botUserID, boundChID snowflake
 	if botUserID == m.ownerBotID {
 		return // the owner's own listener fired this reconnect, so it has nothing left to drain
 	}
-	vm, ok := m.voiceHost().VoiceManager(botUserID)
+	vm, ok := m.voiceManagers().VoiceManager(botUserID)
 	if !ok || vm == nil {
 		return
 	}

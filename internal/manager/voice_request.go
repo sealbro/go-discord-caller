@@ -10,34 +10,34 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
-// VoiceRequest is something the voice side of a raid asks the service to do.
+// voiceRequest is something the voice side of a raid asks the service to do.
 // The service decides from its own state whether to do it; nothing in a
 // request is taken on trust beyond naming what it is about.
-type VoiceRequest interface {
-	voiceRequest()
+type voiceRequest interface {
+	isVoiceRequest()
 }
 
-// EncryptStallRequest asks for a bot whose outbound encryption has stalled to
+// encryptStallRequest asks for a bot whose outbound encryption has stalled to
 // rejoin its channel. See OnEncryptStall.
-type EncryptStallRequest struct {
+type encryptStallRequest struct {
 	GuildID, BotID snowflake.ID
 	Trace          dave.Trace
 }
 
-func (EncryptStallRequest) voiceRequest() {}
+func (encryptStallRequest) isVoiceRequest() {}
 
-// HandleVoiceRequest carries out req when the guild's raid allows it, and
+// handleVoiceRequest carries out req when the guild's raid allows it, and
 // reports whether it did.
-func (m *Service) HandleVoiceRequest(req VoiceRequest) bool {
+func (m *Service) handleVoiceRequest(req voiceRequest) bool {
 	switch r := req.(type) {
-	case EncryptStallRequest:
+	case encryptStallRequest:
 		return m.handleEncryptStall(r)
 	default:
 		return false
 	}
 }
 
-func (m *Service) handleEncryptStall(r EncryptStallRequest) bool {
+func (m *Service) handleEncryptStall(r encryptStallRequest) bool {
 	if !m.botInRaid(r.GuildID, r.BotID) {
 		slog.Debug("voice: encrypt stall for a bot outside the guild's raid, ignored",
 			slog.String("guildID", r.GuildID.String()),

@@ -108,7 +108,7 @@ func TestAllowFilterWithoutCallerRoleRelaysNobody(t *testing.T) {
 	f := newCallerRoleFixture(t)
 	putInVoice(f, userID, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
 
-	if f.m.buildAllowUserFilter(testGuildID, f.m.openGuildView(testGuildID)).Check(userID) {
+	if f.m.buildAllowUserFilter(testGuildID, openView(t, f.m, testGuildID)).Check(userID) {
 		t.Error("allow filter with no caller role relays a member; it must relay nobody")
 	}
 }
@@ -124,7 +124,7 @@ func TestAllowFilterRelaysOnlyCallerRoleHolders(t *testing.T) {
 	putInVoice(f, callerID, roleTestChannels[testGuildID][0], false, roleTestCallerRoleID)
 	putInVoice(f, bystanderID, roleTestChannels[testGuildID][0], false, viewTestOtherRole)
 
-	filter := f.m.buildAllowUserFilter(testGuildID, f.m.openGuildView(testGuildID))
+	filter := f.m.buildAllowUserFilter(testGuildID, openView(t, f.m, testGuildID))
 	if !filter.Check(callerID) {
 		t.Error("member holding the caller role is not relayed")
 	}

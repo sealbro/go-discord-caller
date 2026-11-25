@@ -17,11 +17,25 @@ const (
 
 // putInVoice caches userID as a member of testGuildID holding roles, in
 // channelID. A nil roles slice leaves the member out of the member cache.
-func putInVoice(f *callerRoleFixture, userID, channelID snowflake.ID, bot bool, roles ...snowflake.ID) {
-	if roles != nil {
-		f.caches.AddMember(discord.Member{GuildID: testGuildID, User: discord.User{ID: userID, Bot: bot}, RoleIDs: roles})
+// openView opens guildID's view of voice for a test that drives it by hand.
+func openView(t *testing.T, m *Service, guildID snowflake.ID) *viewProbe {
+	t.Helper()
+	p, err := m.openGuildView(guildID)
+	if err != nil {
+		t.Fatalf("open view: %v", err)
 	}
-	f.caches.AddVoiceState(discord.VoiceState{GuildID: testGuildID, ChannelID: &channelID, UserID: userID})
+	return p
+}
+
+func putInVoice(f *callerRoleFixture, userID, channelID snowflake.ID, bot bool, roles ...snowflake.ID) {
+	putInGuildVoice(f, testGuildID, userID, channelID, bot, roles...)
+}
+
+func putInGuildVoice(f *callerRoleFixture, guildID, userID, channelID snowflake.ID, bot bool, roles ...snowflake.ID) {
+	if roles != nil {
+		f.caches.AddMember(discord.Member{GuildID: guildID, User: discord.User{ID: userID, Bot: bot}, RoleIDs: roles})
+	}
+	f.caches.AddVoiceState(discord.VoiceState{GuildID: guildID, ChannelID: &channelID, UserID: userID})
 }
 
 func TestViewProbe_AnswersLikeTheCaches(t *testing.T) {
@@ -35,7 +49,7 @@ func TestViewProbe_AnswersLikeTheCaches(t *testing.T) {
 		putInVoice(f, 754, chB, false) // in voice, not in the member cache
 		putInVoice(f, 755, chB, false, roleTestCallerRoleID, viewTestOtherRole)
 
-		view := f.m.openGuildView(testGuildID)
+		view := openView(t, f.m, testGuildID)
 		cache := &cacheVoiceProbe{svc: f.m, guildID: testGuildID}
 
 		for _, ch := range []snowflake.ID{chA, chB, viewTestEmptyCh} {
@@ -73,7 +87,6 @@ func TestRefreshVoiceView_EveryEntryPointCatchesUp(t *testing.T) {
 		trigger func(m *Service)
 	}{
 		{"voice-state event", func(m *Service) { m.RefreshVoiceView(testGuildID) }},
-		{"auto-route", func(m *Service) { m.AutoRoute(testGuildID, channel) }},
 		{"member update", func(m *Service) {
 			m.NotifyMemberUpdate(testGuildID, discord.Member{GuildID: testGuildID, User: discord.User{ID: caller}, RoleIDs: []snowflake.ID{roleTestCallerRoleID}})
 		}},
@@ -81,7 +94,7 @@ func TestRefreshVoiceView_EveryEntryPointCatchesUp(t *testing.T) {
 	for _, ep := range entryPoints {
 		t.Run(ep.name, func(t *testing.T) {
 			f := newCallerRoleFixture(t)
-			view := f.m.openGuildView(testGuildID)
+			view := openView(t, f.m, testGuildID)
 			putInVoice(f, caller, channel, false, roleTestCallerRoleID)
 			if view.HasListeners(channel) {
 				t.Fatal("the view changed before anything refreshed it; it is not a snapshot")
@@ -99,7 +112,7 @@ func TestRefreshVoiceView_EveryEntryPointCatchesUp(t *testing.T) {
 func TestRefreshVoiceView_StopsWhenTheViewIsClosed(t *testing.T) {
 	f := newCallerRoleFixture(t)
 	channel := roleTestChannels[testGuildID][0]
-	view := f.m.openGuildView(testGuildID)
+	view := openView(t, f.m, testGuildID)
 	f.m.closeGuildView(testGuildID)
 	putInVoice(f, 757, channel, false, roleTestCallerRoleID)
 
@@ -132,25 +145,65 @@ func TestRaid_ViewClosedWhenTheRaidEnds(t *testing.T) {
 				t.Error("the view outlived the raid")
 			}
 		})
-		t.Run(side.name+"/start failed after the view opened", func(t *testing.T) {
+		t.Run(side.name+"/stopped while the speakers join", func(t *testing.T) {
 			f := withCallerRole(newCallerRoleFixture(t))
 			side.prepare(f)
-			// The owner joins before the view opens; a session appearing by
-			// then makes the commit at the very end of the start fail.
-			f.ownerVM.onOpen = func() {
-				f.m.mu.Lock()
-				f.m.statuses[side.guildID].Session = &guild.Session{GuildID: side.guildID}
-				f.m.mu.Unlock()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			// The speakers join after the view opens; a /stop then fails the start.
+			f.speakerVM.onOpen = cancel
+
+			var err error
+			if side.guildID == testGuildID {
+				_, err = f.m.StartVoiceRaid(ctx, side.guildID, cancel, guild.RaidModeOneCaller)
+			} else {
+				_, err = f.m.JoinSession(ctx, side.guildID, cancel, guild.RaidModeAllyListener, roleTestHostCode)
 			}
 
-			cancel, err := side.start(f)
-			defer cancel()
-
 			if err == nil {
-				t.Fatal("start committed over an existing session")
+				t.Fatal("a start stopped during the speaker joins succeeded")
 			}
 			if _, open := f.m.views.Load(side.guildID); open {
 				t.Error("a failed start left its view of voice open")
+			}
+		})
+	}
+}
+
+// A start that reaches the manager while a raid is already running is
+// refused, and must leave the running raid's view of voice alone: otherwise
+// that raid's capture filter, router and deaf state stop following voice for
+// the rest of the raid.
+func TestRaid_RefusedSecondStartLeavesTheRunningViewAlone(t *testing.T) {
+	for _, side := range raidSides {
+		t.Run(side.name, func(t *testing.T) {
+			f := withCallerRole(newCallerRoleFixture(t))
+			side.prepare(f)
+			channel := roleTestChannels[side.guildID][0]
+			const userID = snowflake.ID(769)
+			putInGuildVoice(f, side.guildID, userID, channel, false, viewTestOtherRole)
+			cancel, err := side.start(f)
+			if err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			defer cancel()
+			defer func() { _ = f.m.StopVoiceRaid(context.Background(), side.guildID) }()
+
+			cancel2, err := side.start(f)
+			cancel2()
+			if err == nil {
+				t.Fatal("a second start while the raid runs succeeded")
+			}
+
+			granted := discord.Member{GuildID: side.guildID, User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{roleTestCallerRoleID}}
+			f.caches.AddMember(granted)
+			f.m.NotifyMemberUpdate(side.guildID, granted)
+
+			f.m.mu.RLock()
+			filter, _ := f.m.statuses[side.guildID].Session.AllowFilter.(*AllowFilter)
+			f.m.mu.RUnlock()
+			if filter == nil || !filter.Check(userID) {
+				t.Error("after a refused second start, a caller role granted mid-raid is not relayed: the running raid's view stopped following voice")
 			}
 		})
 	}

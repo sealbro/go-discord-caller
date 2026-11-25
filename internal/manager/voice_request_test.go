@@ -33,7 +33,7 @@ func TestHandleVoiceRequest_EncryptStallOnlyForBotsInTheRaid(t *testing.T) {
 			var rejoined []snowflake.ID
 			m.rejoinStalled = func(_, botID snowflake.ID) { rejoined = append(rejoined, botID) }
 
-			got := m.HandleVoiceRequest(EncryptStallRequest{GuildID: testGuildID, BotID: c.botID})
+			got := m.handleVoiceRequest(encryptStallRequest{GuildID: testGuildID, BotID: c.botID})
 
 			if got != c.want || (len(rejoined) == 1) != c.want {
 				t.Errorf("handled = %v, rejoined %v; want handled and rejoined = %v", got, rejoined, c.want)

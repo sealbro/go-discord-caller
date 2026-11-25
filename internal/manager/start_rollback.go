@@ -16,7 +16,7 @@ type startRollback struct {
 	// relay detaches the guild from the ally session.
 	relay     func()
 	reconnect func()
-	// view stops keeping the router's view of voice current.
+	// view stops keeping the raid's view of voice current.
 	view func()
 }
 

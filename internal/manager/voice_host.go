@@ -8,9 +8,9 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/raid"
 )
 
-// VoiceHost carries the voice connections of the owner and speaker bots. The
+// voiceHost carries the voice connections of the owner and speaker bots. The
 // service joins and leaves voice only through it.
-type VoiceHost interface {
+type voiceHost interface {
 	// VoiceManager returns the voice manager for botID's connections, or false
 	// when the bot is unknown or its gateway is not connected.
 	VoiceManager(botID snowflake.ID) (voice.Manager, bool)
@@ -41,7 +41,7 @@ func (m *Service) raidRuntime() raid.Runtime {
 	return raid.Local{}
 }
 
-func (m *Service) voiceHost() VoiceHost {
+func (m *Service) voiceManagers() voiceHost {
 	if m.voices != nil {
 		return m.voices
 	}

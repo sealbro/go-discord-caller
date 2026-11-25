@@ -81,7 +81,10 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if guestMode.WithCapture() && !m.hasBoundCallerRole(guestGuildID) {
 		return guestMode, ErrNoCallerRole
 	}
-	view := m.openGuildView(guestGuildID)
+	view, err := m.openGuildView(guestGuildID)
+	if err != nil {
+		return guestMode, err
+	}
 	undo.view = func() { m.closeGuildView(guestGuildID) }
 	allowUser := m.buildAllowUserFilter(guestGuildID, view)
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
@@ -347,7 +350,10 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 
 	gm := m.metrics.ForGuild(ctx, guildID)
-	view := m.openGuildView(guildID)
+	view, err := m.openGuildView(guildID)
+	if err != nil {
+		return "", err
+	}
 	undo.view = func() { m.closeGuildView(guildID) }
 	allowUser := m.buildAllowUserFilter(guildID, view)
 	undo.reconnect = func() { m.clearReconnectState(guildID) }

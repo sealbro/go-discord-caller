@@ -48,6 +48,7 @@ type SessionManager interface {
 	ReconnectBotChannel(ctx context.Context, guildID, botUserID snowflake.ID)
 	OnBotVoiceMove(ctx context.Context, guildID, botUserID snowflake.ID, currentChannelID *snowflake.ID)
 	NotifyMemberUpdate(guildID snowflake.ID, member discord.Member)
+	RefreshVoiceView(guildID snowflake.ID)
 }
 
 // BindingManager handles channel and role bindings.

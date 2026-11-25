@@ -42,6 +42,7 @@ type Service struct {
 	ownerClient        *bot.Client
 	ownerBotID         snowflake.ID
 	voices             VoiceHost // nil runs voice on the bots' own clients; see voiceHost
+	views              sync.Map  // guild ID → *viewProbe of the guild's raid; see RefreshVoiceView
 	bindMu             sync.Mutex
 	toggleMu           sync.Mutex // orders speaker toggles so the store write follows the in-memory change
 	test               config.TestConfig
@@ -107,9 +108,11 @@ func (m *Service) setActiveRouter(guildID snowflake.ID, r guild.AutoRouter) {
 	m.activeRouters.Store(&next)
 }
 
-// clearActiveRouter removes a guild from the activeRouters snapshot. Called
-// from StopVoiceRaid / JoinSession-teardown under m.mu.
+// clearActiveRouter removes a guild from the activeRouters snapshot and stops
+// refreshing its view of voice. Called from StopVoiceRaid / JoinSession-teardown
+// under m.mu.
 func (m *Service) clearActiveRouter(guildID snowflake.ID) {
+	m.closeGuildView(guildID)
 	cur := *m.activeRouters.Load()
 	if _, present := cur[guildID]; !present {
 		return
@@ -505,6 +508,7 @@ func (p *cacheVoiceProbe) callers(channelID, roleID snowflake.ID, skipMuted bool
 // listener check folded together — Plan §3.6). Safe to call when there is no
 // active session or no router attached to the session — both paths are no-ops.
 func (m *Service) AutoRoute(guildID, channelID snowflake.ID) {
+	m.RefreshVoiceView(guildID)
 	// Lock-free hot path: voice events fire on every Discord state change
 	// (typically many per second per active guild). Reading the
 	// activeRouters atomic.Pointer avoids m.mu contention with the slower

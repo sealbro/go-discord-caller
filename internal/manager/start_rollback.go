@@ -16,10 +16,12 @@ type startRollback struct {
 	// relay detaches the guild from the ally session.
 	relay     func()
 	reconnect func()
+	// view stops keeping the router's view of voice current.
+	view func()
 }
 
 func (r *startRollback) run() {
-	for _, step := range []func(){r.audio, r.owner, r.leaveOwner, r.pipeline, r.relay, r.reconnect} {
+	for _, step := range []func(){r.audio, r.owner, r.leaveOwner, r.pipeline, r.relay, r.reconnect, r.view} {
 		if step != nil {
 			step()
 		}

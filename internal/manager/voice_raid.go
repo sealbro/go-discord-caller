@@ -164,6 +164,8 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		return guestMode, fmt.Errorf("join session: %w", err)
 	}
 
+	view := m.openGuildView(guestGuildID)
+	undo.view = func() { m.closeGuildView(guestGuildID) }
 	params := pipeline.GuestParams{
 		GuestGuildID:   guestGuildID,
 		OwnerBotID:     m.ownerBotID,
@@ -177,7 +179,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		OwnerHandle:    ownerHandle,
 		GuestGM:        guestGm,
 		AllowFilter:    allowUser,
-		VoiceProbe:     &cacheVoiceProbe{svc: m, guildID: guestGuildID},
+		VoiceProbe:     view,
 	}
 	// Build gets the session context, not the phase context: the goroutines it
 	// starts outlive every span here.
@@ -412,6 +414,8 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	// it counts as a speaker alongside the pool bots in setup.Joined.
 	speakerCount := countSpeakers(len(setup.Joined), true)
 	span.SetAttributes(attribute.Int("speaker.count", speakerCount))
+	view := m.openGuildView(guildID)
+	undo.view = func() { m.closeGuildView(guildID) }
 	p := pipeline.Params{
 		GuildID:      guildID,
 		OwnerBotID:   m.ownerBotID,
@@ -426,7 +430,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		OV:           ov,
 		GM:           gm,
 		AllowFilter:  allowUser,
-		VoiceProbe:   &cacheVoiceProbe{svc: m, guildID: guildID},
+		VoiceProbe:   view,
 	}
 	// Build gets the session context, not the phase context: the mixer and
 	// router goroutines it starts outlive every span here.

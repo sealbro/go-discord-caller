@@ -30,6 +30,9 @@ func EventListeners(managerSvc ManagerService, syncGuild GuildCommandSyncer) []b
 		bot.NewListenerFunc(onVoiceJoin(managerSvc)),
 		bot.NewListenerFunc(onVoiceLeave(managerSvc)),
 		bot.NewListenerFunc(onVoiceMove(managerSvc)),
+		bot.NewListenerFunc(onVoiceStateUpdate(managerSvc)),
+		bot.NewListenerFunc(onGuildAvailable(managerSvc)),
+		bot.NewListenerFunc(onGuildReady(managerSvc)),
 	}
 }
 
@@ -210,6 +213,28 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 		if e.VoiceState.ChannelID != nil {
 			m.AutoRoute(guildID, *e.VoiceState.ChannelID)
 		}
+	}
+}
+
+// onVoiceStateUpdate refreshes the raid's view of voice after every change,
+// including the ones no other handler reacts to: a bot leaving, a mute.
+func onVoiceStateUpdate(m ManagerService) func(*events.GuildVoiceStateUpdate) {
+	return func(e *events.GuildVoiceStateUpdate) {
+		m.RefreshVoiceView(e.VoiceState.GuildID)
+	}
+}
+
+// onGuildAvailable and onGuildReady refresh the raid's view after a gateway
+// reconnect has rebuilt the guild's voice states and members from scratch.
+func onGuildAvailable(m ManagerService) func(*events.GuildAvailable) {
+	return func(e *events.GuildAvailable) {
+		m.RefreshVoiceView(e.GuildID)
+	}
+}
+
+func onGuildReady(m ManagerService) func(*events.GuildReady) {
+	return func(e *events.GuildReady) {
+		m.RefreshVoiceView(e.GuildID)
 	}
 }
 

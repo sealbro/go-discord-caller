@@ -116,6 +116,7 @@ func (m *Service) trackStartupFilter(guildID snowflake.ID, filter *AllowFilter) 
 // re-runs the cascade. Without this hop the router would only see the change
 // when the user next moved between channels.
 func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member) {
+	m.RefreshVoiceView(guildID)
 	m.mu.RLock()
 	st := m.statuses[guildID]
 	if st == nil || st.Session == nil || st.Session.AllowFilter == nil {

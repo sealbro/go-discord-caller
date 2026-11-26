@@ -11,6 +11,7 @@ import (
 
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -620,10 +621,10 @@ func TestTeardownUndeafenLeavesASpanPerBot(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		calls := &stalledFirstRecorder{}
 		c := &deafController{guildID: testGuild, setDeaf: calls.set, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
-		bots := map[string]bool{"711": true, "712": true, "713": true}
-		for id := range bots {
-			sf, _ := snowflake.Parse(id)
-			c.Register(sf, true)
+		bots := map[string]bool{}
+		for _, id := range []snowflake.ID{711, 712, 713} {
+			c.Register(id, true)
+			bots[id.String()] = true
 		}
 
 		undeafenThenLeave(c, func() {})()
@@ -648,6 +649,28 @@ func TestTeardownUndeafenLeavesASpanPerBot(t *testing.T) {
 		}
 		if failed != 1 {
 			t.Errorf("%d undeafen spans marked failed, want 1: the stalled request's error must be on its span", failed)
+		}
+	})
+}
+
+// Even when Discord answers no undeafen at all, closing the controller must end
+// within the teardown budget: the guild cannot start a new raid until it does.
+func TestTeardownUndeafensStopWithinBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stallAll := func(ctx context.Context, _, _ snowflake.ID, _ bool) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		c := &deafController{guildID: testGuild, setDeaf: stallAll, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+		for id := snowflake.ID(721); id <= 733; id++ {
+			c.Register(id, true)
+		}
+
+		start := time.Now()
+		undeafenThenLeave(c, func() {})()
+
+		if took := time.Since(start); took > pipeline.TeardownUndeafenBudget {
+			t.Errorf("closing with 13 stalled undeafens took %v, want at most %v", took, pipeline.TeardownUndeafenBudget)
 		}
 	})
 }

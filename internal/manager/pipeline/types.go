@@ -42,6 +42,11 @@ const VoiceLeaveTimeout = 5 * time.Second
 // for the guild's shared member-update rate limit.
 const UndeafenTimeout = 10 * time.Second
 
+// TeardownUndeafenBudget caps all of a teardown's undeafens together. The
+// guild refuses a new raid until teardown ends, so Discord stalling on every
+// request must not hold it for N×UndeafenTimeout.
+const TeardownUndeafenBudget = 30 * time.Second
+
 // SpeakerResult holds the outcome of a single successfully joined speaker.
 // Constructed by manager.Service.setupSpeakers and consumed by pipelines via
 // Setup.

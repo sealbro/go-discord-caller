@@ -393,6 +393,10 @@ func (c *deafController) apply(botID snowflake.ID, deaf bool) {
 	}()
 }
 
+// deafInFlightWait caps how long closing the controller waits for deaf
+// changes already in flight before deciding which bots to undeafen.
+const deafInFlightWait = 5 * time.Second
+
 // deafApplyTimeout caps a single deaf PATCH, including disgo's rate-limit wait.
 const deafApplyTimeout = 10 * time.Second
 
@@ -441,7 +445,7 @@ func (c *deafController) noteError(err error) {
 // deafened, so a session never strands the flag on a member. Safe to call more
 // than once; the per-speaker Undeafen in BuildSpeakerCleanup covers sessions
 // that have no router at all (RaidModeAllyListener). ctx bounds only the wait
-// for in-flight changes; each undeafen has its own pipeline.UndeafenTimeout.
+// for in-flight changes; the undeafens run under pipeline.UndeafenInTurn.
 func (c *deafController) Close(ctx context.Context) {
 	if c == nil {
 		return
@@ -487,21 +491,23 @@ func (c *deafController) Close(ctx context.Context) {
 	}
 	c.mu.Unlock()
 
-	// Each undeafen gets its own deadline: they queue on a shared rate-limit
-	// bucket, and one shared deadline would let a stalled request fail every
-	// bot behind it.
-	for _, botID := range restore {
-		reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pipeline.UndeafenTimeout)
+	// One at a time: the undeafens queue on the guild's shared member-update
+	// rate limit, and a deadline started early would be spent waiting.
+	skipped := pipeline.UndeafenInTurn(len(restore), func(reqCtx context.Context, i int) {
+		botID := restore[i]
 		err := traceUndeafen(reqCtx, botID, func(ctx context.Context) error {
 			return c.setDeaf(ctx, c.guildID, botID, false)
 		})
-		cancel()
 		if err != nil {
 			slog.WarnContext(ctx, "failed to undeafen bot on session close; next capture raid will repair it",
 				slog.String("guildID", c.guildID.String()),
 				slog.String("botID", botID.String()),
 				slog.Any("err", err))
 		}
+	})
+	if skipped > 0 {
+		slog.WarnContext(ctx, "teardown undeafen budget spent; bots left deafened until the next capture raid",
+			slog.String("guildID", c.guildID.String()), slog.Int("skipped", skipped))
 	}
 }
 

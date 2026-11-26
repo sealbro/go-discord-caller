@@ -196,3 +196,25 @@ func TestBuildSpeakerCleanupUndeafensEverySpeakerPastAStalledRequest(t *testing.
 		}
 	})
 }
+
+// Even when Discord answers no undeafen at all, teardown must end within its
+// budget: the guild cannot start a new raid until it does.
+func TestBuildSpeakerCleanupUndeafensWithinBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var joined []SpeakerResult
+		for id := snowflake.ID(1311); id <= 1323; id++ {
+			joined = append(joined, SpeakerResult{
+				Speaker:  guild.Speaker{ID: id},
+				GV:       pool.NewGuildVoice(&recordingVoiceManager{note: func(string) {}}, id),
+				Undeafen: func(ctx context.Context) { <-ctx.Done() },
+			})
+		}
+
+		start := time.Now()
+		BuildSpeakerCleanup(snowflake.ID(42), joined)()
+
+		if took := time.Since(start); took > TeardownUndeafenBudget {
+			t.Errorf("teardown of %d stalled undeafens took %v, want at most %v", len(joined), took, TeardownUndeafenBudget)
+		}
+	})
+}

@@ -83,7 +83,7 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 // Discord rejects a member voice-state PATCH once the member is out of voice.
 func undeafenThenLeave(deaf *deafController, leave func()) func() {
 	return func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), pipeline.VoiceLeaveTimeout)
+		closeCtx, cancel := context.WithTimeout(context.Background(), deafInFlightWait)
 		deaf.Close(closeCtx)
 		cancel()
 		leave()

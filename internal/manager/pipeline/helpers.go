@@ -232,12 +232,17 @@ func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 			// undeafens share the guild's member-update rate limit: started
 			// together, they would spend their deadlines queued behind a
 			// stalled one.
+			var undeafens []func(context.Context)
 			for _, r := range joined {
 				if r.Undeafen != nil {
-					ctx, cancel := context.WithTimeout(context.Background(), UndeafenTimeout)
-					r.Undeafen(ctx)
-					cancel()
+					undeafens = append(undeafens, r.Undeafen)
 				}
+			}
+			if skipped := UndeafenInTurn(len(undeafens), func(ctx context.Context, i int) {
+				undeafens[i](ctx)
+			}); skipped > 0 {
+				slog.Warn("teardown undeafen budget spent; speakers left deafened until the next capture raid",
+					slog.String("guildID", guildID.String()), slog.Int("skipped", skipped))
 			}
 			inParallel(joined, func(r SpeakerResult) {
 				ctx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
@@ -246,6 +251,23 @@ func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 			})
 		})
 	}
+}
+
+// UndeafenInTurn calls undeafen for n bots one at a time, each with its own
+// UndeafenTimeout, and stops once TeardownUndeafenBudget is spent. It returns
+// how many bots it never reached.
+func UndeafenInTurn(n int, undeafen func(ctx context.Context, i int)) (skipped int) {
+	budget, cancelBudget := context.WithTimeout(context.Background(), TeardownUndeafenBudget)
+	defer cancelBudget()
+	for i := range n {
+		if budget.Err() != nil {
+			return n - i
+		}
+		ctx, cancel := context.WithTimeout(budget, UndeafenTimeout)
+		undeafen(ctx, i)
+		cancel()
+	}
+	return 0
 }
 
 func inParallel(joined []SpeakerResult, fn func(SpeakerResult)) {

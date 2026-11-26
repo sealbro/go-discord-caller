@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Trace span for each undeafen at the end of a raid** (`voice.deaf.undeafen`): shows how long each one took and why it failed.
+
+### Changed
+- **Undeafening at the end of a raid is capped at 30 s in total**: if Discord stops answering, bots not reached stay deafened until the next capture raid, a warning says how many, and the server can start a new raid sooner.
+
+### Fixed
+- **Speaker bots left server-deafened after a raid**: one slow undeafen request at the end of a raid no longer makes every other bot's undeafen fail with it.
+- **A speaker bot could stay in its channel after a raid**: a slow undeafen at the end of a raid no longer uses up the time the bot has to leave voice.
+
 ## [0.18.1] - 2026-11-25
 
 ### Changed

@@ -47,11 +47,6 @@ type SpeakerResult struct {
 	Handle  *opus.FanoutHandle // nil when withCapture is false
 	GV      pool.GuildVoice
 	Cleanup func() // closes provider/receiver; caller must invoke on teardown
-	// Undeafen clears the server-deaf flag this speaker was given at join time
-	// in non-capture modes; nil when the speaker was never deafened. It must
-	// run before GV.Leave — Discord rejects a member voice-state PATCH for a
-	// member who is no longer connected to voice.
-	Undeafen func(context.Context)
 }
 
 // DeafSink owns the server-deaf flag of the bots in one session. Implemented

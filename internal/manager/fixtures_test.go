@@ -288,3 +288,41 @@ func startHostRaid(t *testing.T, f *callerRoleFixture) (context.Context, context
 	_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
 	return ctx, cancel, err
 }
+
+// oneSpeakerService returns a Service whose test guild has one enabled speaker
+// bound to boundChannel, with cachedChannels the guild's only voice channels.
+func oneSpeakerService(t *testing.T, speakerID, boundChannel snowflake.ID, speakerVM *fakeVoiceManager, ownerRest rest.Rest, cachedChannels ...snowflake.ID) *Service {
+	t.Helper()
+	st := store.NewInMemoryStore()
+	st.BindChannel(testGuildID, speakerID, boundChannel)
+	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("one_speaker_service"))
+	if err != nil {
+		t.Fatalf("NewMetrics: %v", err)
+	}
+	return &Service{
+		statuses: map[snowflake.ID]*guild.Status{
+			testGuildID: {
+				GuildID:     testGuildID,
+				OwnerUserID: testBotID,
+				Speakers:    map[snowflake.ID]*guild.Speaker{speakerID: {ID: speakerID, Enabled: true}},
+			},
+		},
+		store:       st,
+		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: speakerVM, Caches: cache.New(), Rest: stubRest{}}},
+		ownerClient: &bot.Client{Caches: cachesWithChannels(t, testGuildID, cachedChannels...), Rest: ownerRest},
+		ownerBotID:  testBotID,
+		metrics:     metrics,
+		reconnect:   newReconnectState(),
+	}
+}
+
+// runOneCallerSetup sets up the test guild's speakers for a one-caller raid and
+// tears down whatever it set up.
+func runOneCallerSetup(m *Service) error {
+	ctx := context.Background()
+	setup, err := m.setupSpeakers(ctx, testGuildID, guild.RaidModeOneCaller, nil, m.metrics.ForGuild(ctx, testGuildID), time.Now())
+	if setup != nil {
+		setup.SpeakerCleanup()
+	}
+	return err
+}

@@ -122,13 +122,25 @@ func (m *Service) reconcileSpeakerDeaf(ctx context.Context, guildID, speakerID s
 	}
 
 	return func(cleanupCtx context.Context) {
-		if err := m.ensureSpeakerDeaf(cleanupCtx, guildID, speakerID, false); err != nil {
+		if err := traceUndeafen(cleanupCtx, speakerID, func(ctx context.Context) error {
+			return m.ensureSpeakerDeaf(ctx, guildID, speakerID, false)
+		}); err != nil {
 			slog.WarnContext(cleanupCtx, "failed to undeafen speaker on teardown; next capture raid will repair it",
 				slog.String("guildID", guildID.String()),
 				slog.String("speakerID", speakerID.String()),
 				slog.Any("err", err))
 		}
 	}
+}
+
+// traceUndeafen gives a teardown undeafen its own span. Teardown runs outside
+// the raid's trace, and the span's error tells a rate-limit wait ("error
+// locking bucket") from a request Discord was slow to answer.
+func traceUndeafen(ctx context.Context, botID snowflake.ID, undeafen func(context.Context) error) error {
+	ctx, end := startPhase(ctx, "voice.deaf.undeafen", botAttr(botID))
+	err := undeafen(ctx)
+	end(err)
+	return err
 }
 
 // deafenDelay is how long a bot must look idle before it is actually deafened.
@@ -480,7 +492,9 @@ func (c *deafController) Close(ctx context.Context) {
 	// fail every bot queued behind it.
 	for _, botID := range restore {
 		reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deafApplyTimeout)
-		err := c.setDeaf(reqCtx, c.guildID, botID, false)
+		err := traceUndeafen(reqCtx, botID, func(ctx context.Context) error {
+			return c.setDeaf(ctx, c.guildID, botID, false)
+		})
 		cancel()
 		if err != nil {
 			slog.WarnContext(ctx, "failed to undeafen bot on session close; next capture raid will repair it",

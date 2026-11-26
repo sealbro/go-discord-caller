@@ -11,6 +11,8 @@ import (
 
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const (
@@ -608,6 +610,46 @@ func TestTeardownUndeafensEveryBotPastAStalledRequest(t *testing.T) {
 		if got, want := len(rec.undeafened), len(bots)-1; got != want {
 			t.Errorf("%d of %d bots undeafened behind one stalled request (undeafened %v); "+
 				"a slow request must not fail the bots queued after it", got, want, rec.undeafened)
+		}
+	})
+}
+
+// Teardown undeafens carry no raid context, so without their own span a slow
+// one cannot be told apart from a rate-limit wait. Each must leave a span with
+// its bot, and the stalled one must carry its error.
+func TestTeardownUndeafenLeavesASpanPerBot(t *testing.T) {
+	ended := spantest.Record()
+	synctest.Test(t, func(t *testing.T) {
+		calls := &stalledFirstRecorder{}
+		c := &deafController{guildID: testGuild, setDeaf: calls.set, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+		bots := map[string]bool{"711": true, "712": true, "713": true}
+		for id := range bots {
+			sf, _ := snowflake.Parse(id)
+			c.Register(sf, true)
+		}
+
+		undeafenThenLeave(c, func() {})()
+
+		failed := 0
+		seen := map[string]bool{}
+		for _, s := range ended() {
+			if s.Name() != "voice.deaf.undeafen" {
+				continue
+			}
+			for _, a := range s.Attributes() {
+				if a.Key == "bot.id" && bots[a.Value.AsString()] {
+					seen[a.Value.AsString()] = true
+					if s.Status().Code == codes.Error {
+						failed++
+					}
+				}
+			}
+		}
+		if len(seen) != len(bots) {
+			t.Errorf("undeafen spans for bots %v, want one for each of %v", seen, bots)
+		}
+		if failed != 1 {
+			t.Errorf("%d undeafen spans marked failed, want 1: the stalled request's error must be on its span", failed)
 		}
 	})
 }

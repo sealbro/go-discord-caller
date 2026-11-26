@@ -87,8 +87,8 @@ func (m *Service) ensureSpeakerDeaf(ctx context.Context, guildID, speakerID snow
 }
 
 // reconcileSpeakerDeaf brings a freshly joined speaker's server-deaf flag in
-// line with what the raid mode needs, and returns the undoing func to hang on
-// the SpeakerResult (nil when there is nothing to undo).
+// line with what the raid mode needs, and reports whether it left the speaker
+// deafened. The deaf controller is told so at Register and undoes it at Close.
 //
 // Non-capture modes deafen: the bot discards inbound audio anyway, so this
 // just stops Discord sending it. Capture modes undeafen, which is what repairs
@@ -100,7 +100,7 @@ func (m *Service) ensureSpeakerDeaf(ctx context.Context, guildID, speakerID snow
 // win for a much worse failure mode. The reconcile direction is the one that
 // matters, and a capture-mode failure there surfaces as the existing
 // "no audio from speaker" symptom rather than something new.
-func (m *Service) reconcileSpeakerDeaf(ctx context.Context, guildID, speakerID snowflake.ID, withCapture bool, deaf *deafController) func(context.Context) {
+func (m *Service) reconcileSpeakerDeaf(ctx context.Context, guildID, speakerID snowflake.ID, withCapture bool, deaf *deafController) (deafened bool) {
 	if withCapture {
 		if err := m.ensureSpeakerDeaf(ctx, guildID, speakerID, false); err != nil {
 			deaf.noteError(err)
@@ -109,7 +109,7 @@ func (m *Service) reconcileSpeakerDeaf(ctx context.Context, guildID, speakerID s
 				slog.String("speakerID", speakerID.String()),
 				slog.Any("err", err))
 		}
-		return nil
+		return false
 	}
 
 	if err := m.ensureSpeakerDeaf(ctx, guildID, speakerID, true); err != nil {
@@ -118,19 +118,9 @@ func (m *Service) reconcileSpeakerDeaf(ctx context.Context, guildID, speakerID s
 			slog.String("guildID", guildID.String()),
 			slog.String("speakerID", speakerID.String()),
 			slog.Any("err", err))
-		return nil
+		return false
 	}
-
-	return func(cleanupCtx context.Context) {
-		if err := traceUndeafen(cleanupCtx, speakerID, func(ctx context.Context) error {
-			return m.ensureSpeakerDeaf(ctx, guildID, speakerID, false)
-		}); err != nil {
-			slog.WarnContext(cleanupCtx, "failed to undeafen speaker on teardown; next capture raid will repair it",
-				slog.String("guildID", guildID.String()),
-				slog.String("speakerID", speakerID.String()),
-				slog.Any("err", err))
-		}
-	}
+	return true
 }
 
 // traceUndeafen gives a teardown undeafen its own span. Teardown runs outside
@@ -397,6 +387,32 @@ func (c *deafController) apply(botID snowflake.ID, deaf bool) {
 // changes already in flight before deciding which bots to undeafen.
 const deafInFlightWait = 5 * time.Second
 
+// undeafenTimeout caps one undeafen at teardown, including the wait for the
+// guild's shared member-update rate limit.
+const undeafenTimeout = 10 * time.Second
+
+// teardownUndeafenBudget caps all of a teardown's undeafens together. The
+// guild refuses a new raid until teardown ends, so Discord stalling on every
+// request must not hold it for N×undeafenTimeout.
+const teardownUndeafenBudget = 30 * time.Second
+
+// undeafenInTurn runs each undeafen one at a time, each with its own
+// undeafenTimeout, and stops once teardownUndeafenBudget is spent. It returns
+// how many it never reached.
+func undeafenInTurn(undeafens []func(context.Context)) (skipped int) {
+	budget, cancelBudget := context.WithTimeout(context.Background(), teardownUndeafenBudget)
+	defer cancelBudget()
+	for i, undeafen := range undeafens {
+		if budget.Err() != nil {
+			return len(undeafens) - i
+		}
+		ctx, cancel := context.WithTimeout(budget, undeafenTimeout)
+		undeafen(ctx)
+		cancel()
+	}
+	return 0
+}
+
 // deafApplyTimeout caps a single deaf PATCH, including disgo's rate-limit wait.
 const deafApplyTimeout = 10 * time.Second
 
@@ -442,10 +458,10 @@ func (c *deafController) noteError(err error) {
 }
 
 // Close stops all pending deafens and undeafens every bot this controller left
-// deafened, so a session never strands the flag on a member. Safe to call more
-// than once; the per-speaker Undeafen in BuildSpeakerCleanup covers sessions
-// that have no router at all (RaidModeAllyListener). ctx bounds only the wait
-// for in-flight changes; the undeafens run under pipeline.UndeafenInTurn.
+// deafened, so a session never strands the flag on a member. It is the only
+// teardown undeafen: every bot reconcileSpeakerDeaf deafens is registered here,
+// in every mode. Safe to call more than once. ctx bounds only the wait for
+// in-flight changes; the undeafens run under undeafenInTurn.
 func (c *deafController) Close(ctx context.Context) {
 	if c == nil {
 		return
@@ -493,18 +509,21 @@ func (c *deafController) Close(ctx context.Context) {
 
 	// One at a time: the undeafens queue on the guild's shared member-update
 	// rate limit, and a deadline started early would be spent waiting.
-	skipped := pipeline.UndeafenInTurn(len(restore), func(reqCtx context.Context, i int) {
-		botID := restore[i]
-		err := traceUndeafen(reqCtx, botID, func(ctx context.Context) error {
-			return c.setDeaf(ctx, c.guildID, botID, false)
+	undeafens := make([]func(context.Context), 0, len(restore))
+	for _, botID := range restore {
+		undeafens = append(undeafens, func(reqCtx context.Context) {
+			err := traceUndeafen(reqCtx, botID, func(ctx context.Context) error {
+				return c.setDeaf(ctx, c.guildID, botID, false)
+			})
+			if err != nil {
+				slog.WarnContext(ctx, "failed to undeafen bot on session close; next capture raid will repair it",
+					slog.String("guildID", c.guildID.String()),
+					slog.String("botID", botID.String()),
+					slog.Any("err", err))
+			}
 		})
-		if err != nil {
-			slog.WarnContext(ctx, "failed to undeafen bot on session close; next capture raid will repair it",
-				slog.String("guildID", c.guildID.String()),
-				slog.String("botID", botID.String()),
-				slog.Any("err", err))
-		}
-	})
+	}
+	skipped := undeafenInTurn(undeafens)
 	if skipped > 0 {
 		slog.WarnContext(ctx, "teardown undeafen budget spent; bots left deafened until the next capture raid",
 			slog.String("guildID", c.guildID.String()), slog.Int("skipped", skipped))

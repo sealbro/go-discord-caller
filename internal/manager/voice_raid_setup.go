@@ -216,16 +216,15 @@ func (m *Service) joinSpeakers(ctx context.Context, guildID snowflake.ID, candid
 			}
 			deafCtx, endDeaf := startPhase(attachCtx, "voice.deaf.reconcile",
 				botAttr(sp.ID), attribute.Bool("deaf.want", !withCapture))
-			undeafen := m.reconcileSpeakerDeaf(deafCtx, guildID, sp.ID, withCapture, deaf)
+			deafened := m.reconcileSpeakerDeaf(deafCtx, guildID, sp.ID, withCapture, deaf)
 			endDeaf(nil)
 			// The controller takes over from here: the router tells it when
 			// this speaker stops being a live capture source. A speaker that
 			// captures starts undeafened; one that does not starts deafened
-			// (or would have, had the guild granted the permission — a failed
-			// deafen returns a nil undo, and register mirrors that).
-			deaf.Register(sp.ID, !withCapture && undeafen != nil)
+			// (or would have, had the guild granted the permission).
+			deaf.Register(sp.ID, deafened)
 			m.storeApplier(guildID, sp.ID, m.buildApplier(guildID, sp.ID, chOut, handle, allowUser))
-			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup, Undeafen: undeafen}
+			resultCh <- pipeline.SpeakerResult{Speaker: sp, ChOut: chOut, Handle: handle, GV: gv, Cleanup: cleanup}
 			endAttach(nil)
 		}(sp)
 	}

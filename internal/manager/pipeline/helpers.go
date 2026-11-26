@@ -214,66 +214,25 @@ func BuildDestinations(joined []SpeakerResult) []*DestChannel {
 }
 
 // BuildSpeakerCleanup returns a function that closes every speaker's
-// provider/receiver, undeafens it and leaves its voice channel, exactly once.
-// Closes and leaves run in parallel so teardown is bounded by the slowest
-// connection rather than N×VoiceLeaveTimeout.
+// provider/receiver and leaves its voice channel, exactly once.
+// Leave calls run in parallel so teardown is bounded by the slowest connection
+// rather than N×VoiceLeaveTimeout.
 func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			inParallel(joined, func(r SpeakerResult) {
-				if r.Cleanup != nil {
-					r.Cleanup()
-				}
-			})
-			// Before the leaves: a member voice-state PATCH is rejected once
-			// the member is out of voice, so undeafening after the leave would
-			// strand the flag on the member record. One at a time, because the
-			// undeafens share the guild's member-update rate limit: started
-			// together, they would spend their deadlines queued behind a
-			// stalled one.
-			var undeafens []func(context.Context)
+			ctx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
+			defer cancel()
+			var wg sync.WaitGroup
 			for _, r := range joined {
-				if r.Undeafen != nil {
-					undeafens = append(undeafens, r.Undeafen)
-				}
+				wg.Go(func() {
+					if r.Cleanup != nil {
+						r.Cleanup()
+					}
+					r.GV.Leave(ctx, guildID)
+				})
 			}
-			if skipped := UndeafenInTurn(len(undeafens), func(ctx context.Context, i int) {
-				undeafens[i](ctx)
-			}); skipped > 0 {
-				slog.Warn("teardown undeafen budget spent; speakers left deafened until the next capture raid",
-					slog.String("guildID", guildID.String()), slog.Int("skipped", skipped))
-			}
-			inParallel(joined, func(r SpeakerResult) {
-				ctx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
-				defer cancel()
-				r.GV.Leave(ctx, guildID)
-			})
+			wg.Wait()
 		})
 	}
-}
-
-// UndeafenInTurn calls undeafen for n bots one at a time, each with its own
-// UndeafenTimeout, and stops once TeardownUndeafenBudget is spent. It returns
-// how many bots it never reached.
-func UndeafenInTurn(n int, undeafen func(ctx context.Context, i int)) (skipped int) {
-	budget, cancelBudget := context.WithTimeout(context.Background(), TeardownUndeafenBudget)
-	defer cancelBudget()
-	for i := range n {
-		if budget.Err() != nil {
-			return n - i
-		}
-		ctx, cancel := context.WithTimeout(budget, UndeafenTimeout)
-		undeafen(ctx, i)
-		cancel()
-	}
-	return 0
-}
-
-func inParallel(joined []SpeakerResult, fn func(SpeakerResult)) {
-	var wg sync.WaitGroup
-	for _, r := range joined {
-		wg.Go(func() { fn(r) })
-	}
-	wg.Wait()
 }

@@ -11,7 +11,6 @@ import (
 
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
-	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -364,9 +363,8 @@ func TestDeafenReadinessOK(t *testing.T) {
 // A deafen whose timer fires moments before teardown has not recorded itself
 // yet, so a Close that snapshotted immediately would see deaf=false, skip the
 // bot, and let the PATCH land afterwards — leaving the member server-deafened
-// with nothing left to repair it. For the owner bot that is permanent: it is
-// not covered by the per-speaker Undeafen in BuildSpeakerCleanup, so it would
-// capture silence in every later raid.
+// with nothing left to repair it. Close is the only teardown undeafen, so the
+// bot would capture silence in every later raid until a capture raid repairs it.
 func TestDeafControllerCloseWaitsForInFlightDeafen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rec := &deafRecorder{block: make(chan struct{})}
@@ -654,7 +652,7 @@ func TestTeardownUndeafenLeavesASpanPerBot(t *testing.T) {
 }
 
 // Even when Discord answers no undeafen at all, closing the controller must end
-// within the teardown budget: the guild cannot start a new raid until it does.
+// when the teardown budget does: the guild cannot start a new raid until then.
 func TestTeardownUndeafensStopWithinBudget(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		stallAll := func(ctx context.Context, _, _ snowflake.ID, _ bool) error {
@@ -669,8 +667,9 @@ func TestTeardownUndeafensStopWithinBudget(t *testing.T) {
 		start := time.Now()
 		undeafenThenLeave(c, func() {})()
 
-		if took := time.Since(start); took > pipeline.TeardownUndeafenBudget {
-			t.Errorf("closing with 13 stalled undeafens took %v, want at most %v", took, pipeline.TeardownUndeafenBudget)
+		if took := time.Since(start); took != teardownUndeafenBudget {
+			t.Errorf("closing with 13 stalled undeafens took %v, want %v: three tries of %v, then the rest skipped",
+				took, teardownUndeafenBudget, undeafenTimeout)
 		}
 	})
 }

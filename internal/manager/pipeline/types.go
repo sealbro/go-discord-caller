@@ -38,15 +38,6 @@ const ListenDestID snowflake.ID = 3
 // the speaker-cleanup goroutine spawned in BuildSpeakerCleanup.
 const VoiceLeaveTimeout = 5 * time.Second
 
-// UndeafenTimeout caps one speaker's undeafen at teardown, including the wait
-// for the guild's shared member-update rate limit.
-const UndeafenTimeout = 10 * time.Second
-
-// TeardownUndeafenBudget caps all of a teardown's undeafens together. The
-// guild refuses a new raid until teardown ends, so Discord stalling on every
-// request must not hold it for N×UndeafenTimeout.
-const TeardownUndeafenBudget = 30 * time.Second
-
 // SpeakerResult holds the outcome of a single successfully joined speaker.
 // Constructed by manager.Service.setupSpeakers and consumed by pipelines via
 // Setup.
@@ -56,11 +47,6 @@ type SpeakerResult struct {
 	Handle  *opus.FanoutHandle // nil when withCapture is false
 	GV      pool.GuildVoice
 	Cleanup func() // closes provider/receiver; caller must invoke on teardown
-	// Undeafen clears the server-deaf flag this speaker was given at join time
-	// in non-capture modes; nil when the speaker was never deafened. It must
-	// run before GV.Leave — Discord rejects a member voice-state PATCH for a
-	// member who is no longer connected to voice.
-	Undeafen func(context.Context)
 }
 
 // DeafSink owns the server-deaf flag of the bots in one session. Implemented

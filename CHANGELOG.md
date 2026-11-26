@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **Speaker bots left server-deafened after a raid**: one slow undeafen request at the end of a raid no longer makes every other bot's undeafen fail with it.
+- **A speaker bot could stay in its channel after a raid**: a slow undeafen at the end of a raid no longer uses up the time the bot has to leave voice.
 
 ## [0.18.1] - 2026-11-25
 

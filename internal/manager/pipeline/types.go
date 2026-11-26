@@ -38,6 +38,10 @@ const ListenDestID snowflake.ID = 3
 // the speaker-cleanup goroutine spawned in BuildSpeakerCleanup.
 const VoiceLeaveTimeout = 5 * time.Second
 
+// UndeafenTimeout caps one speaker's undeafen at teardown, including the wait
+// for the guild's shared member-update rate limit.
+const UndeafenTimeout = 10 * time.Second
+
 // SpeakerResult holds the outcome of a single successfully joined speaker.
 // Constructed by manager.Service.setupSpeakers and consumed by pipelines via
 // Setup.

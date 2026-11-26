@@ -6,6 +6,8 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/disgoorg/disgo/gateway"
 	"github.com/disgoorg/disgo/voice"
@@ -15,11 +17,21 @@ import (
 )
 
 // recordingVoiceManager is a voice.Manager that reports the Leave attempt and
-// hands back no connection, so GuildVoice.Leave is observable without any
-// Discord I/O.
+// hands back conn (nil unless set), so GuildVoice.Leave is observable without
+// any Discord I/O.
 type recordingVoiceManager struct {
 	note func(string)
+	conn voice.Conn
 }
+
+// leaveCtxConn records the context error its Close is called with: a leave
+// sent on an expired context never reaches Discord.
+type leaveCtxConn struct {
+	voice.Conn
+	closeErr chan error
+}
+
+func (c *leaveCtxConn) Close(ctx context.Context) { c.closeErr <- ctx.Err() }
 
 func (v *recordingVoiceManager) HandleVoiceStateUpdate(gateway.EventVoiceStateUpdate)   {}
 func (v *recordingVoiceManager) HandleVoiceServerUpdate(gateway.EventVoiceServerUpdate) {}
@@ -33,7 +45,7 @@ func (v *recordingVoiceManager) Conns() iter.Seq[voice.Conn] {
 
 func (v *recordingVoiceManager) GetConn(snowflake.ID) voice.Conn {
 	v.note("leave")
-	return nil
+	return v.conn
 }
 
 // eventLog collects cleanup steps from the per-speaker goroutines
@@ -98,4 +110,30 @@ func TestBuildSpeakerCleanupSkipsNilUndeafen(t *testing.T) {
 	if got := log.snapshot(); !slices.Equal(got, want) {
 		t.Fatalf("cleanup order = %v, want %v", got, want)
 	}
+}
+
+// A stalled undeafen must not spend the time the speaker needs to leave: a
+// leave sent on an expired context never reaches Discord, so the bot stays
+// in the channel after the raid.
+func TestBuildSpeakerCleanupLeavesAfterAStalledUndeafen(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		conn := &leaveCtxConn{closeErr: make(chan error, 1)}
+		joined := []SpeakerResult{{
+			Speaker: guild.Speaker{ID: snowflake.ID(1234)},
+			GV:      pool.NewGuildVoice(&recordingVoiceManager{note: func(string) {}, conn: conn}, snowflake.ID(5678)),
+			Undeafen: func(ctx context.Context) {
+				select {
+				case <-ctx.Done():
+				case <-time.After(time.Hour):
+					t.Error("stalled undeafen was never given a deadline")
+				}
+			},
+		}}
+
+		BuildSpeakerCleanup(snowflake.ID(42), joined)()
+
+		if err := <-conn.closeErr; err != nil {
+			t.Errorf("leave was sent on a context already %v: the stalled undeafen spent the leave's budget", err)
+		}
+	})
 }

@@ -221,8 +221,6 @@ func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			ctx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
-			defer cancel()
 			var wg sync.WaitGroup
 			wg.Add(len(joined))
 			for _, r := range joined {
@@ -235,9 +233,13 @@ func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 					// the member is out of voice, so undeafening after the leave
 					// would strand the flag on the member record.
 					if r.Undeafen != nil {
-						r.Undeafen(ctx)
+						undeafenCtx, cancel := context.WithTimeout(context.Background(), UndeafenTimeout)
+						r.Undeafen(undeafenCtx)
+						cancel()
 					}
-					r.GV.Leave(ctx, guildID)
+					leaveCtx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
+					defer cancel()
+					r.GV.Leave(leaveCtx, guildID)
 				}(r)
 			}
 			wg.Wait()

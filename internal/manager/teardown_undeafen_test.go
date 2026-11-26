@@ -1,21 +1,12 @@
 package manager
 
 import (
-	"context"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/disgoorg/disgo/bot"
-	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
-	"go.opentelemetry.io/otel/metric/noop"
-
-	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/store"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 // memberUpdateRecorder accepts every member update and records the deaf
@@ -43,12 +34,6 @@ func TestTeardownUndeafensASpeakerOnce(t *testing.T) {
 		speakerID = snowflake.ID(520)
 		channelID = snowflake.ID(521)
 	)
-	st := store.NewInMemoryStore()
-	st.BindChannel(testGuildID, speakerID, channelID)
-	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("teardown_undeafen_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
 	rec := &memberUpdateRecorder{undeafens: map[snowflake.ID]int{}}
 	conn := &fakeVoiceConn{channelID: channelID}
 	undeafenedBeforeLeave := false
@@ -57,32 +42,11 @@ func TestTeardownUndeafensASpeakerOnce(t *testing.T) {
 		defer rec.mu.Unlock()
 		undeafenedBeforeLeave = rec.undeafens[speakerID] > 0
 	})
-	m := &Service{
-		statuses: map[snowflake.ID]*guild.Status{
-			testGuildID: {
-				GuildID:     testGuildID,
-				OwnerUserID: testBotID,
-				Speakers:    map[snowflake.ID]*guild.Speaker{speakerID: {ID: speakerID, Enabled: true}},
-			},
-		},
-		store: st,
-		poolSvc: onePool{id: speakerID, client: &bot.Client{
-			VoiceManager: &fakeVoiceManager{conn: conn},
-			Caches:       cache.New(),
-			Rest:         stubRest{},
-		}},
-		ownerClient: &bot.Client{Caches: cachesWithChannels(t, testGuildID, channelID), Rest: rec},
-		ownerBotID:  testBotID,
-		metrics:     metrics,
-		reconnect:   newReconnectState(),
-	}
+	m := oneSpeakerService(t, speakerID, channelID, &fakeVoiceManager{conn: conn}, rec, channelID)
 
-	ctx := context.Background()
-	setup, err := m.setupSpeakers(ctx, testGuildID, guild.RaidModeOneCaller, nil, metrics.ForGuild(ctx, testGuildID), time.Now())
-	if err != nil {
+	if err := runOneCallerSetup(m); err != nil {
 		t.Fatalf("setupSpeakers: %v", err)
 	}
-	setup.SpeakerCleanup()
 
 	rec.mu.Lock()
 	defer rec.mu.Unlock()

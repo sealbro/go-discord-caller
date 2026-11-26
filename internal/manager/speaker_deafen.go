@@ -387,17 +387,13 @@ func (c *deafController) apply(botID snowflake.ID, deaf bool) {
 // changes already in flight before deciding which bots to undeafen.
 const deafInFlightWait = 5 * time.Second
 
-// undeafenTimeout caps one undeafen at teardown, including the wait for the
-// guild's shared member-update rate limit.
-const undeafenTimeout = 10 * time.Second
-
 // teardownUndeafenBudget caps all of a teardown's undeafens together. The
 // guild refuses a new raid until teardown ends, so Discord stalling on every
-// request must not hold it for N×undeafenTimeout.
+// request must not hold it for N×deafApplyTimeout.
 const teardownUndeafenBudget = 30 * time.Second
 
 // undeafenInTurn runs each undeafen one at a time, each with its own
-// undeafenTimeout, and stops once teardownUndeafenBudget is spent. It returns
+// deafApplyTimeout, and stops once teardownUndeafenBudget is spent. It returns
 // how many it never reached.
 func undeafenInTurn(undeafens []func(context.Context)) (skipped int) {
 	budget, cancelBudget := context.WithTimeout(context.Background(), teardownUndeafenBudget)
@@ -406,7 +402,7 @@ func undeafenInTurn(undeafens []func(context.Context)) (skipped int) {
 		if budget.Err() != nil {
 			return len(undeafens) - i
 		}
-		ctx, cancel := context.WithTimeout(budget, undeafenTimeout)
+		ctx, cancel := context.WithTimeout(budget, deafApplyTimeout)
 		undeafen(ctx)
 		cancel()
 	}

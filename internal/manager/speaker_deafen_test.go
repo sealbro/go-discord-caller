@@ -669,7 +669,7 @@ func TestTeardownUndeafensStopWithinBudget(t *testing.T) {
 
 		if took := time.Since(start); took != teardownUndeafenBudget {
 			t.Errorf("closing with 13 stalled undeafens took %v, want %v: three tries of %v, then the rest skipped",
-				took, teardownUndeafenBudget, undeafenTimeout)
+				took, teardownUndeafenBudget, deafApplyTimeout)
 		}
 	})
 }

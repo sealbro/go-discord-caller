@@ -587,9 +587,7 @@ func (r *stalledFirstRecorder) set(ctx context.Context, _, botID snowflake.ID, d
 }
 
 // One unanswered undeafen at teardown must not cost every other bot its
-// undeafen. Production, 2026-11-26: six bots failed in the same second, five
-// seconds after the raid stopped, because the first request spent the whole
-// teardown budget and the rest were sent on an expired context.
+// undeafen: they queue on one rate-limit bucket, one after another.
 func TestTeardownUndeafensEveryBotPastAStalledRequest(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rec := &stalledFirstRecorder{}

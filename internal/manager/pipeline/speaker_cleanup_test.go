@@ -137,3 +137,62 @@ func TestBuildSpeakerCleanupLeavesAfterAStalledUndeafen(t *testing.T) {
 		}
 	})
 }
+
+// memberBucket stands in for disgo's per-guild member-update rate limit:
+// requests take it one at a time, waiting under their own deadline, and the
+// first one is never answered until its deadline ends.
+type memberBucket struct {
+	lock       chan struct{}
+	mu         sync.Mutex
+	calls      int
+	undeafened []snowflake.ID
+}
+
+func (b *memberBucket) undeafen(id snowflake.ID) func(context.Context) {
+	return func(ctx context.Context) {
+		select {
+		case b.lock <- struct{}{}:
+		case <-ctx.Done():
+			return
+		}
+		defer func() { <-b.lock }()
+
+		b.mu.Lock()
+		b.calls++
+		first := b.calls == 1
+		b.mu.Unlock()
+		if first {
+			<-ctx.Done()
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		b.mu.Lock()
+		b.undeafened = append(b.undeafened, id)
+		b.mu.Unlock()
+	}
+}
+
+// Speakers' undeafens queue on one rate limit, so a deadline that starts
+// before a request is sent is spent waiting behind a stalled one.
+func TestBuildSpeakerCleanupUndeafensEverySpeakerPastAStalledRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		bucket := &memberBucket{lock: make(chan struct{}, 1)}
+		var joined []SpeakerResult
+		for _, id := range []snowflake.ID{1301, 1302, 1303} {
+			joined = append(joined, SpeakerResult{
+				Speaker:  guild.Speaker{ID: id},
+				GV:       pool.NewGuildVoice(&recordingVoiceManager{note: func(string) {}}, id),
+				Undeafen: bucket.undeafen(id),
+			})
+		}
+
+		BuildSpeakerCleanup(snowflake.ID(42), joined)()
+
+		if got, want := len(bucket.undeafened), len(joined)-1; got != want {
+			t.Errorf("%d of %d speakers undeafened behind one stalled request (undeafened %v); "+
+				"each undeafen's deadline must start when it is sent", got, want, bucket.undeafened)
+		}
+	})
+}

@@ -214,35 +214,44 @@ func BuildDestinations(joined []SpeakerResult) []*DestChannel {
 }
 
 // BuildSpeakerCleanup returns a function that closes every speaker's
-// provider/receiver and leaves its voice channel, exactly once.
-// Leave calls run in parallel so teardown is bounded by the slowest connection
-// rather than N×VoiceLeaveTimeout.
+// provider/receiver, undeafens it and leaves its voice channel, exactly once.
+// Closes and leaves run in parallel so teardown is bounded by the slowest
+// connection rather than N×VoiceLeaveTimeout.
 func BuildSpeakerCleanup(guildID snowflake.ID, joined []SpeakerResult) func() {
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			var wg sync.WaitGroup
-			wg.Add(len(joined))
+			inParallel(joined, func(r SpeakerResult) {
+				if r.Cleanup != nil {
+					r.Cleanup()
+				}
+			})
+			// Before the leaves: a member voice-state PATCH is rejected once
+			// the member is out of voice, so undeafening after the leave would
+			// strand the flag on the member record. One at a time, because the
+			// undeafens share the guild's member-update rate limit: started
+			// together, they would spend their deadlines queued behind a
+			// stalled one.
 			for _, r := range joined {
-				go func(r SpeakerResult) {
-					defer wg.Done()
-					if r.Cleanup != nil {
-						r.Cleanup()
-					}
-					// Before Leave: a member voice-state PATCH is rejected once
-					// the member is out of voice, so undeafening after the leave
-					// would strand the flag on the member record.
-					if r.Undeafen != nil {
-						undeafenCtx, cancel := context.WithTimeout(context.Background(), UndeafenTimeout)
-						r.Undeafen(undeafenCtx)
-						cancel()
-					}
-					leaveCtx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
-					defer cancel()
-					r.GV.Leave(leaveCtx, guildID)
-				}(r)
+				if r.Undeafen != nil {
+					ctx, cancel := context.WithTimeout(context.Background(), UndeafenTimeout)
+					r.Undeafen(ctx)
+					cancel()
+				}
 			}
-			wg.Wait()
+			inParallel(joined, func(r SpeakerResult) {
+				ctx, cancel := context.WithTimeout(context.Background(), VoiceLeaveTimeout)
+				defer cancel()
+				r.GV.Leave(ctx, guildID)
+			})
 		})
 	}
+}
+
+func inParallel(joined []SpeakerResult, fn func(SpeakerResult)) {
+	var wg sync.WaitGroup
+	for _, r := range joined {
+		wg.Go(func() { fn(r) })
+	}
+	wg.Wait()
 }

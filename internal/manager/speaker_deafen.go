@@ -441,7 +441,7 @@ func (c *deafController) noteError(err error) {
 // deafened, so a session never strands the flag on a member. Safe to call more
 // than once; the per-speaker Undeafen in BuildSpeakerCleanup covers sessions
 // that have no router at all (RaidModeAllyListener). ctx bounds only the wait
-// for in-flight changes; each undeafen has its own deafApplyTimeout.
+// for in-flight changes; each undeafen has its own pipeline.UndeafenTimeout.
 func (c *deafController) Close(ctx context.Context) {
 	if c == nil {
 		return
@@ -487,11 +487,11 @@ func (c *deafController) Close(ctx context.Context) {
 	}
 	c.mu.Unlock()
 
-	// Each undeafen gets its own deadline: they run one after another on a
-	// shared rate-limit bucket, so a single shared one let one stalled request
-	// fail every bot queued behind it.
+	// Each undeafen gets its own deadline: they queue on a shared rate-limit
+	// bucket, and one shared deadline would let a stalled request fail every
+	// bot behind it.
 	for _, botID := range restore {
-		reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deafApplyTimeout)
+		reqCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), pipeline.UndeafenTimeout)
 		err := traceUndeafen(reqCtx, botID, func(ctx context.Context) error {
 			return c.setDeaf(ctx, c.guildID, botID, false)
 		})

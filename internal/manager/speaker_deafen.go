@@ -387,6 +387,9 @@ func (c *deafController) apply(botID snowflake.ID, deaf bool) {
 // changes already in flight before deciding which bots to undeafen.
 const deafInFlightWait = 5 * time.Second
 
+// deafApplyTimeout caps a single deaf PATCH, including disgo's rate-limit wait.
+const deafApplyTimeout = 10 * time.Second
+
 // teardownUndeafenBudget caps all of a teardown's undeafens together. The
 // guild refuses a new raid until teardown ends, so Discord stalling on every
 // request must not hold it for N×deafApplyTimeout.
@@ -408,9 +411,6 @@ func undeafenInTurn(undeafens []func(context.Context)) (skipped int) {
 	}
 	return 0
 }
-
-// deafApplyTimeout caps a single deaf PATCH, including disgo's rate-limit wait.
-const deafApplyTimeout = 10 * time.Second
 
 // jsonErrMissingPermissions is Discord's error code for a request the bot is
 // not allowed to make. Returned when the owner bot lacks DEAFEN_MEMBERS or

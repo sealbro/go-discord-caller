@@ -549,3 +549,65 @@ func TestDeafControllerCloseWaitsForChangeBeingStarted(t *testing.T) {
 		}
 	})
 }
+
+// stalledFirstRecorder answers its first deaf change only when the request's
+// context ends, as a PATCH Discord never answers would, and fails every later
+// call made on an expired context, as disgo does.
+type stalledFirstRecorder struct {
+	mu         sync.Mutex
+	calls      int
+	undeafened []snowflake.ID
+}
+
+func (r *stalledFirstRecorder) set(ctx context.Context, _, botID snowflake.ID, deaf bool) error {
+	r.mu.Lock()
+	r.calls++
+	first := r.calls == 1
+	r.mu.Unlock()
+
+	if first {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Hour):
+			return errors.New("stalled request was never given a deadline")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !deaf {
+		r.undeafened = append(r.undeafened, botID)
+	}
+	return nil
+}
+
+// One unanswered undeafen at teardown must not cost every other bot its
+// undeafen. Production, 2026-11-26: six bots failed in the same second, five
+// seconds after the raid stopped, because the first request spent the whole
+// teardown budget and the rest were sent on an expired context.
+func TestTeardownUndeafensEveryBotPastAStalledRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rec := &stalledFirstRecorder{}
+		c := &deafController{guildID: testGuild, setDeaf: rec.set, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+		bots := []snowflake.ID{701, 702, 703, 704, 705, 706}
+		for _, id := range bots {
+			c.Register(id, true)
+		}
+
+		left := false
+		undeafenThenLeave(c, func() { left = true })()
+
+		if !left {
+			t.Fatal("speakers never left voice")
+		}
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		if got, want := len(rec.undeafened), len(bots)-1; got != want {
+			t.Errorf("%d of %d bots undeafened behind one stalled request (undeafened %v); "+
+				"a slow request must not fail the bots queued after it", got, want, rec.undeafened)
+		}
+	})
+}

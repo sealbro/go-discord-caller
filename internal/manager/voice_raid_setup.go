@@ -69,23 +69,25 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 		joinedSpeakers = append(joinedSpeakers, r.Speaker)
 	}
 
-	// Undeafening must precede the voice leaves BuildSpeakerCleanup performs —
-	// Discord rejects a member voice-state PATCH once the member is out of
-	// voice — so the controller is closed first.
-	speakerCleanup := pipeline.BuildSpeakerCleanup(guildID, joined)
 	return &pipeline.Setup{
-		Joined:     joined,
-		Candidates: len(candidates),
-		Speakers:   joinedSpeakers,
-		SpeakerCleanup: func() {
-			closeCtx, cancel := context.WithTimeout(context.Background(), pipeline.VoiceLeaveTimeout)
-			deaf.Close(closeCtx)
-			cancel()
-			speakerCleanup()
-		},
-		Outs: outs,
-		Deaf: deaf,
+		Joined:         joined,
+		Candidates:     len(candidates),
+		Speakers:       joinedSpeakers,
+		SpeakerCleanup: undeafenThenLeave(deaf, pipeline.BuildSpeakerCleanup(guildID, joined)),
+		Outs:           outs,
+		Deaf:           deaf,
 	}, nil
+}
+
+// undeafenThenLeave closes the deaf controller before the speakers leave:
+// Discord rejects a member voice-state PATCH once the member is out of voice.
+func undeafenThenLeave(deaf *deafController, leave func()) func() {
+	return func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), pipeline.VoiceLeaveTimeout)
+		deaf.Close(closeCtx)
+		cancel()
+		leave()
+	}
 }
 
 // boundSpeakers returns the speakers eligible to join: enabled AND bound to a

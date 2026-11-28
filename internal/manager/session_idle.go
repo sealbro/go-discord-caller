@@ -100,6 +100,10 @@ func (w *sessionPresenceWatcher) spokeRecently(interval time.Duration) bool {
 }
 
 // busy reports whether the session still has something to relay.
+//
+// Speech is taken from the audio path, while callers and their audience come
+// from the service's own caches. Speech can therefore only make a session idle
+// sooner: it never keeps one alive without callers and listeners in voice.
 func (w *sessionPresenceWatcher) busy(interval time.Duration) bool {
 	if w.sharesRelay != nil && w.sharesRelay() {
 		return w.hasCaller()

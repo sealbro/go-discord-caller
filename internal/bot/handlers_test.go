@@ -61,6 +61,7 @@ type fakeManager struct {
 	autoRouteCalls      []autoRouteCall
 	reconnectCalls      []snowflakePair
 	onBotVoiceMoveCalls []botMoveCall
+	refreshViewCalls    []snowflake.ID
 }
 
 type snowflakePair struct{ guild, user snowflake.ID }
@@ -123,6 +124,12 @@ func (f *fakeManager) NotifyMemberUpdate(g snowflake.ID, m discord.Member) {
 	defer f.mu.Unlock()
 	f.notifyMemberCalls = append(f.notifyMemberCalls, snowflakePair{g, m.User.ID})
 }
+func (f *fakeManager) RefreshVoiceView(g snowflake.ID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshViewCalls = append(f.refreshViewCalls, g)
+}
+
 func (f *fakeManager) AutoRoute(g, ch snowflake.ID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -273,6 +280,7 @@ func (f *fakeManager) snapshotCalls() fakeManagerSnapshot {
 		autoRouteCalls:      append([]autoRouteCall(nil), f.autoRouteCalls...),
 		reconnectCalls:      append([]snowflakePair(nil), f.reconnectCalls...),
 		onBotVoiceMoveCalls: append([]botMoveCall(nil), f.onBotVoiceMoveCalls...),
+		refreshViewCalls:    append([]snowflake.ID(nil), f.refreshViewCalls...),
 	}
 }
 
@@ -286,6 +294,7 @@ type fakeManagerSnapshot struct {
 	autoRouteCalls      []autoRouteCall
 	reconnectCalls      []snowflakePair
 	onBotVoiceMoveCalls []botMoveCall
+	refreshViewCalls    []snowflake.ID
 }
 
 // newTestClient returns a *bot.Client with a working Caches but no network
@@ -715,5 +724,88 @@ func TestVoiceJoinLeaveInfoLogsCarryNoUserID(t *testing.T) {
 	}
 	if strings.Contains(out, userID.String()) {
 		t.Errorf("INFO log carries the Discord user ID:\n%s", out)
+	}
+}
+
+// Every event that can change who is in voice, or rebuild the guild's caches,
+// must refresh the raid's view of voice, including a bot leaving or a mute,
+// which no other handler reacts to.
+func TestEventListeners_RefreshTheVoiceView(t *testing.T) {
+	const guildID, userID = snowflake.ID(51), snowflake.ID(98)
+	generic := func() *events.GenericEvent { return events.NewGenericEvent(newTestClient(), 0, 0) }
+	cases := []struct {
+		name  string
+		event bot.Event
+	}{
+		{"voice state update", &events.GuildVoiceStateUpdate{GenericGuildVoiceState: &events.GenericGuildVoiceState{
+			GenericEvent: generic(),
+			VoiceState:   discord.VoiceState{GuildID: guildID, UserID: userID, SelfMute: true},
+			Member:       discord.Member{User: discord.User{ID: userID, Bot: true}},
+		}}},
+		{"guild available", &events.GuildAvailable{GenericGuild: &events.GenericGuild{GenericEvent: generic(), GuildID: guildID}}},
+		{"guild ready", &events.GuildReady{GenericGuild: &events.GenericGuild{GenericEvent: generic(), GuildID: guildID}}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := &fakeManager{}
+			for _, l := range EventListeners(f, func(context.Context, snowflake.ID) {}) {
+				l.OnEvent(c.event)
+			}
+			if got := f.snapshotCalls().refreshViewCalls; !slices.Equal(got, []snowflake.ID{guildID}) {
+				t.Errorf("view refreshes = %v, want one for guild %d", got, guildID)
+			}
+		})
+	}
+}
+
+// disgo follows a voice-state event with a join, move or leave event for the
+// same change. A human joining is refreshed by the join handler, after it has
+// cached the full member; refreshing on the voice-state event as well would
+// rebuild the view twice for one join.
+func TestEventListeners_RefreshTheVoiceViewOncePerVoiceChange(t *testing.T) {
+	const guildID, userID = snowflake.ID(52), snowflake.ID(97)
+	chA, chB := snowflake.ID(1002), snowflake.ID(1003)
+	human := discord.Member{User: discord.User{ID: userID}, RoleIDs: []snowflake.ID{42}}
+	state := func(ch *snowflake.ID) discord.VoiceState {
+		return discord.VoiceState{GuildID: guildID, UserID: userID, ChannelID: ch}
+	}
+	cases := []struct {
+		name     string
+		old, now discord.VoiceState
+		follow   func(*events.GenericGuildVoiceState, discord.VoiceState) bot.Event
+	}{
+		{"join", state(nil), state(&chA), func(g *events.GenericGuildVoiceState, _ discord.VoiceState) bot.Event {
+			return &events.GuildVoiceJoin{GenericGuildVoiceState: g}
+		}},
+		{"move", state(&chA), state(&chB), func(g *events.GenericGuildVoiceState, old discord.VoiceState) bot.Event {
+			return &events.GuildVoiceMove{GenericGuildVoiceState: g, OldVoiceState: old}
+		}},
+		{"leave", state(&chA), state(nil), func(g *events.GenericGuildVoiceState, old discord.VoiceState) bot.Event {
+			return &events.GuildVoiceLeave{GenericGuildVoiceState: g, OldVoiceState: old}
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := &fakeManager{}
+			generic := &events.GenericGuildVoiceState{
+				GenericEvent: events.NewGenericEvent(newTestClient(), 0, 0),
+				VoiceState:   c.now,
+				Member:       human,
+			}
+			for _, e := range []bot.Event{
+				&events.GuildVoiceStateUpdate{GenericGuildVoiceState: generic, OldVoiceState: c.old},
+				c.follow(generic, c.old),
+			} {
+				for _, l := range EventListeners(f, func(context.Context, snowflake.ID) {}) {
+					l.OnEvent(e)
+				}
+			}
+			snap := f.snapshotCalls()
+			// NotifyMemberUpdate refreshes the view itself.
+			if got := len(snap.refreshViewCalls) + len(snap.notifyMemberCalls); got != 1 {
+				t.Errorf("%s rebuilt the view %d times (refreshes %v, member updates %v), want once",
+					c.name, got, snap.refreshViewCalls, snap.notifyMemberCalls)
+			}
+		})
 	}
 }

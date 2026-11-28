@@ -6,6 +6,7 @@ import (
 	"slices"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
@@ -16,12 +17,11 @@ import (
 	"go.opentelemetry.io/otel/metric/noop"
 )
 
-// stubAllowFilter is a no-op AllowSource for tests that don't exercise allow
-// updates. RoleID returns 0; pipeline tests never call Set.
+// stubAllowFilter is an AllowSource with no caller role bound.
 type stubAllowFilter struct{}
 
-func (stubAllowFilter) Set(snowflake.ID, bool) {}
-func (stubAllowFilter) RoleID() snowflake.ID   { return 0 }
+func (stubAllowFilter) RoleID() snowflake.ID    { return 0 }
+func (stubAllowFilter) LastAdmitted() time.Time { return time.Time{} }
 
 // hostFixture bundles the inputs every host pipeline test needs.
 type hostFixture struct {

@@ -3,14 +3,17 @@ package manager
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
 	"go.opentelemetry.io/otel/codes"
 )
@@ -549,6 +552,122 @@ func TestDeafControllerCloseWaitsForChangeBeingStarted(t *testing.T) {
 			t.Errorf("%d deaf change(s) started after Close returned: Close did not wait for a change it had already admitted", n)
 		}
 	})
+}
+
+// TestDeafControllerFollowsCallerPresence walks one capture source through
+// people coming and going from its channel, as the raid's voice view reports
+// them. A bot must end up hearing exactly while someone holding the caller
+// role is in its channel.
+func TestDeafControllerFollowsCallerPresence(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const userA, userB = snowflake.ID(762), snowflake.ID(763)
+		f := withCallerRole(newCallerRoleFixture(t))
+		channel := roleTestChannels[testGuildID][1]
+		view := openView(t, f.m, testGuildID)
+		rec := &deafRecorder{}
+		c := newDeafController(f.m, testGuildID, f.m.buildAllowUserFilter(testGuildID, view))
+		c.setDeaf = rec.set
+		c.Register(roleTestSpeakerID, true)
+		c.Watch(map[snowflake.ID]snowflake.ID{roleTestSpeakerID: channel})
+
+		hearing := func() bool {
+			ev := rec.snapshot()
+			return len(ev) > 0 && !ev[len(ev)-1].deaf
+		}
+		steps := []struct {
+			name   string
+			change func()
+			want   bool
+		}{
+			{"role-bearing member joins", func() { putInVoice(f, userA, channel, false, roleTestCallerRoleID) }, true},
+			{"only caller loses the role", func() { putInVoice(f, userA, channel, false, viewTestOtherRole) }, false},
+			{"role granted again", func() { putInVoice(f, userA, channel, false, roleTestCallerRoleID) }, true},
+			{"second caller joins", func() { putInVoice(f, userB, channel, false, roleTestCallerRoleID) }, true},
+			// The other caller still holds it: an off-by-one deafens here.
+			{"one of two loses the role", func() { putInVoice(f, userA, channel, false, viewTestOtherRole) }, true},
+			{"last caller leaves voice", func() { f.caches.RemoveVoiceState(testGuildID, userB) }, false},
+		}
+		for _, step := range steps {
+			step.change()
+			f.m.RefreshVoiceView(testGuildID)
+			settle(deafenDelay)
+			if got := hearing(); got != step.want {
+				t.Errorf("%s: hearing = %v, want %v (changes %v)", step.name, got, step.want, rec.snapshot())
+			}
+		}
+		c.Close(context.Background())
+	})
+}
+
+// deafRest records every server-deaf change the raid asks Discord for, and
+// accepts them all.
+type deafRest struct {
+	rest.Rest
+	mu      sync.Mutex
+	changes []deafEvent
+}
+
+func (r *deafRest) UpdateMember(_, userID snowflake.ID, update discord.MemberUpdate, _ ...rest.RequestOpt) (*discord.Member, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if update.Deaf != nil {
+		r.changes = append(r.changes, deafEvent{userID, *update.Deaf})
+	}
+	return &discord.Member{}, nil
+}
+
+func (r *deafRest) has(want deafEvent) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return slices.Contains(r.changes, want)
+}
+
+// Nothing in voice changes after a raid starts with no caller present, so the
+// only thing that can tell the deaf state the owner's capture source is idle is
+// the report made when the raid goes live. Without it the owner keeps
+// decrypting an empty channel until some unrelated voice event arrives.
+func TestRaidStart_ReportsCaptureStateOnceLive(t *testing.T) {
+	starts := []struct {
+		name    string
+		guildID snowflake.ID
+		start   func(f *callerRoleFixture) (context.CancelFunc, error)
+	}{
+		{"host", testGuildID, func(f *callerRoleFixture) (context.CancelFunc, error) {
+			ctx, cancel := context.WithCancel(context.Background())
+			_, err := f.m.StartVoiceRaid(ctx, testGuildID, cancel, guild.RaidModeOneCaller)
+			return cancel, err
+		}},
+		{"guest caller", roleTestGuestGuildID, func(f *callerRoleFixture) (context.CancelFunc, error) {
+			f.m.sessions.Create(roleTestHostCode, testGuildID, guild.RaidModeGuildCaller)
+			ctx, cancel := context.WithCancel(context.Background())
+			_, err := f.m.JoinSession(ctx, roleTestGuestGuildID, cancel, guild.RaidModeAllyCaller, roleTestHostCode)
+			return cancel, err
+		}},
+	}
+	for _, s := range starts {
+		t.Run(s.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := withCallerRole(newCallerRoleFixture(t))
+				deafs := &deafRest{}
+				f.m.ownerClient.Rest = deafs
+
+				cancel, err := s.start(f)
+				if err != nil {
+					t.Fatalf("start: %v", err)
+				}
+				defer cancel()
+				settle(deafenDelay)
+
+				if !deafs.has(deafEvent{testBotID, true}) {
+					t.Errorf("owner not deafened %v after a raid started with nobody in its channel (changes %v)", deafenDelay, deafs.changes)
+				}
+				if err := f.m.StopVoiceRaid(context.Background(), s.guildID); err != nil {
+					t.Fatalf("stop: %v", err)
+				}
+				synctest.Wait()
+			})
+		})
+	}
 }
 
 // stalledFirstRecorder answers its first deaf change only when the request's

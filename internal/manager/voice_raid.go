@@ -9,9 +9,9 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -81,11 +81,15 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if guestMode.WithCapture() && !m.hasBoundCallerRole(guestGuildID) {
 		return guestMode, ErrNoCallerRole
 	}
-	allowUser := m.buildAllowUserFilter(guestGuildID)
-	defer m.trackStartupFilter(guestGuildID, allowUser)()
+	view, err := m.openGuildView(guestGuildID)
+	if err != nil {
+		return guestMode, err
+	}
+	undo.view = func() { m.closeGuildView(guestGuildID, view) }
+	allowUser := m.buildAllowUserFilter(guestGuildID, view)
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
-	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser.Admit, guestGm, raidStart)
+	setup, err := m.setupSpeakers(setupCtx, guestGuildID, guestMode, allowUser, guestGm, raidStart)
 	if err != nil {
 		return guestMode, err
 	}
@@ -177,12 +181,12 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 		OwnerHandle:    ownerHandle,
 		GuestGM:        guestGm,
 		AllowFilter:    allowUser,
-		VoiceProbe:     &cacheVoiceProbe{svc: m, guildID: guestGuildID},
+		VoiceProbe:     view,
 	}
 	// Build gets the session context, not the phase context: the goroutines it
 	// starts outlive every span here.
 	_, endBuild := startPhase(setupCtx, "voice.pipeline.build")
-	session, start, pipelineCleanup, err := pipeline.GuestFor(guestMode).Build(ctx, params)
+	session, start, pipelineCleanup, err := m.raidRuntime().BuildGuest(ctx, params)
 	endBuild(err)
 	if err != nil {
 		return guestMode, err
@@ -201,6 +205,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	// router's Recompute inside start(); no separate sync pass needed.
 	m.startSessionIdleWatcher(ctx, cancelFunc, session)
 	start()
+	m.RefreshVoiceView(guestGuildID) // first capture report to the deaf state, as start() routed for the first time
 
 	speakerCount := countSpeakers(len(setup.Joined), ownerCleanup != nil)
 	guestGm.SessionStarted(speakerCount, string(guestMode))
@@ -223,6 +228,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			if st := m.statuses[guestGuildID]; st != nil && st.Session == session {
 				st.Session = nil
 				m.clearActiveRouter(guestGuildID)
+				m.closeRaidView(session)
 			}
 			m.mu.Unlock()
 			session.Cleanup()
@@ -289,6 +295,7 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 	}
 	status.Session = nil
 	m.clearActiveRouter(guildID)
+	m.closeRaidView(session)
 	m.starting.hold(guildID)
 	m.mu.Unlock()
 	defer m.starting.release(guildID)
@@ -345,10 +352,14 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	}
 
 	gm := m.metrics.ForGuild(ctx, guildID)
-	allowUser := m.buildAllowUserFilter(guildID)
-	defer m.trackStartupFilter(guildID, allowUser)()
+	view, err := m.openGuildView(guildID)
+	if err != nil {
+		return "", err
+	}
+	undo.view = func() { m.closeGuildView(guildID, view) }
+	allowUser := m.buildAllowUserFilter(guildID, view)
 	undo.reconnect = func() { m.clearReconnectState(guildID) }
-	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser.Admit, gm, raidStart)
+	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser, gm, raidStart)
 	if err != nil {
 		return "", err
 	}
@@ -426,12 +437,12 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		OV:           ov,
 		GM:           gm,
 		AllowFilter:  allowUser,
-		VoiceProbe:   &cacheVoiceProbe{svc: m, guildID: guildID},
+		VoiceProbe:   view,
 	}
 	// Build gets the session context, not the phase context: the mixer and
 	// router goroutines it starts outlive every span here.
 	_, endBuild := startPhase(setupCtx, "voice.pipeline.build")
-	session, start, err := pipeline.HostFor(mode).Build(ctx, p)
+	session, start, err := m.raidRuntime().BuildHost(ctx, p)
 	endBuild(err)
 	if err != nil {
 		return "", err
@@ -469,5 +480,6 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 		slog.Int("speakersCandidates", setup.Candidates),
 	)
 	start()
+	m.RefreshVoiceView(guildID) // first capture report to the deaf state, as start() routed for the first time
 	return allyCode, nil
 }

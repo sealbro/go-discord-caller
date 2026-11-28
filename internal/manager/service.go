@@ -18,6 +18,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/config"
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/metric"
@@ -41,6 +42,9 @@ type Service struct {
 	poolSvc            pool.PoolService
 	ownerClient        *bot.Client
 	ownerBotID         snowflake.ID
+	voices             voiceHost    // nil runs voice on the bots' own clients; see voiceManagers
+	audio              raid.Runtime // nil builds raid audio in this process; see raidRuntime
+	views              sync.Map     // guild ID → *viewProbe of the guild's raid; see RefreshVoiceView
 	bindMu             sync.Mutex
 	toggleMu           sync.Mutex // orders speaker toggles so the store write follows the in-memory change
 	test               config.TestConfig
@@ -49,7 +53,6 @@ type Service struct {
 	reconnect          reconnectState // typed reconnect subsystem (applier registry + in-flight guard)
 	rejoinStalled      func(guildID, botUserID snowflake.ID)
 	starting           startGuard    // one raid start per guild at a time
-	startupFilters     sync.Map      // guild ID → *AllowFilter of the raid still starting
 	sessionIdleTimeout time.Duration // 0 disables; set via SetSessionIdleTimeout
 	reportedCallers    reportedCallers
 	seeding            seedGroup
@@ -151,8 +154,8 @@ func (m *Service) startSessionIdleWatcher(ctx context.Context, cancelFunc contex
 		idleTimeout:      m.sessionIdleTimeout,
 		sharesRelay:      func() bool { return m.sharesRelay(session.GuildID) },
 	}
-	if filter, ok := session.AllowFilter.(*AllowFilter); ok {
-		w.lastHeard = filter.LastAdmitted
+	if session.AllowFilter != nil {
+		w.lastHeard = session.AllowFilter.LastAdmitted
 	}
 	go w.Run(ctx)
 }
@@ -342,7 +345,8 @@ func (m *Service) capturedChannels(guildID snowflake.ID) map[snowflake.ID]struct
 // Join/Leave on the result to manage the connection.
 func (m *Service) ownerVoice(guildID snowflake.ID) pool.GuildVoice {
 	channelID, _ := m.liveBoundChannel(guildID, m.ownerBotID)
-	return pool.NewGuildVoice(m.ownerClient.VoiceManager, channelID).ForBot(m.ownerBotID)
+	vm, _ := m.voiceManagers().VoiceManager(m.ownerBotID)
+	return pool.NewGuildVoice(vm, channelID).ForBot(m.ownerBotID)
 }
 
 func (m *Service) seedGuildSpeakers(guildID, ownerID snowflake.ID) {
@@ -566,12 +570,12 @@ func (m *Service) snapshotLocked(guildID snowflake.ID) guild.Status {
 // configured channel. Use Join/Leave on the result to manage the connection.
 // Returns false if the bot is not in the pool or its gateway is not connected.
 func (m *Service) speakerVoice(guildID, botUserID snowflake.ID) (pool.GuildVoice, bool) {
-	client, ok := m.poolSvc.GetClientByID(botUserID)
+	vm, ok := m.voiceManagers().VoiceManager(botUserID)
 	if !ok {
 		return pool.GuildVoice{}, false
 	}
 	channelID, _ := m.store.GetBoundChannel(guildID, botUserID)
-	return pool.NewGuildVoice(client.VoiceManager, channelID).ForBot(botUserID), true
+	return pool.NewGuildVoice(vm, channelID).ForBot(botUserID), true
 }
 
 // CheckGuildChannelAccess checks Connect+Speak permissions for the owner bot and

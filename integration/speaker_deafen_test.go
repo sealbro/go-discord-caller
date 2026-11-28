@@ -144,14 +144,9 @@ func TestE20_CaptureRaidRepairsStrandedDeaf(t *testing.T) {
 //
 // The dynamic deafen path end-to-end: a capture bot whose channel holds nobody
 // worth capturing gets deafened, and hearing is restored the moment a caller
-// arrives. Direction matters here for a harness reason. onVoiceLeave
-// (internal/bot/handlers.go) returns early for bots before reaching AutoRoute,
-// and every "caller" in the test guild is a bot standing in for a human — so a
-// caller *leaving* never triggers a recompute in this environment, though it
-// does in production where callers are people. Joins and session start both
-// recompute for bots, so the test drives those: start with an empty channel
+// arrives. The test drives that direction: start with an empty channel
 // (case 2), then have a caller arrive (case 6). The leave direction is covered
-// by TestCaptureObserverFollowsCallerPresence at the router level.
+// by TestDeafControllerFollowsCallerPresence in internal/manager.
 //
 // The idle CPU cost, measured before the caller arrives. Production,
 // 2026-10-25: a raid pinned the host's only core for hours, and every bot's

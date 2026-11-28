@@ -17,6 +17,7 @@ import (
 	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 )
 
 // RelayInputID is the synthetic source ID used when adding a guest relay feed
@@ -55,10 +56,10 @@ type SpeakerResult struct {
 type DeafSink interface {
 	// Register enrols a bot with the deaf state it already has.
 	Register(botID snowflake.ID, deaf bool)
-	// Observe receives the router's source → "is capturing" map after every
-	// recomputation and drives each registered bot toward hearing exactly
-	// while it is a live capture source.
-	Observe(capturing map[snowflake.ID]bool)
+	// Watch starts driving each registered bot toward hearing exactly while
+	// it is a live capture source: one of sources (source ID → its channel)
+	// with a caller in its channel.
+	Watch(sources map[snowflake.ID]snowflake.ID)
 	// Close stops pending changes and undeafens whatever it left deafened.
 	Close(ctx context.Context)
 }
@@ -77,14 +78,17 @@ type Setup struct {
 	Deaf DeafSink
 }
 
-// CaptureObserver returns the router capture-observer callback for this setup,
-// or nil when nothing is driving deaf state. Nil-safe on the receiver so
-// pipelines can chain it unconditionally.
-func (s *Setup) CaptureObserver() func(capturing map[snowflake.ID]bool) {
+// WatchCapture hands the router's capture sources to the session's deaf
+// state. Nil-safe on the receiver so pipelines can call it unconditionally.
+func (s *Setup) WatchCapture(sources []*router.SourceSlot) {
 	if s == nil || s.Deaf == nil {
-		return nil
+		return
 	}
-	return s.Deaf.Observe
+	channels := make(map[snowflake.ID]snowflake.ID, len(sources))
+	for _, src := range sources {
+		channels[src.ID] = src.ChannelID
+	}
+	s.Deaf.Watch(channels)
 }
 
 // SourceEntry is one audio capture source feeding the router graph. Handle

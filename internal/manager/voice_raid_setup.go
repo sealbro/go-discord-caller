@@ -12,9 +12,9 @@ import (
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid/pipeline"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/attribute"
@@ -28,7 +28,7 @@ import (
 // gm carries the session context for the metric recorders the speakers' audio
 // pipeline keeps; ctx is only the parent of the startup phase spans and is not
 // retained past this call.
-func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, allowUser func(snowflake.ID) bool, gm telemetry.GuildMetrics, raidStart time.Time) (setup *pipeline.Setup, err error) {
+func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode guild.RaidMode, filter *AllowFilter, gm telemetry.GuildMetrics, raidStart time.Time) (setup *pipeline.Setup, err error) {
 	phaseCtx, endPhase := startPhase(ctx, "voice.speakers.setup",
 		attribute.Bool("capture", mode.WithCapture()))
 	defer func() { endPhase(err) }()
@@ -50,7 +50,11 @@ func (m *Service) setupSpeakers(ctx context.Context, guildID snowflake.ID, mode 
 	}
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.candidates", len(candidates)))
 
-	deaf := newDeafController(m, guildID)
+	deaf := newDeafController(m, guildID, filter)
+	var allowUser func(snowflake.ID) bool
+	if filter != nil {
+		allowUser = filter.Admit
+	}
 	joined := m.joinSpeakers(phaseCtx, guildID, candidates, mode.WithCapture(), allowUser, deaf, gm, raidStart)
 	trace.SpanFromContext(phaseCtx).SetAttributes(attribute.Int("speaker.joined", len(joined)))
 	if len(joined) == 0 {

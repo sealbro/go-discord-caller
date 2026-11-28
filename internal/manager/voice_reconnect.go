@@ -42,19 +42,7 @@ func (m *Service) OnEncryptStall(selfUserID godave.UserID, conn godave.Callbacks
 	if !ok {
 		return
 	}
-	if !m.reconnect.stallRejoinDue(guildID, botUserID, time.Now()) {
-		slog.Debug("voice: outbound encryption still stalled, rejoin backing off",
-			slog.String("guildID", guildID.String()),
-			slog.String("botUserID", botUserID.String()),
-		)
-		return
-	}
-	slog.Warn("voice: outbound encryption stalled, rejoining",
-		slog.String("guildID", guildID.String()),
-		slog.String("botUserID", botUserID.String()),
-		slog.Any("daveTrace", trace),
-	)
-	m.rejoinStalled(guildID, botUserID)
+	m.handleVoiceRequest(encryptStallRequest{GuildID: guildID, BotID: botUserID, Trace: trace})
 }
 
 // encryptStallTarget resolves a stall report to the bot and guild it concerns.
@@ -283,13 +271,16 @@ func (m *Service) buildApplier(guildID, botID snowflake.ID, chOut <-chan []byte,
 //
 // UPSTREAM(disgo v0.20.0): two bots' gateway listeners consume independent queues.
 func (m *Service) waitSpeakerConnDrained(guildID, botUserID, boundChID snowflake.ID) {
-	client, ok := m.poolSvc.GetClientByID(botUserID)
-	if !ok || client.VoiceManager == nil {
+	if botUserID == m.ownerBotID {
+		return // the owner's own listener fired this reconnect, so it has nothing left to drain
+	}
+	vm, ok := m.voiceManagers().VoiceManager(botUserID)
+	if !ok || vm == nil {
 		return
 	}
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		conn := client.VoiceManager.GetConn(guildID)
+		conn := vm.GetConn(guildID)
 		if conn == nil {
 			return
 		}

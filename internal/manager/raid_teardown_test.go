@@ -201,12 +201,15 @@ func TestReconnectBotChannel_LeavesWhenSessionEndedDuringJoin(t *testing.T) {
 func TestStartVoiceRaid_RoleGrantDuringStartupIsKept(t *testing.T) {
 	const userID = snowflake.ID(42)
 	f := withCallerRole(newCallerRoleFixture(t))
+	putInVoice(f, userID, roleTestChannels[testGuildID][0], false, viewTestOtherRole)
 	f.ownerVM.onOpen = func() {
-		f.m.NotifyMemberUpdate(testGuildID, discord.Member{
+		granted := discord.Member{
 			GuildID: testGuildID,
 			User:    discord.User{ID: userID},
 			RoleIDs: []snowflake.ID{roleTestCallerRoleID},
-		})
+		}
+		f.caches.AddMember(granted) // as the member-update handler does before notifying
+		f.m.NotifyMemberUpdate(testGuildID, granted)
 	}
 
 	_, cancel, err := startHostRaid(t, f)

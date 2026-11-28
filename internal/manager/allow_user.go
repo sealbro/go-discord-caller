@@ -3,49 +3,37 @@ package manager
 import (
 	"context"
 	"log/slog"
-	"slices"
-	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/disgo/voice"
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 	"github.com/sealbro/go-discord-caller/internal/store"
 	"go.opentelemetry.io/otel/attribute"
 )
 
-// AllowFilter is a per-session, event-updated cache of per-user allow decisions.
-// The hot path (Check) does a single sync.Map load; Set is called by event handlers
-// on member updates so the hot path stays off the shared disgo cache mutex.
+// AllowFilter decides per frame whose audio a session captures: the members
+// the session's voice view places in voice holding the caller role. It reads
+// only the view, never the caches, so a frame costs an atomic load and a map
+// lookup.
 type AllowFilter struct {
-	allowed  sync.Map // snowflake.ID → bool
-	fallback func(snowflake.ID) bool
-	// roleID is the configured caller role for the guild this filter belongs
-	// to. Zero when no caller role is configured (the filter then allows
-	// nobody). Exposed via RoleID() so the auto-router can capture it at
-	// session start without a second store lookup.
+	view *viewProbe
+	// roleID is the guild's caller role when the raid started; zero when none
+	// is bound, which admits nobody.
 	roleID snowflake.ID
 	// lastAdmitted is the unix-nano time of the last frame Admit let through.
 	lastAdmitted atomic.Int64
 }
 
 // RoleID returns the caller role ID this filter was built for. Returns 0 when
-// no caller role is configured. The router uses this to compute per-channel
-// caller counts; a zero value means nobody is a caller (consistent with Check
-// semantics).
+// no caller role is configured.
 func (f *AllowFilter) RoleID() snowflake.ID { return f.roleID }
 
 // Check returns true if userID is allowed to send audio.
-// Uses the local map when a decision is cached, otherwise falls back to the
-// disgo member cache and memoises the result.
 func (f *AllowFilter) Check(userID snowflake.ID) bool {
-	if v, ok := f.allowed.Load(userID); ok {
-		return v.(bool)
-	}
-	result := f.fallback(userID)
-	f.allowed.Store(userID, result)
-	return result
+	return f.view.holdsRole(userID, f.roleID)
 }
 
 // Admit is Check for a frame that has arrived: it also records the arrival.
@@ -66,70 +54,44 @@ func (f *AllowFilter) LastAdmitted() time.Time {
 	return time.Unix(0, n)
 }
 
-// Set stores an explicit allow decision for userID.
-// Called from event handlers (onGuildMemberUpdate, onVoiceJoin) so the next
-// frame from that user skips the fallback lookup entirely.
-func (f *AllowFilter) Set(userID snowflake.ID, allowed bool) {
-	f.allowed.Store(userID, allowed)
-}
-
-// buildAllowUserFilter creates an AllowFilter for guildID.
-// The filter is built once per session and shared across all voice connections.
-// Call prefetchChannelMembers separately for each connection to warm the disgo
-// member cache before the first frame arrives.
-func (m *Service) buildAllowUserFilter(guildID snowflake.ID) *AllowFilter {
-	caches := m.ownerClient.Caches
+// buildAllowUserFilter creates the AllowFilter for a raid in guildID, answering
+// from view. Call prefetchChannelMembers for each connection so members whose
+// roles the caches lack are fetched before their first frame.
+func (m *Service) buildAllowUserFilter(guildID snowflake.ID, view *viewProbe) *AllowFilter {
 	roleID, hasRole := m.store.GetBoundRole(guildID, store.RoleTypeCaller)
-	if !hasRole {
-		return &AllowFilter{
-			fallback: func(snowflake.ID) bool { return false },
-		}
+	if hasRole {
+		slog.Info("role filter active", slog.String("guildID", guildID.String()), slog.String("roleID", roleID.String()))
 	}
-
-	slog.Info("role filter active", slog.String("guildID", guildID.String()), slog.String("roleID", roleID.String()))
-
-	return &AllowFilter{
-		roleID: roleID,
-		fallback: func(userID snowflake.ID) bool {
-			member, ok := caches.Member(guildID, userID)
-			if !ok || m.IsBot(member.User) {
-				return false
-			}
-			return slices.Contains(member.RoleIDs, roleID)
-		},
-	}
+	return &AllowFilter{view: view, roleID: roleID}
 }
 
-// trackStartupFilter routes member updates to filter while a raid for guildID is
-// still starting and has no committed session. The returned func stops that.
-func (m *Service) trackStartupFilter(guildID snowflake.ID, filter *AllowFilter) func() {
-	m.startupFilters.Store(guildID, filter)
-	return func() { m.startupFilters.CompareAndDelete(guildID, filter) }
-}
-
-// NotifyMemberUpdate pushes a fresh allow decision into the active session's
-// AllowFilter. Called by event handlers when a member's roles change or they
-// join a voice channel; no-op when there is no active session.
+// NotifyMemberUpdate brings the raid's view of voice, and with it the capture
+// filter, up to date after a member's roles changed or they joined voice.
 //
 // Also nudges the auto-router (if any) so that a mid-session role grant /
 // revoke on a user currently in a captured voice channel flips C(channel) and
 // re-runs the cascade. Without this hop the router would only see the change
 // when the user next moved between channels.
 func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member) {
-	m.mu.RLock()
-	st := m.statuses[guildID]
-	if st == nil || st.Session == nil || st.Session.AllowFilter == nil {
-		m.mu.RUnlock()
-		if f, ok := m.startupFilters.Load(guildID); ok {
-			f.(*AllowFilter).Set(member.User.ID, !m.IsBot(member.User) && m.HasCallerRole(guildID, member.RoleIDs))
-		}
-		return
-	}
-	filter := st.Session.AllowFilter
-	router := st.Session.AutoRouter
-	m.mu.RUnlock()
+	m.RefreshVoiceView(guildID)
+	m.nudgeRouterFor(guildID, member.User.ID)
+}
 
-	filter.Set(member.User.ID, !m.IsBot(member.User) && m.HasCallerRole(guildID, member.RoleIDs))
+// membersFetched is NotifyMemberUpdate for a batch: one refresh covers them all.
+func (m *Service) membersFetched(guildID snowflake.ID, members []discord.Member) {
+	m.RefreshVoiceView(guildID)
+	for _, member := range members {
+		m.nudgeRouterFor(guildID, member.User.ID)
+	}
+}
+
+func (m *Service) nudgeRouterFor(guildID, userID snowflake.ID) {
+	m.mu.RLock()
+	var router guild.AutoRouter
+	if st := m.statuses[guildID]; st != nil && st.Session != nil {
+		router = st.Session.AutoRouter
+	}
+	m.mu.RUnlock()
 
 	if router == nil {
 		return
@@ -138,7 +100,7 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 	// the router when the user is in voice (a role change for someone not in
 	// voice has no effect on per-channel caller counts).
 	for vs := range m.ownerClient.Caches.VoiceStates(guildID) {
-		if vs.UserID == member.User.ID && vs.ChannelID != nil {
+		if vs.UserID == userID && vs.ChannelID != nil {
 			router.Debounce(*vs.ChannelID)
 			return
 		}
@@ -172,7 +134,5 @@ func (m *Service) prefetchChannelMembers(ctx context.Context, conn voice.Conn, b
 		slog.WarnContext(ctx, "prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
 		return
 	}
-	for _, member := range members {
-		m.NotifyMemberUpdate(guildID, member)
-	}
+	m.membersFetched(guildID, members)
 }

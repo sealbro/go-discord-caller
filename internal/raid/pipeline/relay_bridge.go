@@ -50,7 +50,7 @@ type relayPeer struct {
 // so a session of two guilds — one peer — never allocates on the audio path.
 type relayBridge struct {
 	in         chan relayPacket
-	session    *ally.Session
+	session    ally.Relay
 	mixers     []*opus.Mixer
 	drop       func()
 	newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)
@@ -68,7 +68,7 @@ type relayBridge struct {
 // feeding every destination's mixer. It returns nil when there is nothing to
 // feed or the decoder cannot be created; otherwise the caller must detach the
 // guild from the session and then stop the bridge on teardown.
-func registerRelayInputs(gm telemetry.GuildMetrics, session *ally.Session, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
+func registerRelayInputs(gm Metrics, session ally.Relay, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
 	b := newRelayBridge(gm, session, dests, chanMixers, newDecoder)
 	if b == nil {
 		return nil
@@ -78,7 +78,7 @@ func registerRelayInputs(gm telemetry.GuildMetrics, session *ally.Session, dests
 	return b
 }
 
-func newRelayBridge(gm telemetry.GuildMetrics, session *ally.Session, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
+func newRelayBridge(gm Metrics, session ally.Relay, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, newDecoder func(sampleRate, channels int) (*hraban.Decoder, error)) *relayBridge {
 	if len(dests) == 0 {
 		return nil
 	}
@@ -255,7 +255,7 @@ func (r *hostRelayInputs) register(registerFn func() *relayBridge) {
 
 // close detaches guildID from the session before stopping its bridge, so no
 // broadcast can send on a closed channel (see ally.Session.broadcast).
-func (r *hostRelayInputs) close(session *ally.Session, guildID snowflake.ID) {
+func (r *hostRelayInputs) close(session ally.Relay, guildID snowflake.ID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {

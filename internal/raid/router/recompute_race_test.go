@@ -1,6 +1,7 @@
 package router
 
 import (
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -9,6 +10,37 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 )
+
+// captureProbe is a VoiceProbe whose per-channel caller list the test mutates
+// between Recompute calls, standing in for people joining, leaving, and gaining
+// or losing the capture role.
+type captureProbe struct {
+	mu       sync.Mutex
+	callers  map[snowflake.ID][]snowflake.ID
+	listener bool
+}
+
+func newCaptureProbe() *captureProbe {
+	return &captureProbe{callers: map[snowflake.ID][]snowflake.ID{}, listener: true}
+}
+
+func (p *captureProbe) set(channelID snowflake.ID, users ...snowflake.ID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.callers[channelID] = users
+}
+
+func (p *captureProbe) EnumerateCallers(channelID, _ snowflake.ID) []snowflake.ID {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.callers[channelID])
+}
+
+func (p *captureProbe) HasListeners(snowflake.ID) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.listener
+}
 
 // gatedProbe parks its first EnumerateCallers call after reading the callers,
 // so a test can change the world while a Recompute holds an already-taken
@@ -61,12 +93,10 @@ func TestStaleRecomputeDoesNotOverwriteNewerOne(t *testing.T) {
 		userA  = snowflake.ID(11)
 	)
 	probe := newGatedProbe()
-	log := &captureLog{}
 	src := &SourceSlot{ID: botID, ChannelID: chanID}
 	dest := &DestSlot{ChannelID: destID, Sources: []*SourceSlot{src}, ChOuts: []chan<- []byte{make(chan []byte, 1)}}
 	src.Feeds = []*DestSlot{dest}
-	r := New(snowflake.ID(1), snowflake.ID(9), probe, []*SourceSlot{src}, []*DestSlot{dest}).
-		WithCaptureObserver(log.observe)
+	r := New(snowflake.ID(1), snowflake.ID(9), probe, []*SourceSlot{src}, []*DestSlot{dest})
 	defer r.Close()
 
 	first := recomputeAsync(r)
@@ -86,14 +116,11 @@ func TestStaleRecomputeDoesNotOverwriteNewerOne(t *testing.T) {
 	waitDone(t, first, "first recompute")
 	waitDone(t, second, "second recompute")
 
-	if !log.capturing(botID) {
-		t.Fatal("capture state is off although a caller is present: a stale recompute was applied after a newer one")
-	}
 	r.mu.Lock()
 	mode := src.activeMode
 	r.mu.Unlock()
 	if mode != RouteCopy {
-		t.Fatalf("source mode = %v, want copy", mode)
+		t.Fatalf("source mode = %v although a caller is present, want copy: a stale recompute was applied after a newer one", mode)
 	}
 }
 

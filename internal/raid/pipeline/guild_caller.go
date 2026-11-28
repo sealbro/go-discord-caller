@@ -8,8 +8,8 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
@@ -41,13 +41,13 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 	// One mixer per destination channel.
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.GM.Opus)
+		mx, err := opus.NewMixer(p.GM.OpusMetrics())
 		if err != nil {
 			return nil, nil, fmt.Errorf("create channel mixer: %w", err)
 		}
 		channelMixers[dest.ChannelID] = mx
 	}
-	relayMixer, err := opus.NewMixer(p.GM.Opus)
+	relayMixer, err := opus.NewMixer(p.GM.OpusMetrics())
 	if err != nil {
 		return nil, nil, fmt.Errorf("create relay mixer: %w", err)
 	}
@@ -106,10 +106,10 @@ func (GuildCallerPipeline) Build(ctx context.Context, p Params) (*guild.Session,
 
 	gm := p.GM
 	r := router.New(p.GuildID, p.AllowFilter.RoleID(), p.VoiceProbe, sourceSlots, dests).
-		WithCaptureObserver(p.Setup.CaptureObserver()).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
+	p.Setup.WatchCapture(sourceSlots)
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {

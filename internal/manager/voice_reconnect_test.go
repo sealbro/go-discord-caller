@@ -71,6 +71,7 @@ func TestEncryptStallRejoinBacksOff(t *testing.T) {
 	t.Parallel()
 
 	m := newTestService(true)
+	m.ownerBotID = testBotID
 	rejoins := 0
 	m.rejoinStalled = func(guildID, botUserID snowflake.ID) { rejoins++ }
 

@@ -7,8 +7,8 @@ import (
 
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 	"go.opentelemetry.io/otel/trace"
 )
@@ -16,7 +16,7 @@ import (
 // EndSession runs the common host session teardown: invokes ownerCleanup, records
 // the stop metric, ends the tracing span, and logs the session end.
 // Intended to be called as a deferred statement inside session goroutines.
-func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetrics, mode string) {
+func EndSession(ctx context.Context, ownerCleanup func(), gm Metrics, mode string) {
 	ownerCleanup()
 	gm.SessionStopped(mode)
 	trace.SpanFromContext(ctx).End()
@@ -46,7 +46,7 @@ func EndSession(ctx context.Context, ownerCleanup func(), gm telemetry.GuildMetr
 // the DrainWatcher from auto-pausing a mixer that a peer guild may feed at any
 // moment (see DrainWatcher.WithKeepAlive). Pass nil for mixers no relay input
 // reaches.
-func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayFeed func() bool, bots OutputBots) {
+func StartChannelMixers(ctx context.Context, gm Metrics, dests []*DestChannel, chanMixers map[snowflake.ID]*opus.Mixer, relayFeed func() bool, bots OutputBots) {
 	drop := bots.Dropper(gm, telemetry.DropPathChannelMixer)
 	for _, dest := range dests {
 		mx := chanMixers[dest.ChannelID]
@@ -86,7 +86,7 @@ func StartChannelMixers(ctx context.Context, gm telemetry.GuildMetrics, dests []
 // produced frame directly to all guest guilds. EndSession runs after Run
 // returns, by which time tick (and therefore the sink) is no longer invoked,
 // so cleanup is ordered after the last broadcast.
-func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMixer *opus.Mixer, relaySession *ally.Session, ownerCleanup func(), mode string) {
+func StartRelayBroadcast(ctx context.Context, gm Metrics, relayMixer *opus.Mixer, relaySession ally.Relay, ownerCleanup func(), mode string) {
 	guildID := gm.GuildID()
 	relayMixer.SetSink(func(pkt []byte) {
 		relaySession.BroadcastFromGuild(guildID, pkt)
@@ -100,7 +100,7 @@ func StartRelayBroadcast(ctx context.Context, gm telemetry.GuildMetrics, relayMi
 // StartGuestRelayBroadcast runs the guest relay mixer with a sink that
 // broadcasts each produced frame directly to all OTHER guilds via
 // BroadcastFromGuild, excluding the guest itself.
-func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, session *ally.Session, guestGuildID snowflake.ID) {
+func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, session ally.Relay, guestGuildID snowflake.ID) {
 	relayMixer.SetSink(func(pkt []byte) {
 		session.BroadcastFromGuild(guestGuildID, pkt)
 	})
@@ -111,7 +111,7 @@ func StartGuestRelayBroadcast(ctx context.Context, relayMixer *opus.Mixer, sessi
 // true while some OTHER guild in the ally session may broadcast audio in.
 // Attach it to every destination that RegisterRelayInputs feeds, so the router
 // keeps that destination's mixer running even when the local guild is silent.
-func RelayFeedFor(session *ally.Session, guildID snowflake.ID) func() bool {
+func RelayFeedFor(session ally.Relay, guildID snowflake.ID) func() bool {
 	return func() bool { return session.HasCapturingPeers(guildID) }
 }
 
@@ -120,7 +120,7 @@ func RelayFeedFor(session *ally.Session, guildID snowflake.ID) func() bool {
 // soon as a peer guild joins (and fall back to copy mode when it leaves).
 // When capturing is true, guildID is also registered as a guild that may
 // broadcast into the session, which is what flips its peers' RelayFeed.
-func WatchRelayMembership(session *ally.Session, guildID snowflake.ID, r *router.Router, capturing bool) {
+func WatchRelayMembership(session ally.Relay, guildID snowflake.ID, r *router.Router, capturing bool) {
 	session.SetRouteObserver(guildID, r.Recompute)
 	if capturing {
 		session.SetCapturing(guildID)
@@ -180,7 +180,7 @@ func SpeakerOutputs(joined []SpeakerResult) OutputBots {
 // Dropper returns a drop counter for path that labels each drop with the bot
 // whose queue was full. The per-bot counters are built up front so a drop
 // costs one map lookup; a queue missing from b is counted without a bot.
-func (b OutputBots) Dropper(gm telemetry.GuildMetrics, path telemetry.DropPath) func(chan<- []byte) {
+func (b OutputBots) Dropper(gm Metrics, path telemetry.DropPath) func(chan<- []byte) {
 	perQueue := make(map[chan<- []byte]func(), len(b))
 	for out, botID := range b {
 		perQueue[out] = gm.DropFor(path, botID)

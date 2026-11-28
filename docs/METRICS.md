@@ -78,7 +78,7 @@ at startup and then hourly; a failed fetch keeps the last known value.
 ## 🏰 Session lifecycle & fanout (`internal/telemetry/session_metrics.go`)
 
 Emitted from `internal/manager/voice_raid.go` (start/stop) and the auto-router
-pipelines in `internal/manager/pipeline/` (route transitions); frame drops from
+pipelines in `internal/raid/pipeline/` (route transitions); frame drops from
 the opus pipeline via `FrameDropper`.
 
 | OTel instrument | Type | Prometheus series | Attributes | Description |

@@ -2,15 +2,19 @@ package guild
 
 import (
 	"context"
+	"time"
 
 	"github.com/disgoorg/snowflake/v2"
 )
 
-// AllowUpdater allows event handlers to push per-user allow decisions into an
-// active session's filter without importing the manager package.
-// Implemented by *manager.AllowFilter.
-type AllowUpdater interface {
-	Set(userID snowflake.ID, allowed bool)
+// CaptureFilter decides whose audio a session captures. Implemented by
+// *manager.AllowFilter.
+type CaptureFilter interface {
+	// RoleID is the caller role the filter admits; zero when none is bound.
+	RoleID() snowflake.ID
+	// LastAdmitted is when the filter last let a caller's frame through, or
+	// the zero time.
+	LastAdmitted() time.Time
 }
 
 // MixerPauser is the subset of opus.Mixer used for pause/resume.
@@ -51,9 +55,8 @@ type Session struct {
 	// Nil in snapshots.
 	ChannelMixers map[snowflake.ID]MixerPauser
 
-	// AllowFilter receives per-user allow-decision updates from event handlers.
-	// Nil in snapshots.
-	AllowFilter AllowUpdater
+	// AllowFilter decides whose audio the session captures. Nil in snapshots.
+	AllowFilter CaptureFilter
 
 	// AutoRouter, when non-nil, switches captured sources between copy and
 	// mix modes based on per-channel caller counts. Voice and member event

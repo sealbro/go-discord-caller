@@ -6,21 +6,30 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/ally"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
 	"github.com/sealbro/go-discord-caller/internal/opus"
 	"github.com/sealbro/go-discord-caller/internal/pool"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
-// AllowSource binds a capture role to a per-user allow decision updater.
-// Holding both behind one interface prevents Params.RoleID drifting out of
-// sync with Params.AllowFilter (the router would then route on one role and
-// the receiver would filter on another, silently). The manager's
-// *AllowFilter satisfies this interface; pipeline tests provide a stub.
-type AllowSource interface {
-	guild.AllowUpdater
-	RoleID() snowflake.ID
+// AllowSource is the session's capture filter. The router takes its caller
+// role from it rather than from a separate parameter, so the router cannot
+// route on one role while the receivers filter on another. The manager's
+// *AllowFilter satisfies it; pipeline tests provide a stub.
+type AllowSource = guild.CaptureFilter
+
+// Metrics is what a raid's audio records about itself. Satisfied by
+// telemetry.GuildMetrics.
+type Metrics interface {
+	GuildID() snowflake.ID
+	OpusMetrics() telemetry.OpusRecorder
+	Drop(path telemetry.DropPath) func()
+	DropFor(path telemetry.DropPath, botID snowflake.ID) func()
+	RouteTransition(from, to string)
+	SessionStopped(mode string)
 }
+
+var _ Metrics = telemetry.GuildMetrics{}
 
 // Params holds all inputs the three host pipeline topologies need.
 // Built once by manager.Service.StartVoiceRaid after the common owner/speaker setup;
@@ -31,13 +40,13 @@ type Params struct {
 	CancelFunc   context.CancelFunc
 	Mode         guild.RaidMode
 	AllyCode     ally.Code
-	AllySession  *ally.Session
+	AllySession  ally.Relay
 	Setup        *Setup
 	OwnerHandle  *opus.FanoutHandle // owner FanoutHandle; non-nil when owner capture is enabled
 	ChOwnerOut   chan []byte        // owner playback channel; nil for direct passthrough (RaidModeOneCaller)
 	OwnerCleanup func()             // closes owner provider/receiver; called on teardown or build error
 	OV           pool.GuildVoice
-	GM           telemetry.GuildMetrics
+	GM           Metrics
 	AllowFilter  AllowSource
 	VoiceProbe   router.VoiceProbe // production: *manager.cacheVoiceProbe
 }
@@ -51,11 +60,11 @@ type GuestParams struct {
 	CancelFunc     context.CancelFunc
 	Code           ally.Code
 	GuestMode      guild.RaidMode
-	AllySession    *ally.Session
+	AllySession    ally.Relay
 	Setup          *Setup
 	OwnerChOut     chan []byte
 	OwnerHandle    *opus.FanoutHandle // non-nil iff the guest owner bot has an inline-capture VoiceReceiver wired up
-	GuestGM        telemetry.GuildMetrics
+	GuestGM        Metrics
 	AllowFilter    AllowSource
 	VoiceProbe     router.VoiceProbe
 }

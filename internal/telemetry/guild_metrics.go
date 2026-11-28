@@ -41,6 +41,9 @@ func (g GuildMetrics) WithCtx(ctx context.Context) GuildMetrics {
 // (e.g. SessionStarted/Stopped, BroadcastFromGuild).
 func (g GuildMetrics) GuildID() snowflake.ID { return g.guildID }
 
+// OpusMetrics returns g.Opus.
+func (g GuildMetrics) OpusMetrics() OpusRecorder { return g.Opus }
+
 // Session returns the underlying *SessionMetrics for cases that need
 // SessionStarted/Stopped or a custom DropPath.
 func (g GuildMetrics) Session() *SessionMetrics { return g.session }

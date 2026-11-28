@@ -8,7 +8,7 @@ import (
 	"github.com/disgoorg/snowflake/v2"
 	hraban "github.com/hraban/opus"
 	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/manager/router"
+	"github.com/sealbro/go-discord-caller/internal/raid/router"
 	"github.com/sealbro/go-discord-caller/internal/telemetry"
 
 	"github.com/sealbro/go-discord-caller/internal/opus"
@@ -30,8 +30,8 @@ func (GuestListenerPipeline) Build(ctx context.Context, p GuestParams) (*guild.S
 		outs = append(outs, p.OwnerChOut)
 	}
 	var listenMixer *opus.Mixer
-	if p.AllySession.HostMode == guild.RaidModeGuildCaller {
-		mx, err := opus.NewMixer(p.GuestGM.Opus)
+	if p.AllySession.HostRaidMode() == guild.RaidModeGuildCaller {
+		mx, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("guest listener: create mixer: %w", err)
 		}
@@ -90,7 +90,7 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 		allOuts = append(allOuts, p.OwnerChOut)
 	}
 
-	relayMixer, err := opus.NewMixer(p.GuestGM.Opus)
+	relayMixer, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("guest star: create relay mixer: %w", err)
 	}
@@ -125,10 +125,10 @@ func (GuestStarCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild
 
 	gm := p.GuestGM
 	r := router.New(p.GuestGuildID, p.AllowFilter.RoleID(), p.VoiceProbe, sourceSlots, dests).
-		WithCaptureObserver(p.Setup.CaptureObserver()).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
+	p.Setup.WatchCapture(sourceSlots)
 
 	mixerPausers := map[snowflake.ID]guild.MixerPauser{RelayDestID: relayMixer}
 
@@ -186,13 +186,13 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 
 	channelMixers := make(map[snowflake.ID]*opus.Mixer, len(destinations))
 	for _, dest := range destinations {
-		mx, err := opus.NewMixer(p.GuestGM.Opus)
+		mx, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("guest caller: create channel mixer: %w", err)
 		}
 		channelMixers[dest.ChannelID] = mx
 	}
-	relayMixer, err := opus.NewMixer(p.GuestGM.Opus)
+	relayMixer, err := opus.NewMixer(p.GuestGM.OpusMetrics())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("guest caller: create relay mixer: %w", err)
 	}
@@ -247,10 +247,10 @@ func (GuestCallerPipeline) Build(ctx context.Context, p GuestParams) (*guild.Ses
 
 	gm := p.GuestGM
 	r := router.New(p.GuestGuildID, p.AllowFilter.RoleID(), p.VoiceProbe, sourceSlots, dests).
-		WithCaptureObserver(p.Setup.CaptureObserver()).
 		WithTransitionRecorder(func(from, to router.RouteMode) {
 			gm.RouteTransition(from.String(), to.String())
 		})
+	p.Setup.WatchCapture(sourceSlots)
 
 	mixerPausers := make(map[snowflake.ID]guild.MixerPauser, len(channelMixers)+1)
 	for chID, mx := range channelMixers {

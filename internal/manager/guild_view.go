@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/disgoorg/snowflake/v2"
+	"github.com/sealbro/go-discord-caller/internal/guild"
 )
 
 // guildView is one guild's voice occupancy as a raid sees it: the non-bot
@@ -65,8 +66,16 @@ func (m *Service) openGuildView(guildID snowflake.ID) (*viewProbe, error) {
 	return p, nil
 }
 
-func (m *Service) closeGuildView(guildID snowflake.ID) {
-	m.views.Delete(guildID)
+// closeGuildView stops refreshing p, if it is still guildID's open view.
+func (m *Service) closeGuildView(guildID snowflake.ID, p *viewProbe) {
+	m.views.CompareAndDelete(guildID, p)
+}
+
+// closeRaidView closes the view session's raid opened at its start.
+func (m *Service) closeRaidView(session *guild.Session) {
+	if f, ok := session.AllowFilter.(*AllowFilter); ok {
+		m.closeGuildView(session.GuildID, f.view)
+	}
 }
 
 // RefreshVoiceView republishes guildID's view from the owner bot's caches.

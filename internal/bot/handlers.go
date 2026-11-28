@@ -217,11 +217,22 @@ func onVoiceMove(m ManagerService) func(*events.GuildVoiceMove) {
 }
 
 // onVoiceStateUpdate refreshes the raid's view of voice after every change,
-// including the ones no other handler reacts to: a bot leaving, a mute.
+// including the ones no other handler reacts to: a bot leaving, a mute. A
+// human joining is left to onVoiceJoin, which refreshes once it has cached the
+// full member.
 func onVoiceStateUpdate(m ManagerService) func(*events.GuildVoiceStateUpdate) {
 	return func(e *events.GuildVoiceStateUpdate) {
+		if humanJoin(m, e) {
+			return
+		}
 		m.RefreshVoiceView(e.VoiceState.GuildID)
 	}
+}
+
+// humanJoin reports whether disgo follows e with a GuildVoiceJoin that
+// onVoiceJoin acts on.
+func humanJoin(m ManagerService, e *events.GuildVoiceStateUpdate) bool {
+	return e.OldVoiceState.ChannelID == nil && e.VoiceState.ChannelID != nil && !m.IsBot(e.Member.User)
 }
 
 // onGuildAvailable and onGuildReady refresh the raid's view after a gateway

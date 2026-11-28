@@ -85,7 +85,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 	if err != nil {
 		return guestMode, err
 	}
-	undo.view = func() { m.closeGuildView(guestGuildID) }
+	undo.view = func() { m.closeGuildView(guestGuildID, view) }
 	allowUser := m.buildAllowUserFilter(guestGuildID, view)
 	guestGm := m.metrics.ForGuild(ctx, guestGuildID)
 	undo.reconnect = func() { m.clearReconnectState(guestGuildID) }
@@ -228,6 +228,7 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			if st := m.statuses[guestGuildID]; st != nil && st.Session == session {
 				st.Session = nil
 				m.clearActiveRouter(guestGuildID)
+				m.closeRaidView(session)
 			}
 			m.mu.Unlock()
 			session.Cleanup()
@@ -294,6 +295,7 @@ func (m *Service) stopSession(ctx context.Context, guildID snowflake.ID, want *g
 	}
 	status.Session = nil
 	m.clearActiveRouter(guildID)
+	m.closeRaidView(session)
 	m.starting.hold(guildID)
 	m.mu.Unlock()
 	defer m.starting.release(guildID)
@@ -354,7 +356,7 @@ func (m *Service) StartVoiceRaid(ctx context.Context, guildID snowflake.ID, canc
 	if err != nil {
 		return "", err
 	}
-	undo.view = func() { m.closeGuildView(guildID) }
+	undo.view = func() { m.closeGuildView(guildID, view) }
 	allowUser := m.buildAllowUserFilter(guildID, view)
 	undo.reconnect = func() { m.clearReconnectState(guildID) }
 	setup, err := m.setupSpeakers(setupCtx, guildID, mode, allowUser, gm, raidStart)

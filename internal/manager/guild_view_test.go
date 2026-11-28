@@ -113,7 +113,7 @@ func TestRefreshVoiceView_StopsWhenTheViewIsClosed(t *testing.T) {
 	f := newCallerRoleFixture(t)
 	channel := roleTestChannels[testGuildID][0]
 	view := openView(t, f.m, testGuildID)
-	f.m.closeGuildView(testGuildID)
+	f.m.closeGuildView(testGuildID, view)
 	putInVoice(f, 757, channel, false, roleTestCallerRoleID)
 
 	f.m.RefreshVoiceView(testGuildID)
@@ -206,5 +206,45 @@ func TestRaid_RefusedSecondStartLeavesTheRunningViewAlone(t *testing.T) {
 				t.Error("after a refused second start, a caller role granted mid-raid is not relayed: the running raid's view stopped following voice")
 			}
 		})
+	}
+}
+
+// A closed view stays closed only for the raid that owned it: a late close
+// from an earlier raid's rollback must not take the view of the raid that
+// replaced it.
+func TestCloseGuildView_LeavesAnotherRaidsView(t *testing.T) {
+	f := newCallerRoleFixture(t)
+	earlier := openView(t, f.m, testGuildID)
+	f.m.closeGuildView(testGuildID, earlier)
+	current := openView(t, f.m, testGuildID)
+
+	f.m.closeGuildView(testGuildID, earlier)
+
+	if v, _ := f.m.views.Load(testGuildID); v != current {
+		t.Error("closing an earlier raid's view closed the current raid's")
+	}
+}
+
+// Members fetched at raid start change the view once, however many there are.
+func TestMembersFetched_RefreshesTheViewOnce(t *testing.T) {
+	f := newCallerRoleFixture(t)
+	channel := roleTestChannels[testGuildID][0]
+	view := openView(t, f.m, testGuildID)
+	var members []discord.Member
+	for id := snowflake.ID(770); id < 775; id++ {
+		putInVoice(f, id, channel, false, roleTestCallerRoleID)
+		members = append(members, discord.Member{User: discord.User{ID: id}})
+	}
+	refreshes := 0
+	count := func(*viewProbe) { refreshes++ }
+	view.watcher.Store(&count)
+
+	f.m.membersFetched(testGuildID, members)
+
+	if refreshes != 1 {
+		t.Errorf("%d members fetched refreshed the view %d times, want once", len(members), refreshes)
+	}
+	if got := view.EnumerateCallers(channel, roleTestCallerRoleID); len(got) != len(members) {
+		t.Errorf("callers after the fetch = %v, want all %d fetched members", got, len(members))
 	}
 }

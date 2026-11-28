@@ -26,31 +26,28 @@ type encryptStallRequest struct {
 
 func (encryptStallRequest) isVoiceRequest() {}
 
-// handleVoiceRequest carries out req when the guild's raid allows it, and
-// reports whether it did.
-func (m *Service) handleVoiceRequest(req voiceRequest) bool {
+// handleVoiceRequest carries out req when the guild's raid allows it.
+func (m *Service) handleVoiceRequest(req voiceRequest) {
 	switch r := req.(type) {
 	case encryptStallRequest:
-		return m.handleEncryptStall(r)
-	default:
-		return false
+		m.handleEncryptStall(r)
 	}
 }
 
-func (m *Service) handleEncryptStall(r encryptStallRequest) bool {
+func (m *Service) handleEncryptStall(r encryptStallRequest) {
 	if !m.botInRaid(r.GuildID, r.BotID) {
 		slog.Debug("voice: encrypt stall for a bot outside the guild's raid, ignored",
 			slog.String("guildID", r.GuildID.String()),
 			slog.String("botUserID", r.BotID.String()),
 		)
-		return false
+		return
 	}
 	if !m.reconnect.stallRejoinDue(r.GuildID, r.BotID, time.Now()) {
 		slog.Debug("voice: outbound encryption still stalled, rejoin backing off",
 			slog.String("guildID", r.GuildID.String()),
 			slog.String("botUserID", r.BotID.String()),
 		)
-		return false
+		return
 	}
 	slog.Warn("voice: outbound encryption stalled, rejoining",
 		slog.String("guildID", r.GuildID.String()),
@@ -58,7 +55,6 @@ func (m *Service) handleEncryptStall(r encryptStallRequest) bool {
 		slog.Any("daveTrace", r.Trace),
 	)
 	m.rejoinStalled(r.GuildID, r.BotID)
-	return true
 }
 
 // botInRaid reports whether botID is the owner or a speaker of guildID's

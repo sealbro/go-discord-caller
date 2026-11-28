@@ -109,11 +109,9 @@ func (m *Service) setActiveRouter(guildID snowflake.ID, r guild.AutoRouter) {
 	m.activeRouters.Store(&next)
 }
 
-// clearActiveRouter removes a guild from the activeRouters snapshot and stops
-// refreshing its view of voice. Called from StopVoiceRaid / JoinSession-teardown
-// under m.mu.
+// clearActiveRouter removes a guild from the activeRouters snapshot. Called
+// from StopVoiceRaid / JoinSession-teardown under m.mu.
 func (m *Service) clearActiveRouter(guildID snowflake.ID) {
-	m.closeGuildView(guildID)
 	cur := *m.activeRouters.Load()
 	if _, present := cur[guildID]; !present {
 		return

@@ -74,6 +74,18 @@ func (m *Service) buildAllowUserFilter(guildID snowflake.ID, view *viewProbe) *A
 // when the user next moved between channels.
 func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member) {
 	m.RefreshVoiceView(guildID)
+	m.nudgeRouterFor(guildID, member.User.ID)
+}
+
+// membersFetched is NotifyMemberUpdate for a batch: one refresh covers them all.
+func (m *Service) membersFetched(guildID snowflake.ID, members []discord.Member) {
+	m.RefreshVoiceView(guildID)
+	for _, member := range members {
+		m.nudgeRouterFor(guildID, member.User.ID)
+	}
+}
+
+func (m *Service) nudgeRouterFor(guildID, userID snowflake.ID) {
 	m.mu.RLock()
 	var router guild.AutoRouter
 	if st := m.statuses[guildID]; st != nil && st.Session != nil {
@@ -88,7 +100,7 @@ func (m *Service) NotifyMemberUpdate(guildID snowflake.ID, member discord.Member
 	// the router when the user is in voice (a role change for someone not in
 	// voice has no effect on per-channel caller counts).
 	for vs := range m.ownerClient.Caches.VoiceStates(guildID) {
-		if vs.UserID == member.User.ID && vs.ChannelID != nil {
+		if vs.UserID == userID && vs.ChannelID != nil {
 			router.Debounce(*vs.ChannelID)
 			return
 		}
@@ -122,7 +134,5 @@ func (m *Service) prefetchChannelMembers(ctx context.Context, conn voice.Conn, b
 		slog.WarnContext(ctx, "prefetchChannelMembers: RequestMembers failed", slog.Any("err", err))
 		return
 	}
-	for _, member := range members {
-		m.NotifyMemberUpdate(guildID, member)
-	}
+	m.membersFetched(guildID, members)
 }

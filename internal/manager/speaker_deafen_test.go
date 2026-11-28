@@ -14,6 +14,8 @@ import (
 	"github.com/disgoorg/disgo/rest"
 	"github.com/disgoorg/snowflake/v2"
 	"github.com/sealbro/go-discord-caller/internal/guild"
+	"github.com/sealbro/go-discord-caller/internal/telemetry/spantest"
+	"go.opentelemetry.io/otel/codes"
 )
 
 const (
@@ -364,9 +366,8 @@ func TestDeafenReadinessOK(t *testing.T) {
 // A deafen whose timer fires moments before teardown has not recorded itself
 // yet, so a Close that snapshotted immediately would see deaf=false, skip the
 // bot, and let the PATCH land afterwards — leaving the member server-deafened
-// with nothing left to repair it. For the owner bot that is permanent: it is
-// not covered by the per-speaker Undeafen in BuildSpeakerCleanup, so it would
-// capture silence in every later raid.
+// with nothing left to repair it. Close is the only teardown undeafen, so the
+// bot would capture silence in every later raid until a capture raid repairs it.
 func TestDeafControllerCloseWaitsForInFlightDeafen(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		rec := &deafRecorder{block: make(chan struct{})}
@@ -667,4 +668,127 @@ func TestRaidStart_ReportsCaptureStateOnceLive(t *testing.T) {
 			})
 		})
 	}
+}
+
+// stalledFirstRecorder answers its first deaf change only when the request's
+// context ends, as a PATCH Discord never answers would, and fails every later
+// call made on an expired context, as disgo does.
+type stalledFirstRecorder struct {
+	mu         sync.Mutex
+	calls      int
+	undeafened []snowflake.ID
+}
+
+func (r *stalledFirstRecorder) set(ctx context.Context, _, botID snowflake.ID, deaf bool) error {
+	r.mu.Lock()
+	r.calls++
+	first := r.calls == 1
+	r.mu.Unlock()
+
+	if first {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(time.Hour):
+			return errors.New("stalled request was never given a deadline")
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !deaf {
+		r.undeafened = append(r.undeafened, botID)
+	}
+	return nil
+}
+
+// One unanswered undeafen at teardown must not cost every other bot its
+// undeafen: they queue on one rate-limit bucket, one after another.
+func TestTeardownUndeafensEveryBotPastAStalledRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rec := &stalledFirstRecorder{}
+		c := &deafController{guildID: testGuild, setDeaf: rec.set, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+		bots := []snowflake.ID{701, 702, 703, 704, 705, 706}
+		for _, id := range bots {
+			c.Register(id, true)
+		}
+
+		left := false
+		undeafenThenLeave(c, func() { left = true })()
+
+		if !left {
+			t.Fatal("speakers never left voice")
+		}
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		if got, want := len(rec.undeafened), len(bots)-1; got != want {
+			t.Errorf("%d of %d bots undeafened behind one stalled request (undeafened %v); "+
+				"a slow request must not fail the bots queued after it", got, want, rec.undeafened)
+		}
+	})
+}
+
+// Teardown undeafens carry no raid context, so without their own span a slow
+// one cannot be told apart from a rate-limit wait. Each must leave a span with
+// its bot, and the stalled one must carry its error.
+func TestTeardownUndeafenLeavesASpanPerBot(t *testing.T) {
+	ended := spantest.Record()
+	synctest.Test(t, func(t *testing.T) {
+		calls := &stalledFirstRecorder{}
+		c := &deafController{guildID: testGuild, setDeaf: calls.set, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+		bots := map[string]bool{}
+		for _, id := range []snowflake.ID{711, 712, 713} {
+			c.Register(id, true)
+			bots[id.String()] = true
+		}
+
+		undeafenThenLeave(c, func() {})()
+
+		failed := 0
+		seen := map[string]bool{}
+		for _, s := range ended() {
+			if s.Name() != "voice.deaf.undeafen" {
+				continue
+			}
+			for _, a := range s.Attributes() {
+				if a.Key == "bot.id" && bots[a.Value.AsString()] {
+					seen[a.Value.AsString()] = true
+					if s.Status().Code == codes.Error {
+						failed++
+					}
+				}
+			}
+		}
+		if len(seen) != len(bots) {
+			t.Errorf("undeafen spans for bots %v, want one for each of %v", seen, bots)
+		}
+		if failed != 1 {
+			t.Errorf("%d undeafen spans marked failed, want 1: the stalled request's error must be on its span", failed)
+		}
+	})
+}
+
+// Even when Discord answers no undeafen at all, closing the controller must end
+// when the teardown budget does: the guild cannot start a new raid until then.
+func TestTeardownUndeafensStopWithinBudget(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stallAll := func(ctx context.Context, _, _ snowflake.ID, _ bool) error {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		c := &deafController{guildID: testGuild, setDeaf: stallAll, delay: deafenDelay, members: map[snowflake.ID]*deafMember{}}
+		for id := snowflake.ID(721); id <= 733; id++ {
+			c.Register(id, true)
+		}
+
+		start := time.Now()
+		undeafenThenLeave(c, func() {})()
+
+		if took := time.Since(start); took != teardownUndeafenBudget {
+			t.Errorf("closing with 13 stalled undeafens took %v, want %v: three tries of %v, then the rest skipped",
+				took, teardownUndeafenBudget, deafApplyTimeout)
+		}
+	})
 }

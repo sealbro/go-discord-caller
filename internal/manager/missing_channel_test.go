@@ -1,22 +1,14 @@
 package manager
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"sync/atomic"
 	"testing"
-	"time"
 
-	"github.com/disgoorg/disgo/bot"
 	"github.com/disgoorg/disgo/cache"
 	"github.com/disgoorg/disgo/discord"
 	"github.com/disgoorg/snowflake/v2"
-	"go.opentelemetry.io/otel/metric/noop"
-
-	"github.com/sealbro/go-discord-caller/internal/guild"
-	"github.com/sealbro/go-discord-caller/internal/store"
-	"github.com/sealbro/go-discord-caller/internal/telemetry"
 )
 
 func voiceChannel(t *testing.T, guildID, channelID snowflake.ID) discord.GuildVoiceChannel {
@@ -45,42 +37,12 @@ func cachesWithChannels(t *testing.T, guildID snowflake.ID, channelIDs ...snowfl
 // the speaker tried to join.
 func speakerJoinAttempted(t *testing.T, boundChannel, existingChannel snowflake.ID) bool {
 	t.Helper()
-	const speakerID = snowflake.ID(500)
-
-	st := store.NewInMemoryStore()
-	st.BindChannel(testGuildID, speakerID, boundChannel)
-
 	var joined atomic.Bool
 	speakerVM := &fakeVoiceManager{
 		conn:   &fakeVoiceConn{channelID: boundChannel},
 		onOpen: func() { joined.Store(true) },
 	}
-	metrics, err := telemetry.NewMetrics(noop.NewMeterProvider().Meter("missing_channel_test"))
-	if err != nil {
-		t.Fatalf("NewMetrics: %v", err)
-	}
-
-	m := &Service{
-		statuses: map[snowflake.ID]*guild.Status{
-			testGuildID: {
-				GuildID:     testGuildID,
-				OwnerUserID: testBotID,
-				Speakers:    map[snowflake.ID]*guild.Speaker{speakerID: {ID: speakerID, Enabled: true}},
-			},
-		},
-		store:       st,
-		poolSvc:     onePool{id: speakerID, client: &bot.Client{VoiceManager: speakerVM, Caches: cache.New(), Rest: stubRest{}}},
-		ownerClient: &bot.Client{Caches: cachesWithChannels(t, testGuildID, existingChannel), Rest: stubRest{}},
-		ownerBotID:  testBotID,
-		metrics:     metrics,
-		reconnect:   newReconnectState(),
-	}
-
-	ctx := context.Background()
-	setup, _ := m.setupSpeakers(ctx, testGuildID, guild.RaidModeOneCaller, nil, metrics.ForGuild(ctx, testGuildID), time.Now())
-	if setup != nil {
-		setup.SpeakerCleanup()
-	}
+	_ = runOneCallerSetup(oneSpeakerService(t, snowflake.ID(500), boundChannel, speakerVM, stubRest{}, existingChannel))
 	return joined.Load()
 }
 

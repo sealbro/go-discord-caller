@@ -156,10 +156,10 @@ func (m *Service) JoinSession(ctx context.Context, guestGuildID snowflake.ID, ca
 			ownerCaptures := guestMode.WithCapture()
 			deafCtx, endDeaf := startPhase(ownerCtx, "voice.deaf.reconcile",
 				botAttr(m.ownerBotID), attribute.Bool("deaf.want", !ownerCaptures))
-			ownerUndeafen := m.reconcileSpeakerDeaf(deafCtx, guestGuildID, m.ownerBotID, ownerCaptures, deafControllerOf(setup.Deaf))
+			ownerDeafened := m.reconcileSpeakerDeaf(deafCtx, guestGuildID, m.ownerBotID, ownerCaptures, deafControllerOf(setup.Deaf))
 			endDeaf(nil)
 			endOwner(nil)
-			setup.Deaf.Register(m.ownerBotID, !ownerCaptures && ownerUndeafen != nil)
+			setup.Deaf.Register(m.ownerBotID, ownerDeafened)
 		}
 	}
 	// A guest carries on without its owner, so an owner join failed by a /stop

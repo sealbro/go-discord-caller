@@ -55,41 +55,14 @@ func (l *eventLog) snapshot() []string {
 	return slices.Clone(l.events)
 }
 
-// TestBuildSpeakerCleanupUndeafensBeforeLeave pins the ordering constraint that
-// makes the non-capture server-deafen safe to undo.
-//
-// Discord rejects a member voice-state PATCH once the member is no longer
-// connected to voice, so an Undeafen that ran after GuildVoice.Leave would fail
-// and strand the deaf flag on the member record. A stranded flag is not
-// cosmetic: a server-deafened bot receives no RTP at all, so the next
-// capture-mode raid would join that speaker, look healthy, and capture nothing
-// until reconcileSpeakerDeaf repaired it.
-func TestBuildSpeakerCleanupUndeafensBeforeLeave(t *testing.T) {
+// TestBuildSpeakerCleanupClosesBeforeLeave: a speaker's provider and receiver
+// are closed before it leaves its channel.
+func TestBuildSpeakerCleanupClosesBeforeLeave(t *testing.T) {
 	log := &eventLog{}
 	joined := []SpeakerResult{{
-		Speaker:  guild.Speaker{ID: snowflake.ID(1234)},
-		GV:       pool.NewGuildVoice(&recordingVoiceManager{note: log.note}, snowflake.ID(5678)),
-		Cleanup:  func() { log.note("cleanup") },
-		Undeafen: func(context.Context) { log.note("undeafen") },
-	}}
-
-	BuildSpeakerCleanup(snowflake.ID(42), joined)()
-
-	want := []string{"cleanup", "undeafen", "leave"}
-	if got := log.snapshot(); !slices.Equal(got, want) {
-		t.Fatalf("cleanup order = %v, want %v", got, want)
-	}
-}
-
-// TestBuildSpeakerCleanupSkipsNilUndeafen covers capture modes, where the
-// speaker is never deafened and reconcileSpeakerDeaf returns a nil undo func.
-func TestBuildSpeakerCleanupSkipsNilUndeafen(t *testing.T) {
-	log := &eventLog{}
-	joined := []SpeakerResult{{
-		Speaker:  guild.Speaker{ID: snowflake.ID(1234)},
-		GV:       pool.NewGuildVoice(&recordingVoiceManager{note: log.note}, snowflake.ID(5678)),
-		Cleanup:  func() { log.note("cleanup") },
-		Undeafen: nil,
+		Speaker: guild.Speaker{ID: snowflake.ID(1234)},
+		GV:      pool.NewGuildVoice(&recordingVoiceManager{note: log.note}, snowflake.ID(5678)),
+		Cleanup: func() { log.note("cleanup") },
 	}}
 
 	BuildSpeakerCleanup(snowflake.ID(42), joined)()
